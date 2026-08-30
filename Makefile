@@ -420,11 +420,10 @@ override part_45 := t45
 TINYX5_F_CPU   = 1000000UL
 
 # The same family as full part names. Anything a USER types names a whole part
-# (attiny85), never the fragment: v0.9.8 removed the last of the `_t85`/`85`
-# spellings from artifacts and goals, and a selector that still took a bare
-# number would have been the only place left where a request had to know the
-# family's internal indexing. Derived from TINYX5 rather than spelled out, so a
-# new sibling cannot appear in one list and not the other.
+# (attiny85), never the fragment: a selector taking a bare number would be the
+# only place a request has to know the family's internal indexing. Derived from
+# TINYX5 rather than spelled out, so a new sibling cannot appear in one list and
+# not the other.
 TINYX5_PARTS   = $(foreach n,$(TINYX5),$(mmcu_$(n)))
 
 # --- Output variants ---------------------------------------------------------
@@ -438,12 +437,8 @@ TINYX5_PARTS   = $(foreach n,$(TINYX5),$(mmcu_$(n)))
 # A variant name IS the output-stage name, spelled exactly as the driver source
 # file and the published image field spell it. One vocabulary, used by the
 # command line (`VARIANT=`), the make goals, the soak combination names and the
-# image basenames alike. Before v0.9.8 there were two -- short tokens
-# (`cd4053`/`mute`/`relay`) on the classic AVR and AVR-XT lanes, hyphenated ones
-# (`cd4053-simple`/`cd4053-mute`/`tq2-relay`) on PIC10F320 -- naming the same
-# three output stages in different words, plus a third spelling in the image
-# names themselves. The cost of the longer token is real and accepted: it is
-# paid once per command line, and it buys the property that a name cannot be
+# image basenames alike. The cost of the longer token is real and accepted: it
+# is paid once per command line, and it buys the property that a name cannot be
 # correct in one lane and meaningless in another.
 CORE_SRC = src/bypass_mcu_avr_classic.c src/bypass_pure.c
 override CLASSIC_VARIANTS_UNKNOWN := $(if $(filter 1,$(CLASSIC_VARIANTS_REQUEST_UNKNOWN)),invalid,)
@@ -479,28 +474,18 @@ override variant_macro_case_arms = $(foreach v,$(1),$(call variant_macro_case_ar
 #
 #     IFS=- read -r prefix mcu stage <<< "$${base%.hex}"
 #
-# WHAT THIS REPLACED (TODO.md "Unified naming scheme", axes 3 and 4). Three
-# basename conventions used to coexist: prefix `bypass_` vs `bypass_mcu_`; stage
-# tokens `cd4053`/`mute`/`relay` vs `cd4053-simple`/`cd4053-mute`/`tq2-relay`;
-# and a part suffix that was `_t45`/`_t85`/`_pic10f322`/`_pic10f320` -- or
-# ABSENT, because a bare `bypass_cd4053.hex` silently meant "the ATtiny13a one".
-# That last case was the real hazard: nothing in the filename stopped a builder
-# from flashing the 1.2 MHz ATtiny13a image onto an ATtiny85. The MCU field is
-# now mandatory on every image. At the v0.9.8 migration point the 6 x 3 product
-# matrix was visible in a plain directory listing; the same rule now exposes the
-# 7 x 3 matrix, and no image is identified by omission.
+# THE MCU FIELD IS MANDATORY, and that is the safety property the rule exists
+# for. An image identified by omission -- a bare `bypass_cd4053.hex` that meant
+# "the ATtiny13a one" -- puts nothing in the filename to stop a builder flashing
+# the 1.2 MHz ATtiny13a image onto an ATtiny85. Every image names its part, so
+# the whole product matrix is visible in a plain directory listing.
 #
-# Longest resulting name is 37 characters (bypass-pic10f320-cd4053_with_mute.hex),
-# one SHORTER than the 38-character worst case this scheme replaced, so the
-# verbose spelling costs nothing anywhere in the toolchain.
-#
-# THE STAGE FIELD IS THE VARIANT NAME, unchanged -- see "Output variants" above.
-# v0.9.8 first added an IMAGE_STAGE_<variant> map here to translate two internal
-# vocabularies into this one published spelling, then removed it by renaming the
-# vocabularies to match (axis 4). There is nothing left to translate: what you
+# THE STAGE FIELD IS THE VARIANT NAME -- see "Output variants" above. What you
 # type after `VARIANT=`, what the make goals and soak names carry, and what the
-# image field says are one string. A translation table is a place where two
-# names can disagree; the way to make that unrepresentable is to not have one.
+# image field says are one string, so nothing here translates between
+# vocabularies. Do not reintroduce a map that would: a translation table is a
+# place where two names can disagree, and the way to make that unrepresentable
+# is to not have one.
 
 # $(call fw_image_tail,<variant>,<mcu-tag>) -> `-<mcu>-<stage>`: everything that
 # follows the prefix. Split out from fw_image so a path stem that ALREADY ends in
@@ -3130,7 +3115,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # Reaching them only through pic10f322-test / pic12f675-test -- standalone
 # aggregates whose OTHER lanes do need those tools -- is what let a stale host
 # fault oracle, a non-shipping compile configuration and a dead coverage anchor
-# sit on a branch under a green `make test` (TODO.md history, 2026-08-20).
+# sit on a branch under a green `make test`.
 # Membership is asserted from Make's own prerequisite sets in
 # test/test_workload_rebuild.sh, not left to inspection of these two lists.
 TEST_GATES_EARLY = \
@@ -3440,16 +3425,12 @@ test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
 
 # Every reviewed resource ceiling is enforced where it is declared, and this
-# gate measures what the build produced against those declarations. It used to
-# do something else: the same figures were restated in four documents, and it
-# kept the copies synchronized. They had drifted before it existed -- at the
-# v0.9.10 candidate three of the four tables were several changes behind and the
-# ATtiny45/85 rows were missing outright -- but synchronizing prose made a
-# documentation edit a precondition for a firmware size change, and made
-# formatting a tested interface. The documents now carry capacities, ceilings and
-# method; the exact figures belong to the release record that binds them to a
-# source commit. So the ceilings are read from this file, which declares them,
-# and the images are read from the build tree.
+# gate measures what the build produced against those declarations: the ceilings
+# are read from this file, which declares them, and the images from the build
+# tree. Documents carry capacities, ceilings and method, never the exact figures
+# -- those belong to the release record that binds them to a source commit.
+# Restating them in prose instead makes a documentation edit a precondition for
+# a firmware size change, and makes formatting a tested interface.
 #
 # It needs no AVR or PIC toolchain. The ordinary `make test` mode measures
 # whatever the tree already built without calling that a final-candidate run.
@@ -4432,11 +4413,9 @@ PIC10F320_TAG         ?= pic10f320
 PIC10F320_XTAL        ?= 2000000UL
 PIC10F320_FLASH_WORDS ?= 256
 
-# PIC10F320_FW_BASE is GONE. It used to be `bypass_mcu`, a prefix inherited from the
-# archived child repository whose `_mcu_` infix distinguished nothing -- every
-# image in every lane is MCU firmware. This part now shares the one FW_BASE with
-# every other lane and is told apart by the mandatory MCU field. See "canonical
-# firmware image basename" near the top.
+# There is deliberately no per-part FW_BASE here: this lane shares the one
+# FW_BASE with every other lane and is told apart by the mandatory MCU field.
+# See "canonical firmware image basename" near the top.
 PIC10F320_SRC         := src/bypass_mcu_pic10f320.c
 PIC10F320_BUILD_DIR   ?= build_pic10f320
 
@@ -4989,18 +4968,13 @@ pic10f320-analyze-misra: $(PIC10F320_SRC) $(MISRA_ADDON) $(MISRA_RULES) $(MISRA_
 # run the REAL built HEX in a simulated PIC10F320, so they are the only lanes
 # that see the emitted image rather than host-compiled source.
 #
-# Current FOLD/PARAM/FORK dispositions (merge plan §4 plus post-merge
-# reconciliation), each decided from a non-comment diff rather than assumed:
-#   FOLD   power_on_pressed.stc     -- executable stimulus byte-identical
-#   FOLD   run_gpsim*.sh            -- differed only in the default PROC, and
-#                                      they already parameterize on
-#                                      PIC_GPSIM_PROC, so the 320 just overrides
-#   FOLD   test_soak_pic.cc         -- the parent copy is AHEAD (SOAK_LIVENESS_DUE)
-#   PARAM  test_config_pic.c        -- one printf label; now PIC_DEVICE_NAME
-#   PARAM  test_{fault,io,lockstep}_pic.cc
-#                                   -- thin per-part adapters include shared cores
-#                                      in test/pic/; fault policy/counts stay explicit
-#   FORK   footswitch_toggle.stc    -- chip-specific gpsim command script
+# What this lane shares with the PIC10F322 and what it does not: the stimulus
+# script power_on_pressed.stc, the gpsim wrappers (parameterized on
+# PIC_GPSIM_PROC, so the 320 only overrides it) and test_soak_pic.cc are shared
+# outright; test_config_pic.c is shared through PIC_DEVICE_NAME; the fault, io
+# and lockstep harnesses are thin per-part adapters over shared cores in
+# test/pic/, with fault policy and counts stated explicitly per part; and
+# footswitch_toggle.stc is chip-specific and forked.
 PIC10F320_GPSIM_PROC ?= p10f320
 PIC10F320_GPSIM_DIR   = test/pic10f320/gpsim
 PIC10F320_GPSIM_TOGGLE_STC := $(PIC10F320_GPSIM_DIR)/footswitch_toggle.stc
@@ -5437,23 +5411,12 @@ pic10f320-test-soak: variant-selectors-valid _pic10f320-build-soak
 	$(PIC10F320_SOAK_COMPILE) && \
 	./$(PIC10F320_SOAK_BIN)
 
-# --- §6.13 byte-identity gate ------------------------------------------------
-# This began as a one-shot MIGRATION gate (merge plan §15, D4). It ran twice,
-# exactly as §6.13 required:
-#
-#   Phase 2, vs the child project's signed release/v0.9.5 images -- PASSED 3/3.
-#     Proved the relocated firmware, built by the ported recipe under new
-#     variable names in a different Makefile, emitted the child's exact bytes.
-#   Phase 4, vs the hashes the §6.11 exact-TRISA edit rebaselined to -- PASSED
-#     3/3, with the HARDENED build rule (budget gate, IHEX validation, cleanup
-#     traps), proving that hardening changed no emitted bytes either.
-#
-# Both historical hash sets remain recorded in the merge plan and validation
-# record. The post-audit standing gate moves the reviewed final set into
-# test/pic10f320/expected_images.sha256, where Phase 7 cannot delete it, and
-# `pic10f320-test-build` enforces it through CI/release qualification. This is the
-# byte-level witness for hardware-integrity changes the differential lanes cannot
-# see; rebaselining must be an explicit reviewed firmware/toolchain change.
+# --- byte-identity gate ------------------------------------------------------
+# The reviewed image set lives in test/pic10f320/expected_images.sha256 and
+# `pic10f320-test-build` enforces it through CI and release qualification. This
+# is the byte-level witness for hardware-integrity changes the differential
+# lanes cannot see; rebaselining must be an explicit reviewed firmware or
+# toolchain change.
 
 # --- cleanup -----------------------------------------------------------------
 # §5.7: scoped to PIC10F320 paths ONLY. The imported child recipe did
@@ -7621,10 +7584,8 @@ origins:
 #
 # Every entry is composed by $(call fw_image,<variant>,<mcu-tag>), so all seven
 # parts share ONE basename convention -- bypass-<mcu>-<output stage>.hex -- and
-# this list cannot spell an image differently from the rule that builds it. The
-# five divergent conventions that used to be reconciled here by hand (merge plan
-# §5.3, decision D2) were retired in v0.9.8; see "canonical firmware image
-# basename" near the top for what replaced them and why.
+# this list cannot spell an image differently from the rule that builds it. See
+# "canonical firmware image basename" near the top for the rule itself.
 # Fail at parse time, not at publish time, if a supported variant is not fully
 # declared. Every lane's supported set is checked, so a variant that exists for
 # one MCU but was never given a driver mapping cannot reach a build rule; without

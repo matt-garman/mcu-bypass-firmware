@@ -608,11 +608,9 @@ ATTINY13A_MCU=$(mkv ATTINY13A_MCU) # attiny13a
 # Makefile ON PURPOSE: the enumeration below is this script's INDEPENDENT
 # opinion of what a complete release contains, and it is cross-checked against
 # the Makefile's RELEASE_IMAGES a few dozen lines down. Deriving the names from
-# the thing being cross-checked would make that check agree with itself.
-#
-# v0.9.8 briefly needed a variant->stage translation table here. It is gone
-# because the vocabularies were unified rather than mapped, so the only thing
-# left to restate is the delimiter layout.
+# the thing being cross-checked would make that check agree with itself. The
+# only thing restated here is the delimiter layout: nothing translates between
+# a variant name and a stage token, because they are the same string.
 # $(fw_image <build dir> <mcu tag> <variant>) -> full path, no suffix
 fw_image() { printf '%s/%s-%s-%s' "$1" "$FW_BASE" "$2" "$3"; }
 AVR_BUILD_DIR=$(mkv AVR_BUILD_DIR) # build_avr_classic

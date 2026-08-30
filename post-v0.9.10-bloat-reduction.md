@@ -1865,7 +1865,7 @@ BR-COMMENT-01, which owns comment text.
 
 ## BR-RELEASEDOC-01 - Reduce release/README.md to release policy and navigation
 
-**Status:** DONE `<commit>`
+**Status:** DONE `512d0c3`
 
 **Current size:** 641 lines
 
@@ -1942,7 +1942,7 @@ retained by the release directory that ran it.
 
 ## BR-COMMENT-01 - Trim migration archaeology from live Make/script comments
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Rationale:** Live comments should explain invariants and non-obvious failure
 modes. Long histories of retired names and earlier approaches are prone to stale
@@ -1980,6 +1980,74 @@ comments and belong here.
 - Comment removal does not obscure safety or provenance rationale.
 - No comment carries a stale current measurement.
 - Make/scripts become easier to scan without changing behavior.
+
+**Work:**
+
+- [x] Remove retired naming histories already documented in release history.
+- [x] Remove old migration sequences.
+- [x] Remove mutable "today" counts.
+- [x] Repair the two dangling `TODO.md` citations recorded above.
+- [x] Keep invariant, safety, fail-closed and revisit rationale.
+
+**Result:** `Makefile` 8,356 -> 8,317 lines; `scripts/make-release.sh` 2,395 ->
+2,393. Ten comment blocks, no executable line touched.
+
+The largest was the item's own example, the canonical-basename section. Its
+archaeology enumerated the three retired basename conventions, the
+`IMAGE_STAGE_<variant>` map that v0.9.8 added and then deleted, the 6 x 3 and
+7 x 3 product matrices, and a 37-versus-38-character name-length comparison.
+`CHANGELOG.md` under `0.9.8` carries all of it, in more detail and in some
+places in the same words. What that paragraph uniquely held was the reason the
+MCU field is mandatory -- a bare `bypass_cd4053.hex` was the ATtiny13a image by
+omission, and nothing in the filename stopped it being flashed to an ATtiny85 --
+so the safety statement stays and the inventory goes. The stage-field paragraph
+keeps its conclusion as a revisit condition: do not reintroduce a translation
+table, because a translation table is a place where two names can disagree.
+
+The same one-fact-in-several-places shape as the release README, one axis of the
+rename per site: the retired stage tokens again under *Output variants*, the
+retired `_t85` part fragments in the `TINYX5_PARTS` note, the retired
+`bypass_mcu` prefix where the PIC10F320 lane sets its build names, and the
+deleted translation table once more in `scripts/make-release.sh`. Each now
+states its own rule and nothing else.
+
+Two more were migration records rather than naming ones. The PIC10F320 gpsim
+section carried a FOLD/PARAM/FORK disposition table from the merge; it now
+describes what the lane shares with the PIC10F322 and what it forks, which is
+the same information as a fact about the tree. The byte-identity gate opened by
+explaining that it began as a one-shot migration gate and recording its two
+qualifying runs; the reviewed set has lived in
+`test/pic10f320/expected_images.sha256` under `pic10f320-test-build` ever since,
+and that -- with the rule that rebaselining must be an explicit reviewed change
+-- is what a reader needs.
+
+The resource-tables gate no longer opens with what it used to be. It kept the
+durable half of that story as a rule: documents carry capacities, ceilings and
+method, never the exact figures, because restating them makes a documentation
+edit a precondition for a firmware size change.
+
+**Kept and why:** every comment that justifies a live gate by naming the defect
+it would have caught -- the clean-contract severance, the `-D<MACRO>=$(VAR)`
+fuse-default hole, the analyzer's shrinking subject, the fail-closed target
+aggregate, `make-release.sh`'s exact version comparison and its
+read-from-the-Makefile soak path. These read as history but are the answer to
+"why is this gate here", which the Keep list names first.
+`AVR_TEST_BINARIES_RETIRED` keeps its full note, including the growth rule and
+the 2026-08-03 addition, because it is the comment that explains why current
+variant names appear in a list called retired.
+
+**Found:** `docs/pic10f320_merge_plan.md` was deleted by BR-PIC-03 (`b8b4af1`),
+and the tree still cites its section numbers -- `merge plan §5.6`, `§6.12`,
+`§14.8`, and bare `§N` references that never named a document at all. Eight
+went with the blocks removed here; 48 remain in live code and CI (`Makefile` 24,
+`scripts/` 10, `test/` 11, `.github/workflows/` 3). A further 10 in
+`docs/flashing_simplicity.md` leave with the file under BR-FLASH-03, and
+`CHANGELOG.md`'s 8 are correct as historical record. (The `§` citations in
+`DESIGN_DOCUMENTATION.adoc` and `src/bypass_mcu_avr_classic.c` are datasheet
+sections and resolve.) The 48 sit inside comments this item keeps, so they are
+a reference repair rather than a comment trim: recorded against BR-FINAL-01,
+which already carries "Search for stale section-number and line-number
+references".
 
 ---
 
@@ -2777,6 +2845,20 @@ Any firmware refactor proposed during this effort must explicitly discharge:
 
 **Depends on:** All document deletion/consolidation tasks
 
+**Found during BR-COMMENT-01:** the largest instance of "stale section-number
+reference" is already enumerated. `docs/pic10f320_merge_plan.md` was deleted by
+BR-PIC-03 (`b8b4af1`); after BR-COMMENT-01 removed eight of them with the
+comment blocks they sat in, 48 citations of its section numbers remain in live
+code and CI -- `Makefile` 24, `scripts/make-release.sh` 6, `scripts/ci-local.sh`
+2, `scripts/verify-release-images.sh` 2, `test/` 10 (`test_pic_rebuild.sh` 4,
+`test_release_images.sh` 2, and one each in `check_stack_depth_pic.sh`,
+`test_strict_tools.sh`, `test_gpsim_wrappers.sh`, `run_mutation_tests.sh`, and
+`formal/test_model_check.c`), and `.github/workflows/` 3. Several are bare
+`§N` with no document named at all. `CHANGELOG.md`'s 8 are historical record and
+correct as they stand; `docs/flashing_simplicity.md`'s 10 leave with the file
+under BR-FLASH-03; the `§` citations in `DESIGN_DOCUMENTATION.adoc` and
+`src/bypass_mcu_avr_classic.c` are datasheet sections and resolve.
+
 **Work:**
 
 - [ ] Search all current tracked text for deleted document paths.
@@ -2963,8 +3045,8 @@ dependencies and acceptance criteria.
 | BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
 | BR-TODO-01 | Reduce TODO to registry | DONE `6fa9a1b` |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
-| BR-RELEASEDOC-01 | Reduce release README | DONE `<commit>` |
-| BR-COMMENT-01 | Trim live historical comments | TODO |
+| BR-RELEASEDOC-01 | Reduce release README | DONE `512d0c3` |
+| BR-COMMENT-01 | Trim live historical comments | DONE `<commit>` |
 | BR-STATE-01 | Remove repeated release declarations | DONE `d799c14` |
 | BR-STATE-02 | Make development/release state explicit | TODO |
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
