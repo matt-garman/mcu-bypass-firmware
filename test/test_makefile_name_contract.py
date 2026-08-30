@@ -661,6 +661,8 @@ MKV_QUERY = re.compile(r"(?<![-\w])mkv\s+([A-Za-z_][A-Za-z0-9_]*)")
 # prefix is a hard failure rather than a silent pass.
 COMPUTED_KEYS = {
     "part_": "TINYX5",     # `for n in $TINYX5; do ... $(mkv part_"$n"); done`
+    # `for v in $CLASSIC_VARIANTS_SUPPORTED; do ... print-macro_"$v"; done`
+    "macro_": "CLASSIC_VARIANTS_SUPPORTED",
 }
 COMPUTED_TAIL = ('"', "'", "$", "{")
 

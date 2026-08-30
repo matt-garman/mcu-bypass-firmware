@@ -38,8 +38,11 @@
 # the classic-AVR lane only, with avr-gcc. The shared invariants in
 # bypass_compile_checks.h are MCU-neutral and reach every modular shell through a
 # direct include. That include topology and its negative fixtures are checked
-# below without target tools; the AVR-XT and PIC shell-local pin/timer guards are
-# NOT compiled here and would need their own toolchains.
+# below without target tools; the AVR-XT and PIC shell-local pin, clock and
+# watchdog guards need their own toolchains and are mutated in
+# test/test_target_guard_mutations.sh, which skips when those toolchains are
+# absent. The census below spans EVERY shell either way, because counting needs
+# no compiler and a deleted guard should not wait on an optional lane.
 set -euo pipefail
 
 mixed_control_child=0
@@ -155,8 +158,8 @@ fi
 SHELLS_WITH_OWN_COPY="bypass_mcu_pic10f320.c"
 # "Active" here is deliberately lexical: the # is the first non-whitespace
 # token and the direct include consumes the complete line. Proving reach through
-# conditional preprocessing belongs to each real target toolchain; the release
-# server runs semantic negative compiles for AVR-XT and PIC10F322.
+# conditional preprocessing belongs to each real target toolchain, which is what
+# test/test_target_guard_mutations.sh does for the AVR-XT and the three PICs.
 ACTIVE_SHARED_INCLUDE_RE='^[[:space:]]*#[[:space:]]*include[[:space:]]+"bypass_compile_checks[.]h"[[:space:]]*$'
 find_shells_missing_shared_checks() {
 	local source_root=$1 shell base
@@ -224,7 +227,15 @@ done
 #
 # Counting is the cheap complement: a mutation proves the mechanism works, the
 # census proves nothing has quietly left. Adding a guard fails this too, on
-# purpose -- someone then decides whether the new one needs a mutation.
+# purpose -- someone then decides whether the new one needs a mutation, and in
+# which file: the classic-AVR mutations are below, the target-toolchain ones are
+# in test/test_target_guard_mutations.sh.
+#
+# EVERY shell is counted, not only the ones this file compiles. The four target
+# shells hold 52 of the 79 guards; their mutations live behind optional
+# toolchains, and a census that skipped with them would leave the majority of
+# the firmware's compile-time invariants protected by nothing on a machine
+# without XC8.
 #
 # On bypass_compile_checks.h's five: four are reachable. PRESSED_THRESH <
 # DEBOUNCE_COUNTER_MAX cannot fire while RELEASE_THRESH < DEBOUNCE_COUNTER_MAX
@@ -233,6 +244,10 @@ done
 GUARD_CENSUS=(
 	"bypass_compile_checks.h 5"
 	"bypass_mcu_avr_classic.c 17"
+	"bypass_mcu_avr_xt.c 11"
+	"bypass_mcu_pic10f320.c 18"
+	"bypass_mcu_pic10f322.c 8"
+	"bypass_mcu_pic12f675.c 15"
 	"bypass_output_cd4053_simple.c 1"
 	"bypass_output_cd4053_with_mute.c 2"
 	"bypass_output_tq2_l2_5v_relay.c 2"

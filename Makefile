@@ -988,6 +988,7 @@ FORCE:
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract test-static-assert-guards \
+        test-attiny202-guard-mutations test-pic-guard-mutations \
 		pic12f675-target-selector-valid \
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound attiny202-test-stack-bound test-stack-bound-regression test-flash-budget \
@@ -3147,6 +3148,7 @@ TEST_GATES_LATE = \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
+        test-attiny202-guard-mutations test-pic-guard-mutations \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -3532,6 +3534,36 @@ test-static-assert-guards:
 		echo "$(CC) not installed; skipping the static_assert guard checks"; $(SKIP); \
 	fi; \
 	./test/test_static_assert_guards.sh
+
+# The same proof for the guards test-static-assert-guards cannot reach. Its
+# mutations compile the classic-AVR lane with avr-gcc; 52 of the firmware's 79
+# static_assert guards live in the AVR-XT and three PIC shells, where a pin
+# assert reads the device pack, a clock assert reads that part's -D, and a
+# watchdog assert compares against that part's own de-rated floor. None of that
+# can be evaluated by another part's toolchain, so these are two targets rather
+# than one: the reasons they skip are different, and a machine with avr-gcc but
+# no XC8 should still prove the ATtiny202's guards. STRICT_TOOLS=1 turns either
+# skip into a failure, which is how release and CI run them.
+test-attiny202-guard-mutations:
+	@if ! command -v $(CC) >/dev/null 2>&1; then \
+		echo "$(CC) not installed; skipping the ATtiny202 compile-guard mutations"; $(SKIP); \
+	fi; \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping the ATtiny202 compile-guard mutations."; \
+		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
+		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		$(SKIP); \
+	fi; \
+	./test/test_target_guard_mutations.sh avr-xt
+
+test-pic-guard-mutations:
+	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
+		echo "XC8 not found at $(PIC_CC); skipping the PIC compile-guard mutations"; $(SKIP); \
+	fi; \
+	if [ ! -d "$(PIC_DFP)" ]; then \
+		echo "PIC device pack not found at PIC_DFP=$(PIC_DFP); skipping the PIC compile-guard mutations"; $(SKIP); \
+	fi; \
+	./test/test_target_guard_mutations.sh pic
 
 # Parse the GitHub workflow files and cross-check ci.yml's job list against
 # ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
@@ -8236,6 +8268,8 @@ help:
 	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
 	@echo "  test-fuse-injection-contract  every fuse byte survives -D injection into the checker (included in test)"
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
+	@echo "  test-attiny202-guard-mutations  the ATtiny202 shell's pin/clock/tick/watchdog guards fire under avr-gcc (included in test)"
+	@echo "  test-pic-guard-mutations  the three PIC shells' pin/clock/watchdog guards fire under XC8 (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC soak rebuild + image/block-value routing checks"

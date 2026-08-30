@@ -99,6 +99,7 @@ missing_cppcheck="$work/missing-cppcheck"
 missing_xc8="$work/missing-xc8"
 missing_gpsim="$work/missing-gpsim"
 missing_cxx="$work/missing-cxx"
+missing_dfp="$work/missing-dfp"
 
 expect_both test-cbmc "cbmc not installed" "CBMC=$missing_cbmc"
 expect_both analyze-cppcheck "cppcheck not installed" "CPPCHECK=$missing_cppcheck"
@@ -106,6 +107,15 @@ expect_both attiny202-analyze-cppcheck "cppcheck not installed" \
 	"CPPCHECK=$missing_cppcheck"
 expect_both attiny202-analyze-misra "cppcheck and/or python3 not available" \
 	"CPPCHECK=$missing_cppcheck"
+
+# The ATtiny202 compile-guard mutations are the one gate here whose optional
+# dependency is a vendored DATA set rather than a program: the device pack
+# supplies both the specs avr-gcc needs and the io header the pin guards are
+# pinned against. Its absence has to route through the same $(SKIP) as a missing
+# binary, and nothing else in this file exercises XT_DFP.
+expect_both test-attiny202-guard-mutations \
+	"ATtiny_DFP device files not found under XT_DFP=$missing_dfp" \
+	"XT_DFP=$missing_dfp"
 
 # --- all three PIC parts' optional-tool recipes ------------------------------
 # The build directories are redirected into the scratch tree: `pic10f322`,
@@ -125,6 +135,16 @@ expect_both pic10f320 "XC8 not found at $missing_xc8" \
 	"PIC10F320_CC=$missing_xc8" "PIC10F320_BUILD_DIR=$pic10f320_build"
 expect_both pic12f675 "XC8 not found at $missing_xc8" \
 	"PIC_CC=$missing_xc8" "PIC12F675_BUILD_DIR=$pic12f675_build"
+
+# The PIC compile-guard mutations build no image and so need no redirected build
+# directory; they compile a throwaway copy of src/ under each part's production
+# flags. Both of their prerequisites are covered: the compiler here, and the
+# device pack below.
+expect_both test-pic-guard-mutations "XC8 not found at $missing_xc8" \
+	"PIC_CC=$missing_xc8"
+expect_both test-pic-guard-mutations \
+	"PIC device pack not found at PIC_DFP=$missing_dfp" \
+	"PIC_DFP=$missing_dfp"
 
 expect_both pic10f322-analyze-cppcheck "cppcheck not installed" \
 	"CPPCHECK=$missing_cppcheck"
@@ -263,6 +283,6 @@ fi
 	|| fail "analyze-cppcheck omitted its per-profile execution diagnostics"
 checks=$((checks + 1))
 
-[ "$checks" -eq 64 ] \
-	|| fail "strict optional-tool inventory ran $checks checks, expected 64"
+[ "$checks" -eq 70 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 70"
 printf 'strict optional-tool validation (host + AVR-XT + all three PIC parts): %d checks, 0 failures\n' "$checks"

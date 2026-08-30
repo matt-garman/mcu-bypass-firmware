@@ -76,6 +76,27 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **The compile-time guards in the AVR-XT and PIC shells are now proven to
+  fire.** 52 of the firmware's 79 `static_assert` guards live in the four MCU
+  shells that need a target toolchain, and nothing compiled a mutated input
+  against any of them; the guard census did not count them either, so a deleted
+  guard was equally invisible. These are the guards no shared proof can stand in
+  for -- a pin assert resolves against the part's device pack, a clock assert
+  against the `-D` only that part's build passes, a watchdog assert against that
+  part's own de-rated floor, tick and ISR duty. `make test` now runs
+  `test-attiny202-guard-mutations` (avr-gcc + ATtiny device pack) and
+  `test-pic-guard-mutations` (XC8), each breaking one input to a guard in a
+  throwaway copy of `src/` and requiring the build to fail with that guard's own
+  message: wrong pin, wrong clock, wrong part selector, enum width, and every
+  part's watchdog pet-to-pet budget pinned to its exact millisecond by a
+  reject/accept pair. Both skip cleanly without their toolchain and fail closed
+  under `STRICT_TOOLS=1`; the census is deliberately left outside them so it
+  covers all 79 guards on a host with no XC8. Three configurations the firmware
+  still accepts in silence -- two output selectors on one shell, a driver built
+  under a foreign selector, and the PIC10F320's dual-scheme rejection that comes
+  from undeclared identifiers rather than a guard -- are recorded as fixtures
+  that fail when the guard closing them lands. The firmware is unchanged.
+
 - **The single declaration of the release contract is now checked between
   releases, not only on release day.** `release/README.md`'s bounded block is
   the one place the version, part, image and soak counts are declared, and the

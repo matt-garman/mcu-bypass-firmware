@@ -2147,7 +2147,7 @@ topology into target-specific and TODO documents.
 
 ## BR-STATE-02 - Treat main as development and releases as immutable snapshots
 
-**Status:** DONE `<commit>`
+**Status:** DONE `d4675d0`
 
 **Rationale:** Unreleased source is inherently in development. Non-developers
 should consume signed release images and the corresponding tagged snapshot and
@@ -2855,6 +2855,16 @@ resource use, MISRA attribution, coverage allowlists, and fault behavior.
 - Build/test recipes must pass explicit selectors consistently.
 - Static-analysis recipes must cover each expected selector.
 - Negative compile tests must be ready to prove new guards are load-bearing.
+  DONE by BR-SRC-03: `test/test_target_guard_mutations.sh` records the three
+  configurations the firmware currently accepts in silence -- two output
+  selectors on a modular shell, a driver compiled under a foreign selector, and
+  the PIC10F320's dual-scheme rejection that today comes from undeclared
+  identifiers rather than a guard -- and each row FAILS when the guard closing it
+  lands, demanding conversion to an explicit assertion on its message. Note for
+  the one-hot work: `bypass_mcu_pic10f320.c` selects its output scheme with two
+  different idioms, an `#if/#elif/#else` pin-map chain and standalone
+  `#if defined(OUTPUT_TQ2_RELAY)` blocks, which is why a conflicting definition
+  lands it in an inconsistent state instead of a diagnostic.
 - Pinned toolchains must be available for image/resource/timing comparison.
 
 **Acceptance:**
@@ -2867,7 +2877,7 @@ resource use, MISRA attribution, coverage allowlists, and fault behavior.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Observation:** Existing static-assert negative testing is strongest for
 Classic AVR/shared sources and does not equivalently exercise every target-local
@@ -2875,17 +2885,127 @@ guard.
 
 **Work:**
 
-- [ ] Census guards in every MCU shell.
-- [ ] Add narrowly mutated negative compiles under each full target toolchain.
-- [ ] Cover wrong MCU, conflicting backend selectors, wrong output selector,
+- [x] Census guards in every MCU shell.
+- [x] Add narrowly mutated negative compiles under each full target toolchain.
+- [x] Cover wrong MCU, conflicting backend selectors, wrong output selector,
   wrong pin, wrong clock, enum/layout assumptions, and timing-budget violations.
-- [ ] Require the intended diagnostic, not merely any compilation failure.
-- [ ] Keep target-local guards target-local.
+- [x] Require the intended diagnostic, not merely any compilation failure.
+- [x] Keep target-local guards target-local.
 
 **Acceptance:**
 
 - Deleting or bypassing any required guard is detected even when firmware bytes
   would otherwise remain valid.
+
+**Result:**
+
+The observation understated it. `test/test_static_assert_guards.sh` compiles the
+classic-AVR lane only, and its guard census listed five files holding 27
+guards. The firmware declares **79**. The remaining 52 sit in the four MCU
+shells that need a target toolchain -- `bypass_mcu_avr_xt.c` (11),
+`bypass_mcu_pic10f320.c` (18), `bypass_mcu_pic10f322.c` (8) and
+`bypass_mcu_pic12f675.c` (15) -- and nothing in the tree compiled a single
+mutated input against any of them. Neither half of the pair was in place: no
+mutation could prove one of those guards fires, and the census did not even
+count them, so deleting one outright was also invisible.
+
+Those 52 are exactly the guards no shared proof can stand in for. A pin assert
+resolves `_PORTA_RA3_POSN` out of the Microchip device pack or `PIN7_bp` out of
+`<avr/io.h>`; a clock assert reads the `-D_XTAL_FREQ` or `-DF_CPU` only that
+part's build passes; a watchdog assert compares against that part's own de-rated
+floor over a tick and an ISR duty that also differ by part. Compiled with
+another part's toolchain each one evaluates a different expression, or does not
+preprocess at all.
+
+`test/test_target_guard_mutations.sh` closes it, in the discipline the
+classic-AVR file established: copy `src/` to a throwaway tree, break one INPUT
+to a guard, compile with flags read from the Makefile via `print-<VAR>`, and
+require the failure to carry that guard's own message. 53 fixtures over 20
+compile configurations. The firmware is never modified.
+
+Two targets, not one, because the reasons they skip differ:
+`test-attiny202-guard-mutations` needs `avr-gcc` and the vendored ATtiny device
+pack, `test-pic-guard-mutations` needs XC8 and its device pack, and a machine
+with one should still prove that half. Both route through the standard `$(SKIP)`
+mechanism and are registered in `test/test_strict_tools.sh`, so under
+`STRICT_TOOLS=1` a missing toolchain fails the run rather than quietly removing
+the coverage.
+
+**The census is deliberately NOT in either of them.** Counting needs no
+compiler, so it stays in `test_static_assert_guards.sh` and now spans all nine
+files and all 79 guards. Had it moved behind the optional lanes, a host without
+XC8 would have had nothing at all standing between the majority of the
+firmware's compile-time invariants and silent deletion.
+
+Coverage against the checklist above, all under each part's own toolchain:
+
+- **Wrong pin** -- pin ordinals on all four shells, including the PIC12F675's
+  GP3/GP4 spare-pin family, where moving the footswitch onto GP3 must trip both
+  the identity guard and the "no weak pull-up on this part" guard, and moving it
+  onto GP1 must trip both identity and output-collision. Multi-message rows are
+  required as families, so deleting one sibling cannot hide behind another.
+- **Wrong clock** -- `_XTAL_FREQ` on all three PICs, `F_CPU` on the ATtiny202.
+- **Wrong MCU** -- dropping the part selector. On the PICs this reaches
+  `bypass_output_common.h`'s "no pin map selected". On the ATtiny202 it does
+  not: that part also defines `__AVR__`, so a shell that loses
+  `BYPASS_MCU_AVR_XT` silently takes the CLASSIC pin map and misroutes every
+  pin. What actually stops it is the classic arm's `F_CPU` check, and the
+  fixture pins that.
+- **Enum/layout assumptions** -- dropping `-fshort-enums` must trip all three
+  `sizeof` guards in the AVR-XT shell.
+- **Timing-budget violations** -- each part's watchdog pet-to-pet budget pinned
+  to the exact millisecond by a PAIR: the floor set equal to the budget must be
+  rejected, the floor one millisecond higher must compile. The budgets differ by
+  part (relay: 18 ms on the ATtiny202, 14 on the PIC10F322 and PIC10F320, 16 on
+  the PIC12F675), which is the whole reason a shared proof cannot substitute.
+  Twelve bounds, one per part per variant.
+- **Keeping target-local guards target-local** -- the PIC10F320's branch-local
+  pin guards each get their own output variant, since compiling the wrong arm
+  would score a deleted guard as a pass. Its duplicated threshold invariants get
+  a mutation of their own: this shell includes neither `bypass_compile_checks.h`
+  nor `bypass_config.h`, so its copy is compiled by no other lane in the suite.
+  The first draft of that fixture broke `bypass_config.h` and compiled clean --
+  the per-configuration control caught it.
+- **Conflicting backend selectors / wrong output selector** -- see below.
+
+**Finding: three configurations the firmware accepts in silence.** The last
+checklist item cannot be discharged by a passing test, because the guards it
+names do not exist yet -- they are BR-SRC-02 candidates. Probed rather than
+assumed:
+
+1. A modular shell compiles clean with TWO output selectors defined
+   (`-DCD4053_SIMPLE -DTQ2_L2_5V_RELAY`), on both the AVR-XT and PIC lanes.
+2. An output driver translation unit compiles clean under a FOREIGN selector.
+3. The self-contained `bypass_mcu_pic10f320.c` is the one shell that rejects two
+   output schemes -- but only by accident. Its pin map uses an
+   `#if/#elif/#else` chain (first arm wins) while two later blocks test
+   `OUTPUT_TQ2_RELAY` on its own, so the two disagree and the relay code refers
+   to pins the chain never defined. It fails on undeclared identifiers, not on
+   anything this project wrote. Two selection idioms in one file is the actual
+   defect; the rejection is a side effect of the inconsistency.
+
+Each is recorded as a fixture with its own outcome kind (`UNGUARDED`,
+`INCIDENTAL`) that **fails when the missing guard lands**, with a message saying
+to convert the row to `ASSERT:<the new guard's message>`. That is what makes
+BR-SRC-02's prerequisite real: without it, "the guard works" and "the guard was
+never reachable" look identical on the day it is added.
+
+**Also corrected:** `test_static_assert_guards.sh` claimed "the release server
+runs semantic negative compiles for AVR-XT and PIC10F322". Nothing in the tree
+did -- the phrase appears nowhere else, and neither `scripts/make-release.sh`
+nor any CI path compiled a mutated target shell. The scope note now points at
+the file that actually does it.
+
+**Verified.** Ten negative controls on doctored copies of `src/` via
+`TARGET_GUARD_SRC` (the suite never edits the firmware to test itself): a
+deleted guard, a reworded message, a reindented `#define` that stops a mutation
+matching, a `<` weakened to `<=`, a dropped term in the pet-to-pet formula, a
+weakened clock guard, a deleted enum-width sibling, and both hand-off paths --
+adding a one-hot selector guard fails the `UNGUARDED` row, and making the
+PIC10F320's incidental rejection deliberate fails the `INCIDENTAL` row. All ten
+rejected; the pristine control passes. `test-attiny202-guard-mutations`: 37
+checks. `test-pic-guard-mutations`: 99 checks, 3.4 s. `test-static-assert-guards`:
+111 -> 115 checks, 27 -> 79 guards counted. `test-strict-tools`: 64 -> 70 checks.
 
 ## BR-SRC-04 - Proof obligations for any user-made firmware refactor
 
@@ -3124,7 +3244,7 @@ dependencies and acceptance criteria.
 | BR-RELEASEDOC-01 | Reduce release README | DONE `512d0c3` |
 | BR-COMMENT-01 | Trim live historical comments | DONE `b194731` |
 | BR-STATE-01 | Remove repeated release declarations | DONE `d799c14` |
-| BR-STATE-02 | Make development/release state explicit | DONE `<commit>` |
+| BR-STATE-02 | Make development/release state explicit | DONE `d4675d0` |
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |
 | BR-TEST-03 | Route CI through aggregates | DONE `b9cbd36` |
@@ -3144,7 +3264,7 @@ dependencies and acceptance criteria.
 | BR-REL-07 | Preserve historical releases | TODO |
 | BR-SRC-01 | Preserve deliberate source duplication | TODO |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
-| BR-SRC-03 | Expand negative guard tests | TODO |
+| BR-SRC-03 | Expand negative guard tests | DONE `<commit>` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
 | BR-FINAL-01 | Audit current references | TODO |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
