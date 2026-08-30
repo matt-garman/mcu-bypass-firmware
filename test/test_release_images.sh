@@ -391,6 +391,50 @@ set_fixture_provenance_files 'QUALIFICATION MANIFEST.md README.md helper.py'
 expect_fail "name declared as both artifact and provenance" \
 	"declared as both a release artifact and a provenance file"
 
+# --- the three published eras -------------------------------------------------
+# This verifier is not only run on releases being staged. Every PIC12F675 field
+# programming runs it against a PUBLISHED directory, and those signatures cannot
+# be reissued. release/ currently holds three contracts: no QUALIFICATION at all
+# (v0.9.0-v0.9.5), format=1 (v0.9.6-v0.9.9) and format=3 (v0.9.10-v0.9.11), none
+# of which signed provenance. The release's own format field is what tells them
+# apart, so it is exercised here in both directions rather than assumed.
+unseal_fixture_provenance() {
+	(
+		cd "$release"
+		grep -v -E '  (QUALIFICATION|MANIFEST\.md|README\.md)$' SHA256SUMS \
+			> SHA256SUMS.tmp
+		mv SHA256SUMS.tmp SHA256SUMS
+	)
+}
+
+reset_fixture
+printf 'format=3\n' > "$release/QUALIFICATION"
+unseal_fixture_provenance
+expect_pass "format=3 release with provenance outside the signature"
+
+reset_fixture
+printf 'format=1\n' > "$release/QUALIFICATION"
+unseal_fixture_provenance
+expect_pass "format=1 release with provenance outside the signature"
+
+reset_fixture
+rm -f "$release/QUALIFICATION" "$release/MANIFEST.md" "$release/README.md"
+unseal_fixture_provenance
+expect_pass "pre-QUALIFICATION release with no provenance at all"
+
+# Half-adopting the new contract is rejected from the other side: a recipient
+# who sees one provenance file inside the signature and the rest outside cannot
+# tell which era they are verifying.
+reset_fixture
+printf 'format=3\n' > "$release/QUALIFICATION"
+expect_fail "format=3 release listing provenance in its signature" \
+	"declares QUALIFICATION format=3 but its SHA256SUMS lists provenance files"
+
+reset_fixture
+printf 'format=notanumber\n' > "$release/QUALIFICATION"
+expect_fail "release declaring a non-numeric format" \
+	"declares a non-numeric format"
+
 # The reproduction leg rebuilds IMAGES. A tool sitting in a fresh build
 # directory is not part of what a compiler reproduced, and is ignored.
 reset_fixture

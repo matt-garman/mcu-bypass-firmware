@@ -416,7 +416,7 @@ for renderer in release_validate_current_documentation \
 		release_validate_pic12f675_flashing_helper \
 		release_validate_flashing_simplicity_status \
 		release_render_scope release_render_validation \
-		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
+		release_render_toolchain_table release_render_pic12f675_flashing \
 		release_render_flashing \
 		release_render_reproduction_commands \
 		release_render_commit_message; do
@@ -1958,6 +1958,52 @@ resource_tables_sha256=$(sha256sum -- "$EVID/resource-tables.log") \
 resource_tables_sha256=${resource_tables_sha256%% *}
 ok "final resource evidence covers all images and retained RAM/stack measurements."
 
+# --- the toolchain, as evidence rather than as prose -------------------------
+# The MANIFEST's toolchain table was authored output: fifteen rows printed from
+# the TC_* captures with no machine authority behind them and nothing checking
+# them, so a wrong compiler version was a provenance error that passed every
+# gate. Write the captures once, here, as the canonical record; the table is
+# rendered FROM this file, and verify-release-qualification.sh holds the
+# rendered rows back to it in both directions.
+#
+# Tab-separated because a version string can contain anything but a tab -- these
+# are `--version` first lines and dpkg-query output -- while the label may
+# contain the backticks, slashes and `=` that make a Markdown cell. The digest
+# goes into QUALIFICATION exactly as the resource and matrix digests do.
+{
+	printf 'TOOLCHAIN format=1 source_commit=%s\n' "$GIT_SHA"
+	printf '%s\t%s\n' \
+		'avr-gcc' "$TC_AVR_GCC" \
+		'binutils-avr (objcopy)' "$TC_AVR_BU" \
+		'avr-libc (pkg)' "$TC_AVR_LIBC" \
+		'host cc' "$TC_HOST_CC" \
+		"PIC10F322/PIC12F675 XC8 (\`PIC_CC=$PIC_CC\`)" "$TC_XC8_322" \
+		"PIC10F320 XC8 (\`PIC10F320_CC=$PIC10F320_CC\`)" "$TC_XC8_320" \
+		'PIC10F322/PIC12F675 DFP (`PIC_DFP`)' "$PIC_DFP" \
+		'PIC10F320 DFP (`PIC10F320_DFP`)' "$PIC10F320_DFP" \
+		'gpsim' "$TC_GPSIM" \
+		'libsimavr-dev (pkg)' "$TC_SIMAVR" \
+		'cppcheck' "$TC_CPPCHECK" \
+		'cbmc' "$TC_CBMC" \
+		'clang' "$TC_CLANG" \
+		'python3' "$TC_PY" \
+		'PIC12F675 Python' "$TC_PIC12F675_PY"
+	printf 'TOOLCHAIN_RESULT format=1 status=pass rows=%d source_commit=%s\n' \
+		15 "$GIT_SHA"
+} > "$EVID/toolchain.txt" \
+	|| die "could not record the toolchain evidence"
+toolchain_rows=$(grep -c $'\t' "$EVID/toolchain.txt") \
+	|| die "could not count toolchain evidence rows"
+[ "$toolchain_rows" -eq 15 ] \
+	|| die "toolchain evidence records $toolchain_rows rows, expected 15"
+if grep -q '^[[:space:]]*$' "$EVID/toolchain.txt"; then
+	die "toolchain evidence contains a blank line"
+fi
+toolchain_sha256=$(sha256sum -- "$EVID/toolchain.txt") \
+	|| die "could not hash the toolchain evidence"
+toolchain_sha256=${toolchain_sha256%% *}
+ok "toolchain evidence records $toolchain_rows tools; the MANIFEST table renders from it."
+
 # Builds and parallel soaks can run for 24 hours. The Make lock protects shared
 # artifacts from other Make invocations, but intentionally cannot prevent a
 # human or editor from changing source or moving HEAD. Recheck immediately
@@ -2095,7 +2141,7 @@ staged_resource_tables_sha256=${staged_resource_tables_sha256%% *}
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=3\n'
+	printf 'format=5\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -2105,6 +2151,7 @@ staged_resource_tables_sha256=${staged_resource_tables_sha256%% *}
 	printf 'soak_combination_count=%s\n' "$NCOMBOS"
 	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
 	printf 'resource_tables_sha256=%s\n' "$resource_tables_sha256"
+	printf 'toolchain_sha256=%s\n' "$toolchain_sha256"
 } > "$OUTPUT_DIR/QUALIFICATION"
 
 # --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
@@ -2274,20 +2321,11 @@ REL_BANNER=""
 	printf '\n'
 
 	printf '## Toolchain\n\n'
-	printf -- '| tool | version |\n|---|---|\n'
-	printf -- '| avr-gcc | %s |\n' "$TC_AVR_GCC"
-	printf -- '| binutils-avr (objcopy) | %s |\n' "$TC_AVR_BU"
-	printf -- '| avr-libc (pkg) | %s |\n' "$TC_AVR_LIBC"
-	printf -- '| host cc | %s |\n' "$TC_HOST_CC"
-	release_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322" \
-		"$PIC10F320_CC" "$TC_XC8_320" "$PIC_DFP" "$PIC10F320_DFP"
-	printf -- '| gpsim | %s |\n' "$TC_GPSIM"
-	printf -- '| libsimavr-dev (pkg) | %s |\n' "$TC_SIMAVR"
-	printf -- '| cppcheck | %s |\n' "$TC_CPPCHECK"
-	printf -- '| cbmc | %s |\n' "$TC_CBMC"
-	printf -- '| clang | %s |\n' "$TC_CLANG"
-	printf -- '| python3 | %s |\n' "$TC_PY"
-	printf -- '| PIC12F675 Python | %s |\n\n' "$TC_PIC12F675_PY"
+	# Rendered from evidence/toolchain.txt, not from the TC_* captures directly,
+	# so the table a reader sees and the record a verifier reads are one list.
+	release_render_toolchain_table "$EVID/toolchain.txt" \
+		|| die "could not render the toolchain table from its evidence"
+	printf '\n'
 
 	printf '## Images\n\n'
 	printf '| image | MCU | clock | flash used | fuses / config | sha256 |\n'

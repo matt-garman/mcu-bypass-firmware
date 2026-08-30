@@ -76,6 +76,22 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **The manifest's toolchain table is evidence now, not prose.** Fifteen rows
+  of compiler, simulator and analyzer versions were printed into `MANIFEST.md`
+  from shell captures, with no machine authority behind them and nothing
+  checking them, so a wrong version there was a provenance error that passed
+  every gate -- on the one table a reader consults to decide whether a released
+  image was built with the toolchain it claims. The captures are now written
+  once to `evidence/toolchain.txt`, that file's digest is bound from
+  `QUALIFICATION` as `toolchain_sha256` (moving it to `format=5`, the same
+  mechanism already used for the PIC12F675 matrix and the resource tables), and
+  the table is *rendered from* the record instead of printed alongside it.
+  `verify-release-qualification.sh` then holds the rendered table back to the
+  record in both directions: every recorded tool must appear as a row, and the
+  table may carry no row the record does not justify. The now-redundant
+  `release_render_pic_toolchain_rows` renderer is deleted rather than left as a
+  second producer of the same four rows.
+
 - **A release signature now covers where the release came from, not just the
   firmware.** Through v0.9.11 `SHA256SUMS` listed the images and the required
   programming helper and nothing else, so `gpg --verify SHA256SUMS.asc
@@ -90,9 +106,19 @@ historical records and are not retroactively compacted by this policy.
   and the published set stay the same set, and held by
   `verify-release-images.sh` as a third exactly-declared set beside the images
   and the helpers. `QUALIFICATION` moves to `format=4` to mark the new
-  contract; `format=3` is rejected rather than accepted as a legacy mode,
-  since the verifier only ever runs on a directory being staged or a tag being
-  published. The per-release `README.md`, which no verifier had ever read, is
+  contract, and the two verifiers treat it differently because they see
+  different inputs. `verify-release-qualification.sh` requires `format=4`: it
+  only ever runs on a directory being staged or a tag being published, so a
+  branch for an older format would be unreachable. `verify-release-images.sh`
+  accepts all three published eras -- no `QUALIFICATION` at all
+  (v0.9.0-v0.9.5), `format=1` (v0.9.6-v0.9.9) and `format=3`
+  (v0.9.10-v0.9.11) -- because every PIC12F675 field programming runs it
+  against a published directory through
+  `scripts/verify-release-program-image.sh`, and those signatures cannot be
+  reissued. A pre-`format=4` release is held to the old contract rather than
+  merely tolerated: it must not list provenance in its checksum file either,
+  so a half-adopted contract cannot leave a recipient unable to tell which era
+  they are verifying. The per-release `README.md`, which no verifier had ever read, is
   now bound to `QUALIFICATION` for its version heading and its qualification
   banner in both directions, exactly as `MANIFEST.md` already was. Releases
   through v0.9.11 are left as published -- bringing their provenance inside

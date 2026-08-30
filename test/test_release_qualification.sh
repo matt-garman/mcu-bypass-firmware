@@ -38,7 +38,7 @@ for function in release_validate_current_documentation \
 		release_validate_pic12f675_flashing_helper \
 		release_validate_flashing_simplicity_status \
 		release_render_scope release_render_validation \
-		release_render_pic_toolchain_rows release_render_pic12f675_flashing \
+		release_render_toolchain_table release_render_pic12f675_flashing \
 		release_render_flashing \
 		release_render_reproduction_commands \
 		release_render_commit_message; do
@@ -160,7 +160,7 @@ for required in \
 done
 for required in \
 		'`pic10f320-test-stack-bound`, `pic12f675-test-stack-bound`' \
-		'exact canonical 35-file evidence set' \
+		'exact canonical 36-file evidence set' \
 		'each of 18 release soak combinations' \
 		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
 		'48 PIC10F322, 102 PIC10F320, and 168 PIC12F675 checks' \
@@ -175,8 +175,7 @@ checks=$((checks + 1))
 for wiring in \
 	$'\trelease_render_scope' \
 	$'\trelease_render_validation "$hours"' \
-	$'\trelease_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' \
-	$'\t\t"$PIC10F320_CC" "$TC_XC8_320" "$PIC_DFP" "$PIC10F320_DFP"' \
+	$'\trelease_render_toolchain_table "$EVID/toolchain.txt" \\' \
 	$'\trelease_render_flashing "$WORK/flashcmds.txt" "$VERSION"' \
 	$'\trelease_render_reproduction_commands "$VERSION" "$RELEASE_IMAGE_DIRS"' \
 	$'\t\t"$AVR_BUILD_DIR" "$XT_BUILD_DIR" "$PIC10F322_BUILD_DIR"' \
@@ -309,6 +308,18 @@ EOF
 	matrix_digest=${matrix_digest%% *}
 	resource_digest=$(sha256sum -- "$release/evidence/resource-tables.log")
 	resource_digest=${resource_digest%% *}
+	# Fifteen recorded tools, the count the verifier requires, written in the
+	# same tab-separated form make-release.sh produces.
+	{
+		printf 'TOOLCHAIN format=1 source_commit=%s\n' "$sha"
+		for tool_index in $(seq 1 15); do
+			printf 'fixture-tool-%s\t1.%s.0\n' "$tool_index" "$tool_index"
+		done
+		printf 'TOOLCHAIN_RESULT format=1 status=pass rows=15 source_commit=%s\n' \
+			"$sha"
+	} > "$release/evidence/toolchain.txt"
+	toolchain_digest=$(sha256sum -- "$release/evidence/toolchain.txt")
+	toolchain_digest=${toolchain_digest%% *}
 	{
 		printf '=== PIC12F675 retained matrix qualified: %s ===\n' "$matrix_record"
 		printf '=== all PIC12F675 pre-hardware checks complete: %s ===\n' "$matrix_record"
@@ -327,7 +338,7 @@ SOAK_RESULT format=1 status=pass combination=$name duration_ms=$duration livenes
 EOF
 	done
 	cat > "$release/QUALIFICATION" <<EOF
-format=4
+format=5
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -337,6 +348,7 @@ soak_liveness_interval_ms=$liveness
 soak_combination_count=${#soak_names[@]}
 pic12f675_matrix_sha256=$matrix_digest
 resource_tables_sha256=$resource_digest
+toolchain_sha256=$toolchain_digest
 EOF
 	{
 		printf '# Firmware release %s\n\n' "$version"
@@ -352,6 +364,12 @@ EOF
 			"$matrix_digest"
 		printf -- '- **Final resource evidence:** `evidence/resource-tables.log` (SHA-256 `%s`)\n' \
 			"$resource_digest"
+		printf '\n## Toolchain\n\n'
+		printf -- '| tool | version |\n|---|---|\n'
+		for tool_index in $(seq 1 15); do
+			printf -- '| fixture-tool-%s | 1.%s.0 |\n' "$tool_index" "$tool_index"
+		done
+		printf '\n## Images\n\n'
 	} > "$release/MANIFEST.md"
 	{
 		printf '# %s\n\n' "$version"
@@ -388,6 +406,19 @@ refresh_matrix_digest() {
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" \
 		"$release/QUALIFICATION" "$release/MANIFEST.md"
+	reseal_provenance
+}
+
+# The toolchain digest is bound from QUALIFICATION, so a control that mutates
+# the evidence to test a LATER check has to re-pin it first -- otherwise the
+# digest check fires and the control proves the wrong thing.
+refresh_toolchain_digest() {
+	local old_digest new_digest
+	old_digest=$(awk -F= '$1 == "toolchain_sha256" { print $2 }' \
+		"$release/QUALIFICATION")
+	new_digest=$(sha256sum -- "$release/evidence/toolchain.txt")
+	new_digest=${new_digest%% *}
+	sed -i "s/$old_digest/$new_digest/g" "$release/QUALIFICATION"
 	reseal_provenance
 }
 
@@ -475,7 +506,7 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=4\n' >> "$release/QUALIFICATION"
+printf 'format=5\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
 # format=3 is every release through v0.9.11: the contract in which SHA256SUMS
@@ -484,11 +515,11 @@ expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 # legacy mode, because this verifier only ever runs on a directory being staged
 # or a tag being published -- both of which must sign their own provenance.
 reset_fixture
-sed -i 's/^format=4$/format=3/' "$release/QUALIFICATION"
+sed -i 's/^format=5$/format=3/' "$release/QUALIFICATION"
 expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
-sed -i 's/^format=4$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=5$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
@@ -588,6 +619,72 @@ sed -i '/DRY RUN -- NOT A VALIDATED RELEASE/d' "$release/README.md"
 reseal_provenance
 expect_fail "dry-run README without its warning" \
 	"dry-run README.md is missing its warning banner" --allow-dry-run
+
+# --- the toolchain table, which was authored prose until format=5 -------------
+# Fifteen rows of compiler and analyzer versions with no machine authority
+# behind them. A wrong version there is a provenance error, and until this
+# binding existed it passed every gate.
+# A missing toolchain.txt is caught by the canonical evidence-set comparison,
+# which is the right authority for "a required evidence file is absent" and
+# runs before anything reads the file.
+reset_fixture
+rm -f "$release/evidence/toolchain.txt"
+expect_fail "missing toolchain evidence" \
+	"retained evidence does not exactly match RELEASE_EVIDENCE_FILES"
+
+reset_fixture
+rm -f "$release/evidence/toolchain.txt"
+printf 'elsewhere\n' > "$release/evidence/real-toolchain"
+ln -s real-toolchain "$release/evidence/toolchain.txt"
+expect_fail "symlinked toolchain evidence" \
+	"evidence file is empty or not regular: toolchain.txt"
+
+reset_fixture
+printf 'appended\n' >> "$release/evidence/toolchain.txt"
+expect_fail "toolchain evidence edited after recording" \
+	"retained toolchain evidence digest does not match QUALIFICATION"
+
+# The table loses a row the record still claims. The digests all still agree --
+# only the row-by-row comparison sees it.
+reset_fixture
+sed -i '/^| fixture-tool-7 | 1.7.0 |$/d' "$release/MANIFEST.md"
+expect_fail "recorded tool missing from the rendered table" \
+	"MANIFEST.md toolchain table omits the recorded row for fixture-tool-7"
+
+# A version edited in place. The row count still matches; the content does not.
+reset_fixture
+sed -i 's/^| fixture-tool-3 | 1.3.0 |$/| fixture-tool-3 | 9.9.9 |/' \
+	"$release/MANIFEST.md"
+expect_fail "rendered tool version edited after rendering" \
+	"MANIFEST.md toolchain table omits the recorded row for fixture-tool-3"
+
+# A tool the record does not justify. Every recorded row is still present, so
+# only counting the table's own rows catches this one.
+reset_fixture
+sed -i 's/^| fixture-tool-1 | 1.1.0 |$/| fixture-tool-1 | 1.1.0 |\n| smuggled-tool | 0.0.1 |/' \
+	"$release/MANIFEST.md"
+expect_fail "unrecorded tool added to the rendered table" \
+	"MANIFEST.md toolchain table has 17 rows for 15 recorded tools"
+
+reset_fixture
+sed -i 's/^TOOLCHAIN_RESULT format=1 status=pass rows=15/TOOLCHAIN_RESULT format=1 status=pass rows=14/' \
+	"$release/evidence/toolchain.txt"
+refresh_toolchain_digest
+expect_fail "toolchain result miscounts its own rows" \
+	"toolchain evidence has no exact source-bound complete result"
+
+reset_fixture
+sed -i 's/^TOOLCHAIN format=1 source_commit=.*/TOOLCHAIN format=1 source_commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' \
+	"$release/evidence/toolchain.txt"
+refresh_toolchain_digest
+expect_fail "toolchain evidence bound to another commit" \
+	"toolchain evidence has no source-bound header record"
+
+reset_fixture
+printf 'a-tool-with-no-version\n' >> "$release/evidence/toolchain.txt"
+refresh_toolchain_digest
+expect_fail "toolchain record without a version" \
+	"malformed toolchain evidence record"
 
 # --- the signature has to reach the provenance --------------------------------
 # Every release through v0.9.11 signed its images and left QUALIFICATION,
@@ -838,9 +935,10 @@ for required in attiny85_cd4053_simple attiny45_cd4053_simple \
 done
 checks=$((checks + 1))
 
-[ "${#evidence_names[@]}" -eq 35 ] \
-	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 35"
-for required in pic12f675-qualification.log pic12f675-qualified-matrix.json; do
+[ "${#evidence_names[@]}" -eq 36 ] \
+	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 36"
+for required in pic12f675-qualification.log pic12f675-qualified-matrix.json \
+		toolchain.txt; do
 	[[ " ${evidence_names[*]} " == *" $required "* ]] \
 		|| fail "canonical release evidence set is missing $required"
 done
@@ -1293,9 +1391,6 @@ rendered_manifest="$work/rendered-manifest-sections.md"
 {
 	release_render_scope
 	release_render_validation 24
-	release_render_pic_toolchain_rows "$selected_pic_cc" 'XC8 shared version' \
-		"$selected_pic320_cc" 'XC8 PIC10F320 version' \
-		"$selected_pic_dfp" "$selected_pic320_dfp"
 } > "$rendered_manifest"
 grep -Fq 'PIC10F322, PIC10F320, and PIC12F675.' "$rendered_manifest" \
 	|| fail "rendered release scope omits PIC12F675"
@@ -1330,12 +1425,43 @@ if grep -Eqi 'physical[- ](output|pin|port)' "$rendered_manifest"; then
 	fail "rendered validation prose claims physical output evidence for simulator lanes"
 fi
 checks=$((checks + 1))
+# The toolchain table renders from evidence as of QUALIFICATION format=5, so
+# these attributions are exercised through that renderer against a synthetic
+# record file. The claim they protect is unchanged and is the reason the labels
+# read the way they do: one XC8 and one DFP serve BOTH the PIC10F322 and the
+# PIC12F675, and a table that names only one of the two parts tells a reader
+# their device was built with a compiler nobody recorded.
+rendered_toolchain="$work/rendered-toolchain.md"
+renderer_sha=0000000000000000000000000000000000000000
+toolchain_records="$work/toolchain-records.txt"
+{
+	printf 'TOOLCHAIN format=1 source_commit=%s\n' "$renderer_sha"
+	printf '%s\t%s\n' \
+		"PIC10F322/PIC12F675 XC8 (\`PIC_CC=$selected_pic_cc\`)" 'XC8 shared version' \
+		"PIC10F320 XC8 (\`PIC10F320_CC=$selected_pic320_cc\`)" 'XC8 PIC10F320 version' \
+		'PIC10F322/PIC12F675 DFP (`PIC_DFP`)' "$selected_pic_dfp" \
+		'PIC10F320 DFP (`PIC10F320_DFP`)' "$selected_pic320_dfp"
+	printf 'TOOLCHAIN_RESULT format=1 status=pass rows=4 source_commit=%s\n' \
+		"$renderer_sha"
+} > "$toolchain_records"
+release_render_toolchain_table "$toolchain_records" > "$rendered_toolchain" \
+	|| fail "could not render the toolchain table from its records"
 grep -Fq "| PIC10F322/PIC12F675 XC8 (\`PIC_CC=$selected_pic_cc\`) | XC8 shared version |" \
-	"$rendered_manifest" \
+	"$rendered_toolchain" \
 	|| fail "rendered toolchain table does not attribute shared XC8 to PIC10F322 and PIC12F675"
 grep -Fq "| PIC10F322/PIC12F675 DFP (\`PIC_DFP\`) | $selected_pic_dfp |" \
-	"$rendered_manifest" \
+	"$rendered_toolchain" \
 	|| fail "rendered toolchain table does not attribute shared DFP to PIC10F322 and PIC12F675"
+# The header is emitted by the renderer too, so the table has one producer.
+grep -Fxq '| tool | version |' "$rendered_toolchain" \
+	|| fail "rendered toolchain table omits its header row"
+# The TOOLCHAIN and TOOLCHAIN_RESULT records are metadata, not tools, and must
+# not appear as rows.
+if grep -q 'TOOLCHAIN' "$rendered_toolchain"; then
+	fail "rendered toolchain table leaks a machine record as a tool row"
+fi
+[ "$(grep -c '^| .* | .* |$' "$rendered_toolchain")" -eq 5 ] \
+	|| fail "rendered toolchain table has the wrong row count for 4 records"
 checks=$((checks + 1))
 
 rendered_commit="$work/rendered-commit-message.txt"

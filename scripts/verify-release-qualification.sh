@@ -70,7 +70,7 @@ evidence_dir="$release_dir/evidence"
 declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
 	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
-	pic12f675_matrix_sha256 resource_tables_sha256)
+	pic12f675_matrix_sha256 resource_tables_sha256 toolchain_sha256)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -93,14 +93,18 @@ done
 [ "${#q[@]}" -eq "${#required_keys[@]}" ] \
 	|| die "QUALIFICATION does not contain the exact required schema"
 
-# format=4 is the contract in which SHA256SUMS covers the provenance files as
-# well as the images and helpers, so one signature verification reaches where
-# the firmware came from. format=3 releases (v0.9.0-v0.9.11) signed the
-# firmware only. Exactly one format is accepted: this verifier runs on a
-# freshly staged directory and on the tag CI is publishing, never on a
-# historical release, so a compatibility branch for 3 would be unreachable
-# code claiming a capability nothing exercises.
-[ "${q[format]}" = 4 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+# format=4 brought the provenance files inside SHA256SUMS, so one signature
+# verification reaches where the firmware came from. format=5 adds
+# toolchain_sha256: the MANIFEST toolchain table stopped being authored prose
+# and is now rendered from bound evidence. Releases through v0.9.11 declare
+# format=3 or format=1 or nothing at all and signed the firmware only.
+#
+# Exactly one format is accepted here. This verifier runs on a freshly staged
+# directory and on the tag CI is publishing, never on a historical release, so
+# a compatibility branch would be unreachable code claiming a capability
+# nothing exercises. verify-release-images.sh, which IS run against published
+# directories, carries the era policy instead.
+[ "${q[format]}" = 5 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -109,6 +113,8 @@ done
 	|| die "QUALIFICATION pic12f675_matrix_sha256 is not a lowercase SHA-256"
 [[ "${q[resource_tables_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION resource_tables_sha256 is not a lowercase SHA-256"
+[[ "${q[toolchain_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
+	|| die "QUALIFICATION toolchain_sha256 is not a lowercase SHA-256"
 
 case "${q[release_mode]}" in
 	production)
@@ -342,6 +348,54 @@ case "${q[release_mode]}" in
 			|| die "dry-run MANIFEST.md is missing its warning banner"
 		;;
 esac
+
+# --- the toolchain table is rendered from evidence, and still matches it ------
+# Fifteen rows of compiler, simulator and analyzer versions were authored output
+# until format=5: printed into MANIFEST.md from shell captures, with no machine
+# authority and nothing checking them, so a wrong version there was a provenance
+# error that passed every gate. Now they are recorded once and rendered from the
+# record. Both directions are checked, because either alone is satisfiable by a
+# table that is wrong: every record must appear as a row, and every row must
+# come from a record.
+# Existence, regularity and non-emptiness are already established by the
+# canonical evidence-set comparison above, which is why resource-tables.log
+# below is opened the same way -- without a second guard that could never fire.
+toolchain_log="$evidence_dir/toolchain.txt"
+toolchain_digest=$(sha256sum -- "$toolchain_log") \
+	|| die "could not hash retained toolchain evidence"
+[ "${toolchain_digest%% *}" = "${q[toolchain_sha256]}" ] \
+	|| die "retained toolchain evidence digest does not match QUALIFICATION"
+
+toolchain_result="TOOLCHAIN_RESULT format=1 status=pass rows=15 source_commit=${q[source_commit]}"
+mapfile -t toolchain_results < <(grep '^TOOLCHAIN_RESULT ' "$toolchain_log" || true)
+[ "${#toolchain_results[@]}" -eq 1 ] && [ "${toolchain_results[0]}" = "$toolchain_result" ] \
+	|| die "toolchain evidence has no exact source-bound complete result"
+grep -Fxq "TOOLCHAIN format=1 source_commit=${q[source_commit]}" "$toolchain_log" \
+	|| die "toolchain evidence has no source-bound header record"
+
+toolchain_rows=0
+while IFS=$'\t' read -r tool_label tool_version; do
+	case "$tool_label" in
+		TOOLCHAIN\ *|TOOLCHAIN_RESULT\ *) continue ;;
+	esac
+	[ -n "$tool_label" ] && [ -n "$tool_version" ] \
+		|| die "malformed toolchain evidence record: $tool_label"
+	grep -Fxq -- "| $tool_label | $tool_version |" "$manifest" \
+		|| die "MANIFEST.md toolchain table omits the recorded row for $tool_label"
+	toolchain_rows=$((toolchain_rows + 1))
+done < "$toolchain_log"
+[ "$toolchain_rows" -eq 15 ] \
+	|| die "toolchain evidence records $toolchain_rows tools, expected 15"
+
+# The other direction. Counting the table's own rows is what catches a row the
+# record does not justify -- an extra tool, or a version edited in place after
+# the table was rendered.
+rendered_rows=$(sed -n '/^## Toolchain$/,/^## /p' "$manifest" \
+	| grep -c '^| .* | .* |$') \
+	|| die "could not read the MANIFEST.md toolchain table"
+# The header row `| tool | version |` matches that shape too.
+[ "$rendered_rows" -eq $((toolchain_rows + 1)) ] \
+	|| die "MANIFEST.md toolchain table has $rendered_rows rows for $toolchain_rows recorded tools"
 
 # --- the provenance files are inside the signature ---------------------------
 # verify-release-images.sh proves SHA256SUMS LISTS exactly the declared

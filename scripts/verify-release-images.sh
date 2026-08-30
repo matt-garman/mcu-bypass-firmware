@@ -165,6 +165,36 @@ for provenance_base in "${provenance_list[@]}"; do
 done
 LC_ALL=C sort -o "$provenance_expected" "$provenance_expected"
 
+# --- which contract THIS release was published under -------------------------
+# This verifier does not only see releases being staged. Every PIC12F675 field
+# programming runs it against a PUBLISHED directory via
+# verify-release-program-image.sh, and those signatures cannot be reissued to
+# cover more than they already do. Three eras exist in release/ right now:
+# v0.9.0-v0.9.5 ship no QUALIFICATION at all, v0.9.6-v0.9.9 declare format=1,
+# and v0.9.10-v0.9.11 declare format=3. All three signed images and helpers
+# only. format=4 is the first to sign its own provenance.
+#
+# The release's own format field is the only thing that can tell them apart,
+# which is what a format version is for. This is a live compatibility policy
+# over directories that exist, not speculative tolerance for a hypothetical
+# input: dropping it would break programming a PIC12F675 from any release
+# published to date.
+release_format=0
+release_qualification="$release_dir/QUALIFICATION"
+if [ -f "$release_qualification" ] && [ ! -L "$release_qualification" ]; then
+	format_line=$(grep -m1 '^format=' "$release_qualification" || true)
+	if [ -n "$format_line" ]; then
+		release_format=${format_line#format=}
+		[[ "$release_format" =~ ^[0-9]+$ ]] \
+			|| die "release QUALIFICATION declares a non-numeric format: $format_line"
+	fi
+fi
+if [ "$release_format" -ge 4 ]; then
+	provenance_signed=1
+else
+	provenance_signed=0
+fi
+
 expected="$work/expected.txt"
 : > "$expected"
 for base in "${expected_images[@]}"; do
@@ -275,17 +305,24 @@ fi
 # QUALIFICATION, MANIFEST.md and README.md authenticates the firmware and
 # nothing about where the firmware came from -- which is what every release
 # through v0.9.11 did.
-if ! diff -u "$provenance_expected" "$listed_provenance"; then
-	die "SHA256SUMS entries do not exactly match the provenance file set (Makefile RELEASE_PROVENANCE_FILES)"
+if [ "$provenance_signed" -eq 1 ]; then
+	if ! diff -u "$provenance_expected" "$listed_provenance"; then
+		die "SHA256SUMS entries do not exactly match the provenance file set (Makefile RELEASE_PROVENANCE_FILES)"
+	fi
+	# Listing a provenance file is not the same as having one. The digest leg
+	# below covers the images; these are checked here because nothing else in
+	# this script opens them.
+	for provenance_base in "${provenance_list[@]}"; do
+		provenance_path="$release_dir/$provenance_base"
+		[ -f "$provenance_path" ] && [ ! -L "$provenance_path" ] && [ -s "$provenance_path" ] \
+			|| die "provenance file is missing, empty, or not a regular file: $provenance_base"
+	done
+elif [ -s "$listed_provenance" ]; then
+	# A pre-format=4 release must not list provenance either. Half-adopting the
+	# new contract -- one provenance file inside the signature, the rest outside
+	# -- would leave a recipient unable to tell which era they were verifying.
+	die "release declares QUALIFICATION format=$release_format but its SHA256SUMS lists provenance files: $(tr '\n' ' ' < "$listed_provenance")"
 fi
-# Listing a provenance file is not the same as having one. The digest leg
-# below covers the images; these are checked here because nothing else in this
-# script opens them.
-for provenance_base in "${provenance_list[@]}"; do
-	provenance_path="$release_dir/$provenance_base"
-	[ -f "$provenance_path" ] && [ ! -L "$provenance_path" ] && [ -s "$provenance_path" ] \
-		|| die "provenance file is missing, empty, or not a regular file: $provenance_base"
-done
 
 # The committed directory must hold each required artifact, and each must be the
 # tracked source byte for byte. No build step produces these files, so "the
@@ -314,14 +351,16 @@ done
 # has to be present here or the check cannot speak for it. This is also the
 # leg that proves the listed provenance digests are the digests of the files
 # actually committed, not merely that the names appear.
-for provenance_base in "${provenance_list[@]}"; do
-	provenance_path="$release_dir/$provenance_base"
-	cp -a -- "$provenance_path" "$committed_snapshot/$provenance_base" \
-		|| die "could not snapshot provenance file: $provenance_base"
-	[ -f "$committed_snapshot/$provenance_base" ] \
-		&& [ ! -L "$committed_snapshot/$provenance_base" ] \
-		|| die "provenance file is not a regular file: $provenance_path"
-done
+if [ "$provenance_signed" -eq 1 ]; then
+	for provenance_base in "${provenance_list[@]}"; do
+		provenance_path="$release_dir/$provenance_base"
+		cp -a -- "$provenance_path" "$committed_snapshot/$provenance_base" \
+			|| die "could not snapshot provenance file: $provenance_base"
+		[ -f "$committed_snapshot/$provenance_base" ] \
+			&& [ ! -L "$committed_snapshot/$provenance_base" ] \
+			|| die "provenance file is not a regular file: $provenance_path"
+	done
+fi
 
 printf '%s\n' '== committed release checksums =='
 if ! (cd "$committed_snapshot" && sha256sum -c "$checksum_file"); then

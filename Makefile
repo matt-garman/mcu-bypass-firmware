@@ -7828,7 +7828,7 @@ override RELEASE_SOAK_NAMES := \
 override RELEASE_FIXED_EVIDENCE_FILES := \
 	build-avr-classic.log build-avr-xt.log \
 	build-pic10f322.log build-pic10f320.log build-pic12f675.log \
-	final-image-build.log resource-tables.log \
+	final-image-build.log resource-tables.log toolchain.txt \
 	attiny202-test.log attiny202-test-target.log \
 	pic10f322-test.log pic10f322-test-target-variants.log \
 	pic10f320-test.log pic10f320-test-target-variants.log \
