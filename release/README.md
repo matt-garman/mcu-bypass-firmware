@@ -10,19 +10,8 @@ documentation marks them as superseded. Each release lives in its own
 PIC12F675 is the safety exception: do not pass its downloaded HEX directly to a
 writer. Its per-device factory OSCCAL word and CONFIG `BG<1:0>` trim live in
 memory a programmer erases, so every write goes through a guarded transaction.
-From `v0.9.10` that transaction has a no-compiler path: each bundle also ships
-`flash-pic12f675.py`, covered by the same signed `SHA256SUMS` as the images, and
-it runs the whole transaction on Python 3 plus MPLAB X 6.20 `ipecmd` -- no
-source checkout, no XC8, no device pack. Pass the downloaded HEX to that helper,
-never to `ipecmd`. `make pic12f675-release-program` remains the development and
-release-provenance path, and it is the one that needs the toolchain and a clean
-tagged checkout, because it binds a private fresh build to a signed tag.
-
-From `v0.9.10`, PIC12F675 release qualification runs its pre-hardware and target
-aggregates in one Make graph against one retained matrix. The release evidence
-keeps the combined aggregate log and the complete twelve-artifact matrix JSON;
-`QUALIFICATION` and `MANIFEST.md` bind that JSON's digest to the final three
-shipped HEX files and their `SHA256SUMS` entries.
+There are two routes into it -- one for a downloaded release, one for a source
+checkout -- and both are under "Flash a chip" below.
 
 <!-- current-release:start -->
 > **Current release contract:** `v0.9.11`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
@@ -114,13 +103,12 @@ validation suite — backs these binaries, through two mechanisms:
 1. **Provenance.** Every release carries a `MANIFEST.md` recording the exact
    source commit, pinned toolchain versions, per-image fuse bytes / CONFIG word,
    and its validation evidence. Beginning with `v0.9.6`, a machine-readable
-   `QUALIFICATION` record is checked
-   against that release's exact retained-evidence inventory (35 files from
-   `v0.9.10`, 34 in `v0.9.9`, 28 in `v0.9.6`–`v0.9.8`) and every one of its soak logs (18 from
-   `v0.9.9`, 15 before the PIC12F675 graduated) before publication; each log must
-   identify its canonical
-   combination and report the configured duration, expected nonzero
-   liveness-check count, and zero failure counters. The current unified pipeline
+   `QUALIFICATION` record is checked against that release's own exact
+   retained-evidence and soak inventories before publication; each soak log must
+   identify its canonical combination and report the configured duration,
+   expected nonzero liveness-check count, and zero failure counters. Those
+   inventories are per-release: judge a release against the contract recorded in
+   its own tag, never against a later one's. The current unified pipeline
    requires `make test-long`, both ATtiny202 gates (`make attiny202-test` and
    `make attiny202-test-target`), both PIC10F322 gates (`make pic10f322-test` and
    `make pic10f322-test-target-variants`), both PIC10F320 gates (`make pic10f320-test` and
@@ -135,12 +123,17 @@ validation suite — backs these binaries, through two mechanisms:
    qualification verifier enforces a 1-hour floor for `express` exactly as it
    enforces 24 hours for `production`, and rejects an `express` record whose
    manifest omits the banner. Releases `v0.9.0` through `v0.9.5` predate
-   `QUALIFICATION` and use the manifest/evidence contract recorded in their own
-   tags; they must not be judged against the later `QUALIFICATION` inventories.
-   Because the gates are long-running, release orchestration
+   `QUALIFICATION` entirely and carry the manifest/evidence contract of their own
+   tags instead. Because the gates are long-running, release orchestration
    rechecks both the recorded source `HEAD` and worktree cleanliness immediately
    before staging artifacts. Only explicitly non-publishable dry runs may proceed
    from a dirty tree.
+
+   From `v0.9.10`, PIC12F675 release qualification runs its pre-hardware and
+   target aggregates in one Make graph against one retained matrix. The release
+   evidence keeps the combined aggregate log and the complete twelve-artifact
+   matrix JSON; `QUALIFICATION` and `MANIFEST.md` bind that JSON's digest to the
+   final three shipped HEX files and their `SHA256SUMS` entries.
 
    The complete `make test-long` transcript is transient diagnostic output, not
    required release evidence. Future releases produced by this pipeline retain
@@ -150,16 +143,12 @@ validation suite — backs these binaries, through two mechanisms:
    is not a release asset or a dependency of the qualification claim.
 
    `v0.9.10` is tagged but was never published, and no GitHub release exists for
-   it. Its tag CI reproduced every image bit-for-bit and then failed while
-   re-running the gates on the clean runner: the release job's environment
-   carried an ATtiny device-pack version variable, and the Makefile refuses a
-   release configuration under any unreviewed build input in the environment.
-   Publication never ran. The signed tag and `release/v0.9.10/` are retained as
+   it. Its tag CI reproduced every image bit-for-bit and then failed re-running
+   the gates on the clean runner; [`CHANGELOG.md`](../CHANGELOG.md) records the
+   cause under `0.9.11`. The signed tag and `release/v0.9.10/` are retained as
    the record of that cut rather than rewritten, so its `CHANGELOG.md` section
-   and comparison link stay resolvable. Its retained `test-long` summary is the
-   selected terminal output of that aggregate run and carries no machine-readable
-   result record; judge `v0.9.10` by the evidence contract recorded in its own
-   tag.
+   and comparison link stay resolvable. Its retained `test-long` summary carries
+   no machine-readable result record.
 
    The signed version tag points to a dedicated release-artifact commit. Tag CI
    fetches the exact remote annotated-tag object and verifies its OpenPGP
@@ -199,19 +188,17 @@ A release is not one commit. Four steps produce it, in this order, and the
 separation between the first and the third is enforced rather than conventional.
 
 1. **Source finalization.** One ordinary commit on `main` finalizes
-   [`CHANGELOG.md`](../CHANGELOG.md) and the bounded current-release
-   declarations — this file and [`TODO.md`](../TODO.md) — for `vX.Y.Z`. This
-   commit is the **source contract**, and it is the commit the qualification
-   run measures. The designated set is
-   `scripts/release-documentation.sh`'s `current_documents`, which is what step
-   0 actually validates; two PIC10F320 documents that used to carry a
-   declaration were folded into `DESIGN_DOCUMENTATION.adoc` and left it.
+   [`CHANGELOG.md`](../CHANGELOG.md) and the bounded current-release block above
+   for `vX.Y.Z`. This commit is the **source contract**, and it is the commit the
+   qualification run measures. That block is the whole designated set --
+   `scripts/release-documentation.sh`'s `current_documents` -- and step 0
+   validates it and rejects a bounded block written into any other document.
 2. **Production staging.** `scripts/make-release.sh vX.Y.Z` builds every image,
    runs every gate, soaks every combination for 24 hours (1 hour under
    `--express`, recorded as such), and stages
    `release/vX.Y.Z/`. It refuses to start unless step 1 is already committed,
    and it stages without committing anything. Before handing off it re-checks
-   the bounded declarations against the inventory it actually staged, so "21
+   the bounded declaration against the inventory it actually staged, so "21
    images; 18 soak combinations" is verified against 21 files and 18 soak
    records rather than against the Makefile that predicted them.
 3. **Artifact commit.** One commit whose sole parent is the qualified source
@@ -234,8 +221,8 @@ qualified, the **artifact commit** is what the tag publishes.
 contract while `release/vX.Y.Z/` is unpublished. That window is intended and is
 bounded by the qualification run. Two things keep it honest:
 
-- The bounded declarations are written to be true throughout it. They state the
-  source contract, and where they name the release directory they carry a fixed
+- The bounded declaration is written to be true throughout it. It states the
+  source contract, and where it names the release directory it carries a fixed
   pre-tag transition line recording that the release cut creates it. Release
   preflight rejects a declaration that names any *other* release directory this
   tree does not contain.
@@ -296,15 +283,9 @@ a raw `pk2cmd` or `ipecmd` writer command. Real preservation and actual ipecmd
 operation remain hardware-unvalidated until the `1.x.y` bench pass; see
 `TODO.md` `T3-pic12f675-bench`, items 1 and 2.
 
-There are **two** guarded paths, and which one applies depends on what you have.
-Programming a downloaded release needs neither a source checkout nor the
-firmware development toolchain: from `v0.9.10` every release bundle also ships
-`flash-pic12f675.py`, listed in that release's signed `SHA256SUMS` like an
-image, and it runs the same transaction using only Python 3 and MPLAB X 6.20
-`ipecmd`. The `make pic12f675-release-program` transaction further down is the
-developer and release-provenance path: it rebuilds the image privately and binds
-it to a signed tag, which is why it needs the toolchain, a clean tagged checkout,
-and a pk2cmd reader.
+Both guarded routes -- the release helper for a downloaded image, and the
+source-tree transaction that binds a private build to a signed tag -- are under
+"Flash a chip" below.
 
 ### Renamed in v0.9.8 (`v0.9.7` and earlier used different names)
 
@@ -344,22 +325,13 @@ the published signatures. Use this table to map an old name to its replacement.
 | `bypass_mcu_tq2-relay_pic10f320.hex` | `bypass-pic10f320-tq2_l2_5v_relay.hex` |
 
 where old `<v>` `cd4053`/`mute`/`relay` maps to `<stage>`
-`cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`. The rename itself does not
-change image contents. Seventeen `v0.9.8` images are therefore required to be
-bit-identical to their `v0.9.7` counterparts. The one exception is the
-PIC10F320 relay image, which also adds the `v0.9.8` idle coil-latch safety
-correction and is required to differ:
-
-`bypass-pic10f320-tq2_l2_5v_relay.hex` reasserts both relay-coil outputs low on
-every serviced iteration. The exact new bytes remain pinned by the PIC10F320
-expected-image manifest and the release checksum manifest.
-
-The historical release retains the checked result in
-`release/v0.9.8/RENAME_IDENTITY.md`, listing both digests and the verdict for
-every image. Its tag-local one-shot verifier required exactly 17 identities and
-the named relay-image difference, with no missing, added, or other changed
-image. The signed `v0.9.8` tag preserves that verifier and contract; current
-releases use the standing canonical reproduction and expected-image checks.
+`cd4053_simple`/`cd4053_with_mute`/`tq2_l2_5v_relay`. Renaming does not change
+image contents, so every `v0.9.8` image is bit-identical to its `v0.9.7`
+counterpart except one: `bypass-pic10f320-tq2_l2_5v_relay.hex` also carries the
+`v0.9.8` idle coil-latch safety correction, reasserting both relay-coil outputs
+low on every serviced iteration. `release/v0.9.8/RENAME_IDENTITY.md` retains the
+checked digests and the verdict for every image; current releases use the
+standing canonical reproduction and expected-image checks instead.
 
 **The build commands moved too.** Every make goal that acts on one part now
 carries that part's name, in the same vocabulary as the image field, so an
@@ -421,26 +393,18 @@ as one ordered transaction — it builds and validates the image first, then
 writes the fuses, then flashes, so a failed build reaches no programmer at all:
 `make attiny13a-program VARIANT=<variant>` (ATtiny13a),
 `make attiny85-program VARIANT=<variant>` (ATtiny85), and so on. `<variant>` is
-the output-stage name from the table above — `cd4053_simple`,
-`cd4053_with_mute` or `tq2_l2_5v_relay` — the same string that appears in the
-image filename. (Through `v0.9.7` these were spelled `cd4053`, `mute` and
-`relay`, and the PIC10F320 lane used `cd4053-simple`, `cd4053-mute` and
-`tq2-relay`; all six spellings were retired in `v0.9.8`.)
+the output-stage name from the table above.
 
-**The PIC10F32x parts carry their CONFIG word inside the HEX**, so writing the
-HEX configures the device and there is no separate fuse step.
-`make pic10f322-program VARIANT=<variant>` is the source-tree equivalent of the
-programmer command; the PIC10F320 lane has no such convenience goal, so flash
+**The PIC10F32x parts need no fuse step**, so
+`make pic10f322-program VARIANT=<variant>` is the whole source-tree equivalent of
+the programmer command; the PIC10F320 lane has no such convenience goal, so flash
 that part with the command `MANIFEST.md` gives for its image.
 
 **PIC12F675 is not a raw write target, on either route**, and the board must be
 externally powered for both. Programming a downloaded image needs no source
 checkout and no build toolchain: pass the release HEX to this release's
 `flash-pic12f675.py`, never to a programmer directly, and follow the
-transaction in [`FLASHING.md`](../FLASHING.md). The helper is identified by its
-released name and its bytes in the signed `SHA256SUMS`, not by where the file
-sits, so a byte-identical copy works from anywhere and an edited or renamed one
-is refused wherever it lives.
+transaction in [`FLASHING.md`](../FLASHING.md).
 The helper's `ipecmd` route is published and software-tested, but it is not
 hardware-qualified.
 

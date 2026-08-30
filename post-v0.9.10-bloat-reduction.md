@@ -1735,7 +1735,7 @@ of ordinary test changes and can turn prose formatting into a tested interface.
 
 ## BR-TODO-01 - Reduce TODO.md to an actionable registry
 
-**Status:** DONE `<commit>`
+**Status:** DONE `6fa9a1b`
 
 **Current size:** 669 lines
 
@@ -1865,7 +1865,7 @@ BR-COMMENT-01, which owns comment text.
 
 ## BR-RELEASEDOC-01 - Reduce release/README.md to release policy and navigation
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Current size:** 641 lines
 
@@ -1892,6 +1892,53 @@ BR-COMMENT-01, which owns comment text.
 - Release policy remains auditable.
 - Operator commands have one authority.
 - Historical errata remain visible without being mistaken for current process.
+
+**Work:**
+
+- [x] State the PIC12F675 two-route story once instead of three times.
+- [x] Drop the hand-maintained per-release evidence inventory.
+- [x] Reduce the v0.9.8 rename machinery to the mapping a reader still needs.
+- [x] Send the general flashing procedure to `FLASHING.md` and keep only what the
+  release process adds.
+- [x] Move the maintainer-facing qualification topology out of the front matter.
+- [x] Check the published release procedure against the tree it describes.
+
+**Result:** 629 -> 593 lines. Two of the five *Move or generate* bullets were
+answered by decisions taken after this item was written, and were recorded rather
+than acted on:
+
+- *Current release contract block to canonical release data.* BR-STATE-01 went
+  the other way and made `release/README.md` the single live bearer, enforced by
+  `_release_reject_extra_current_blocks()`. Moving the block now would reopen the
+  duplication that item closed.
+- *Current exact programming commands to generated per-release guidance.* The
+  `pic12f675-release-program` and `pic12f675-finalize` blocks cannot leave:
+  `release_validate_pic12f675_finalization()` names `release/README.md` as the
+  sole live home of the guarded transaction and fails if the recovery example is
+  deleted from it. `Makefile:7760` states the same requirement as a release gate.
+  The *general* per-part procedure did move to `FLASHING.md`, which is the half
+  of this bullet that was still open.
+
+The reduction itself was concentrated in one fact told three times. The head
+paragraph, the PIC12F675 block under `Which image do I want?`, and `Flash a chip`
+each explained that there are two guarded routes, which one needs a toolchain,
+and what the helper is. `Flash a chip` is where the commands live and where the
+gates anchor, so the other two now point at it.
+
+**Found:** step 1 of `How a release is sequenced` told a maintainer to finalize
+the bounded current-release declarations in "this file and `TODO.md`". TODO.md
+has not carried one since BR-STATE-01 (`d799c14`) made the declaration singular,
+so the published release procedure named a file a maintainer would search in
+vain. It now names the one block and says step 0 rejects a second. Two nearby
+plural readings ("the bounded declarations") were corrected with it.
+
+**Kept whole and why:** the four errata and safety-warning sections, including
+the 24-hour-soak wording erratum and its five manifest links, because they are
+the historical record this item is explicitly told to preserve; the enumeration
+of the gates a release runs, checked against `scripts/make-release.sh` and found
+accurate, because "release policy remains auditable" is an acceptance condition;
+and the `RENAME_IDENTITY.md` pointer, because the identity contract itself is
+retained by the release directory that ran it.
 
 ## BR-COMMENT-01 - Trim migration archaeology from live Make/script comments
 
@@ -2914,9 +2961,9 @@ dependencies and acceptance criteria.
 | BR-DOC-04 | Classify feature safety records | DONE `8180569` |
 | BR-README-01 | Reduce root README | DONE `d7104c9` |
 | BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
-| BR-TODO-01 | Reduce TODO to registry | DONE `<commit>` |
+| BR-TODO-01 | Reduce TODO to registry | DONE `6fa9a1b` |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
-| BR-RELEASEDOC-01 | Reduce release README | TODO |
+| BR-RELEASEDOC-01 | Reduce release README | DONE `<commit>` |
 | BR-COMMENT-01 | Trim live historical comments | TODO |
 | BR-STATE-01 | Remove repeated release declarations | DONE `d799c14` |
 | BR-STATE-02 | Make development/release state explicit | TODO |
