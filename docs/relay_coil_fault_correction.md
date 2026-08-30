@@ -1,5 +1,22 @@
 # Relay coil fault policy (fail-safe resynchronization)
 
+> **Scope.** This is the F1 decision and safety case: the hazard, the model it
+> replaced and why, the alternative that was refused, the evidence each
+> substrate can and cannot supply, and the residual risk that remains. It is
+> not a second copy of anything. The normative design of the escalation --
+> per-shell detection, the single masked coil write, the AVR-XT and PIC12F675
+> emergency pin sequences, and the parked-GP4 rule -- is in "Failsafe
+> Mechanisms" in
+> [`DESIGN_DOCUMENTATION.adoc`](../DESIGN_DOCUMENTATION.adoc); the shipped code
+> is in `src/`; which lane runs where is
+> [`test/README.md`](../test/README.md); and exact per-image figures are
+> release evidence.
+>
+> **Claim boundary.** Everything below is simulator, host-harness and mutation
+> evidence. No part of it is bench evidence: no simulator models an armature,
+> and whether a given relay moves for a given pulse is a hardware question --
+> see [HARDWARE_VALIDATION_LOG.md](../HARDWARE_VALIDATION_LOG.md).
+
 ## Policy
 
 **An unexpectedly energized relay coil is a fault. The firmware de-energizes
@@ -91,55 +108,27 @@ final-low coils are *not* recovery:
 
 1. **De-energization.** `hw_force_wdt_reset()` runs its emergency output path
    *before* it disables interrupts and spins, so a fault cannot hold a coil
-   energized for the watchdog period. The implementation clears both coils in
-   one masked output write on **every** shell: the four modular ones reach it
-   through the relay driver's
-   `hw_pin_mask_set_low()`, and PIC10F320, which links no driver, writes the same
-   constant mask itself. A per-bit clear of RESET and then SET would settle
-   identically and differ in the transient: with both coil bits high, the second
-   coil stays driven for the whole of the first write, on the one path whose
-   purpose is to stop driving them. That is asserted rather than assumed - see
-   *The PIC10F320 exception* below. On AVR-XT and PIC12F675 the masked clear is
-   deliberately sequenced between shell-specific pin teardown and safe
-   output-direction restoration.
+   energized for the watchdog period.
 2. **Resynchronization.** The watchdog reset re-runs `init()`, whose
    `hw_set_bypass_state()` drives a complete 12 ms RESET-coil actuation
    (`TQ2_L2_5V_PULSE_MS`, 3× the datasheet minimum). *That* is what puts the
    physical relay back in agreement with the logical state and the LED. The
    device comes up in BYPASS with the LED dark.
 
-### Physical-pin emergency paths
+How each shell performs half 1 -- the single masked write, the replay hazard
+that forbids a per-bit clear, and the MCU-specific pin teardown AVR-XT and
+PIC12F675 wrap around it -- is specified in "Failsafe Mechanisms". This file
+records why the halves are separated, and what each one is tested against.
 
-The ordinary relay driver can clear output intent, but it cannot know whether an
-MCU peripheral has taken ownership of the pad or whether an output-polarity bit
-has inverted the meaning of that intent. The two affected shells therefore wrap
-the shared clear:
+### The PIC12F675 comparator neighborhood
 
-- **AVR-XT:** clear each coil pin's pull-up and input-sense fields while
-  preserving its current inversion, disconnect both output drivers, clear the
-  remaining `PINnCTRL` inversion, clear both `PORTA.OUT` latch bits, then restore
-  output direction. This prevents a pull-up from becoming active during the
-  high-impedance interval and prevents a stale latch from being exposed while
-  polarity is restored.
-- **PIC12F675:** clear the coil weak-pull-up latches, make both coil pins inputs,
-  disable the ADC/analog selections/comparator, canonicalize parked GP4 in the
-  shadow, clear the SRAM shadow coil bits and write GPIO once, then restore
-  output direction. In particular, comparator modes 011 and 101 route `COUT`
-  onto GP2; GPIO writes cannot force that pad low until `CMCON` returns
-  ownership to GPIO.
-
-  The parked-GP4 step is part of the *same* single write, not an extra one. Having
-  no `LATx`, this shell publishes the whole shadow byte on every output change, so
-  the one write that de-energizes the coils also drives every other output bit —
-  including a GP4 intent bit an upset flipped low to high, which until that moment
-  was inert SRAM. Without the canonicalization the escalation path would itself
-  create a driven-high GP4 and hold it for the whole watchdog period, on a pin the
-  board contract permits only while it is low
-  (`src/bypass_pins_pic12f675.h`). A second single-pin write is *not* the fix: two
-  sequential whole-port writes can replay the other corrupt coil bit between them,
-  which is what the one-write guarantee exists to prevent. The CD4053 variants have
-  an empty `hw_outputs_reassert_safe()` and never reach this path, so they need no
-  equivalent.
+The emergency paths exist because a low output latch is not by itself a
+physical-pad guarantee when pin configuration is corrupt: AVR-XT can invert a
+coil pad, and PIC12F675 can route comparator `COUT` onto GP2, outside GPIO
+ownership. "Failsafe Mechanisms" specifies both sequences and the parked-GP4
+rule the PIC12F675 one carries. What is evidence rather than design, and so
+belongs here, is how far the comparator hazard reaches and what the simulator
+may honestly be asked about it.
 
 The PIC12F675 comparator scope is the complete single-bit neighborhood of the
 required off mode. DS41190G Figure 6-2 names three of the eight modes "with
@@ -178,13 +167,9 @@ survive arbitrary CPU, bus, or package failure.
 
 ### Detection, per shell
 
-| Shell | What the gate compares | Coil coverage |
-| --- | --- | --- |
-| `bypass_mcu_pic10f322.c` | complete `LATA` output latch vs. expected | full |
-| `bypass_mcu_avr_classic.c` | complete `PORTB` output latch vs. expected | full |
-| `bypass_mcu_avr_xt.c` | complete `PORTA.OUT` latch vs. expected | full |
-| `bypass_mcu_pic12f675.c` | shadow vs. expected **and** port-follows-shadow | full, both views |
-| `bypass_mcu_pic10f320.c` | exact `TRISA`, plus the two `LATA` coil bits | **coil-only (see below)** |
+What each shell's gate compares, and how much of the coil guarantee that buys
+it, is specified in "Failsafe Mechanisms". Two consequences of those differences
+belong to this policy rather than to the design, and are recorded here.
 
 The four modular shells needed no new detection code: an energized coil is an
 output-latch mismatch, which `hw_is_sanity_check_failed()` already rejects.
@@ -199,56 +184,50 @@ does a non-coil port divergence that used to be silently rewritten.
 
 ### The PIC10F320 exception
 
-PIC10F320 has 256 words and no room for the modular shells' complete
-output-latch comparison; that gap was accepted when the part was added and is
-unchanged. What the relay variant does buy is the one part of the latch that
-carries a physical hazard: `hw_output_pins_intact()` OR-folds
-`LATA & (RELAY_RESET | RELAY_SET)` into its exact-`TRISA` check, under
-`#if defined(OUTPUT_TQ2_RELAY)` so the CD4053 variants pay nothing (`LATA` is
-volatile — a masked-by-zero read would still be emitted). `hw_force_wdt_reset()`
-calls `set_relay_coils_low()` directly, since this shell links no output driver.
+The 320's coil-only gate, and the parity it does and does not give the part, are
+likewise specified there. Two details of it are this policy's cost and this
+policy's evidence, and belong here.
 
-That direct call is a single constant-mask `LATA` write, matching half 1 above.
-It cleared the two bits separately until `v0.9.10`; folding them into one write
-freed six program words and a return-stack level on the part with the least of
-both. Both fault lanes now observe the
-**write sequence** and not only the settled result: injecting both coil latches
-and finding one still driven after the clear began fails the host lane
-(`partial_clear_coils`) and the gpsim lane (instruction-granular sampling of
-`LATA` and modeled `PORTA`). With only one coil energized there is nothing for
-either to see — a per-bit clear would delay the useful de-energization by one
-write without passing through a distinct state — so the both-coils injection is
-where the contract is pinned.
+The coil term is compiled under `#if defined(OUTPUT_TQ2_RELAY)`, so the CD4053
+variants pay nothing for it (`LATA` is volatile — a masked-by-zero read would
+still be emitted).
 
-So the 320 has **full parity on the coil guarantee**, in the transient as well as
-the settled state, and retains its documented gap elsewhere: an LED or spare output-latch upset still goes undetected on that
-part until the next accepted actuation rewrites it. That exception is now
-*asserted*, not merely described — its gpsim adapter injects the RA0 LED latch
-and requires **no** reset, so the gap cannot widen unnoticed (the coil cases
-would fail) and cannot silently close either (this case would fail, forcing the
-documentation to be updated alongside the firmware).
+The clear itself cleared the two bits separately until `v0.9.10`; folding them
+into one write freed six program words and a return-stack level on the part with
+the least of both. Both fault lanes now observe the **write sequence** and not
+only the settled result: injecting both coil latches and finding one still
+driven after the clear began fails the host lane (`partial_clear_coils`) and the
+gpsim lane (instruction-granular sampling of `LATA` and modeled `PORTA`). With
+only one coil energized there is nothing for either to see — a per-bit clear
+would delay the useful de-energization by one write without passing through a
+distinct state — so the both-coils injection is where the contract is pinned.
+
+The part's remaining gap is *asserted*, not merely described. Its gpsim adapter
+injects the RA0 LED latch and requires **no** reset, so the gap cannot widen
+unnoticed (the coil cases would fail) and cannot silently close either (this
+case would fail, forcing the documentation to be updated alongside the
+firmware).
 
 ## Exclusions
 
 These are properties of the design, not gaps in the tests, and they are
-unchanged by this policy.
+unchanged by this policy. The first and fourth are stated as guarantee
+boundaries in "Failsafe Mechanisms"; they are listed here because a
+residual-risk list with holes in it is not reviewable.
 
-- **The blocking actuation sequence.** From the pre-pulse clear through the
-  12 ms delay to the post-pulse clear, no sanity gate runs. An upset there can
-  shorten the intended pulse or energize the inactive coil or both coils. The
-  normal post-pulse clear commands both coils low if execution completes, but
-  missed or spurious relay actuation, audio disruption, and an external output
-  path that does not accept that command remain residual risks. This window is
-  *characterized* by the shipping-source host harness (below), not guarded.
+- **The blocking actuation sequence.** No sanity gate runs from the pre-pulse
+  clear through the 12 ms delay to the post-pulse clear, and an upset inside
+  that window is a residual risk rather than a guarded one. What this policy
+  adds is that the window is *characterized* by the shipping-source host
+  harness (below) rather than merely declared.
 - **Instruction phase.** The fault tests inject at reviewed, deterministic
   settled seams. They do not sweep every instruction boundary.
 - **Detection latency.** An upset arriving just after a gate stays energized
   until the next gate — one tick, 1 ms (1.024 ms on PIC12F675). That is the same
   exposure the old loop-top re-assert had, and it is bounded by the tick, not by
-  the watchdog period.
+  the watchdog period. Trading the re-assert away therefore cost no latency.
 - **A stuck external pin.** Only PIC12F675 compares physical port against
-  independent shadow intent. The other shells guard writable state; they do not
-  claim to detect an output that refuses to follow it.
+  independent shadow intent; the other shells guard writable state.
 - **Relay mechanics.** No simulator models an armature. Every measurement below
   is of the *electrical pulse the firmware drives*. Whether a given relay,
   at a given voltage and temperature, moves for a below-minimum pulse — or fails
@@ -278,13 +257,16 @@ BYPASS) and ENGAGED with an unintended RESET (the mirror). Both must converge on
 BYPASS. Pin-configuration fixtures use the one settled state needed to isolate
 their register and physical-pad mechanism.
 
-Measured recovery pulses at the reviewed seam, against a 12 ms design pulse:
-10.8 ms (PIC10F322), 11.2 ms (PIC10F320), 11.3 ms (PIC12F675). The shortfall is
-the harness's 1 ms reset-detection step, not the firmware's. The tinyx5 case
-times the same pulse from pin edges and requires only that it clear the 4 ms
-minimum; the separate width oracle, which measures the *design* pulse rather
-than a recovery, reports 13.5 ms on the classic AVR, where the 1 ms tick ISR
-preempts the busy-wait.
+Each PIC lane requires the measured recovery pulse to clear the relay's 4 ms
+datasheet minimum against a 12 ms design pulse, and each reports what it
+measured; the reported figure is short of 12 ms by the harness's own 1 ms
+reset-detection step, not by anything the firmware does. At `v0.9.10` those
+reports were 10.8 ms (PIC10F322), 11.2 ms (PIC10F320) and 11.3 ms (PIC12F675) --
+recorded here to fix the size of that harness artifact, not as a current
+measurement. The tinyx5 case times the same pulse from pin edges against the
+same 4 ms minimum. The separate width oracle measures the *design* pulse rather
+than a recovery, and reports a longer one on the classic AVR, where the 1 ms
+tick ISR preempts the busy-wait.
 
 ### Mutation resistance
 
@@ -345,22 +327,18 @@ energy path open; it is the part of the problem firmware cannot reach.
 
 ### PIC12F675 whole-port write
 
-The classic mid-range core has **no `LATx` register**, so the shell keeps an SRAM
-`gpio_shadow_` and writes `GPIO = gpio_shadow_` — the entire port byte — on every
-output change. The relay driver's masked clear therefore removes both coil bits
-from the shadow before its single `GPIO = gpio_shadow_` assignment. That ordering
-is load-bearing and unchanged by this policy: two sequential single-pin clears
-could replay the other coil's corrupt shadow bit onto the physical port between
-them. `test_relay_reassert_atomic_clear()` requires exactly one whole-port write
-with no intermediate high, and kills a mutation back to the sequential form.
+Having no `LATx`, this shell publishes the whole port byte on every output
+change. "Failsafe Mechanisms" specifies what that forces: one masked write with
+both coil bits already cleared from the shadow, and parked GP4 canonicalized in
+the same write rather than a second one. Both halves of that rule are asserted,
+and the assertions are what this section records.
 
-That same write has a second obligation, and it points the other way. Because the
-write publishes the whole shadow, every safety-constrained output must already be
-low in the shadow it publishes — the two coils *and* parked GP4. The emergency
-path therefore clears GP4's intent (shadow only, no write of its own) before
-calling the driver's masked clear. Two oracles pin it, both **before** the
-watchdog spin, because the reset is what ends the unsafe interval and so cannot
-witness it:
+The single-write half: `test_relay_reassert_atomic_clear()` requires exactly one
+whole-port write with no intermediate high, and kills a mutation back to the
+sequential form.
+
+The parked-GP4 half: two oracles pin it, both **before** the watchdog spin,
+because the reset is what ends the unsafe interval and so cannot witness it:
 
 - the host shipping-source lane's `FWI_SHADOW_GP4_HIGH` relay case reads the
   modeled pin at the point the harness escapes the spin, folded into the single
@@ -373,23 +351,6 @@ witness it:
 The mutation harness's `host:parked-output` signature removes only GP4 from the
 canonicalization: reset entry and both coil assertions stay green, and only the
 pre-spin pad observation kills it.
-
-## Test-harness note: faithful footswitch on the AVR classic (simavr)
-
-The classic-AVR harness accounts for a **simavr fidelity gap**, not a firmware
-behavior. The masked clear is a full-`PORTB` read-modify-write, so it re-asserts
-PB0's internal pull-up. simavr, left alone, lets that write override the
-externally driven footswitch level, so presses stopped registering. On real
-hardware this cannot happen — a footswitch closed to ground overrides the weak
-internal pull-up, and re-writing an already-enabled pull-up is a no-op.
-
-The harness drives the footswitch as a **persistent external pull** via simavr's
-`AVR_IOCTL_IOPORT_SET_EXTERNAL`, <!-- name-contract: exempt (AVR_IOCTL_IOPORT_SET_EXTERNAL is a simavr C macro, not a make variable) --> plus an immediate `avr_raise_irq`
-for zero-latency edges (`footsw_set` in `test/avr/test_sim.c`). The external pull
-survives PORT writes (the switch beats the pull-up, as on hardware); the raise
-avoids the one-tick input latency the persistent-pull-alone path introduced. The
-AVR-XT (yasimavr) already models this faithfully (`set_external_state`), and the
-PIC gpsim/shadow harnesses were never affected.
 
 ## Related
 

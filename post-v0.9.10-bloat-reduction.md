@@ -977,7 +977,7 @@ user-owned and belong to BR-PIC-05; the replacement target is
 
 ## BR-PIC-04 - Consolidate PIC12F675 feasibility into current authorities
 
-**Status:** DONE `<commit>`
+**Status:** DONE `f968de7`
 
 **Depends on:** BR-PIC-01, BR-RES-01, BR-FLASH-01
 
@@ -1133,7 +1133,7 @@ left for BR-FINAL-01:
 
 ## BR-PIC-05 - Update firmware-source documentation references
 
-**Status:** DONE `<commit>`
+**Status:** DONE `f968de7`
 
 **Depends on:** BR-PIC-02, BR-PIC-03, BR-PIC-04
 
@@ -1457,12 +1457,12 @@ the cited record exists; it is not a current authority.
 
 ## BR-DOC-04 - Decide the fate of feature-specific design records
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Candidates:**
 
-- `docs/context_seu_detection.md`, 336 lines
-- `docs/relay_coil_fault_correction.md`, 398 lines
+- `docs/context_seu_detection.md`, 334 lines
+- `docs/relay_coil_fault_correction.md`, 407 lines
 
 These are not completed merge plans. They contain current assurance and safety
 rationale, so deletion is not automatic.
@@ -1479,10 +1479,84 @@ rationale, so deletion is not automatic.
 
 **Work:**
 
-- [ ] Classify each file as live safety case, concise ADR candidate, or material
+- [x] Classify each file as live safety case, concise ADR candidate, or material
   to merge into the design document.
-- [ ] If retained, add a short scope banner and remove duplicated current data.
-- [ ] If merged, delete the original after reference migration.
+- [x] If retained, add a short scope banner and remove duplicated current data.
+- [x] If merged, delete the original after reference migration.
+
+**Result:** Both are live safety cases, and both are retained. Neither is a
+summary of the design document; each is the reviewable argument behind one of
+its requirements, and the tree treats them that way. `src/bypass_hw_iface.h` and
+nine test files cite the relay policy as the rationale for the contract they
+enforce; the `Makefile`'s `BYPASS_CTX_CHECK_FLAG` comment, `MISRA_COMPLIANCE.md`
+and four PIC fault-test files cite the F2 record the same way; and
+`DESIGN_DOCUMENTATION.adoc`'s PIC10F322 resource section names that record as
+the owner of the fold's measured alternative spellings. Deleting either would
+leave live code pointing at nothing, and merging either would put an argument
+inside a specification.
+
+Each gained a two-part opening banner: a **Scope** paragraph naming the four
+owners it does not duplicate -- "Failsafe Mechanisms" in
+`DESIGN_DOCUMENTATION.adoc` for the normative design, `src/` for the shipped
+code, `test/README.md` for which lane runs where, and release evidence for
+per-image figures -- and a **Claim boundary** paragraph. F2's claim boundary was
+already there and was condensed; F1 had none, and now states that everything in
+it is simulator, host-harness and mutation evidence, and that no simulator
+models an armature.
+
+Removed from F2 as duplication of `src/`: the shipped declaration and definition
+of `debounce_ctx_check_word()` together with the instruction on where to place
+it, the two "essential shape" code blocks restating the shell transaction, and
+the numbered per-tick step list. Removed as duplication of an owner: the
+`Enablement` section, since the `Makefile` comment that owns the flag already
+explains it and points here, and the five-row budget/gate table, which is a
+strict subset of the design document's seven-row Flash capacity table and names
+the enforcing goal where that one also names the Makefile variable. What each
+family's transaction does is now cited; **why the two families place its
+boundaries differently** is what the file keeps.
+
+Removed from F1 as duplication of "Failsafe Mechanisms": the two emergency
+pin-sequence step lists, the per-shell detection table, the single-masked-write
+and parked-GP4 mechanism paragraphs, and the blocking-actuation-window
+residual-risk paragraph, which was a near-verbatim second copy.
+
+**Moved:** the classic-AVR simavr footswitch fidelity note, 17 lines of test
+mechanics in the relay document, is now `test/README.md`'s "Simulator fidelity:
+the classic-AVR footswitch" under the Classic AVR validation layers. Its
+name-contract exemption marker moved with it and was rewritten to the own-line
+form, which exempts the following line as well as its own. (Spelled without the
+colon here on purpose: the marker's own syntax, written out in prose, is read by
+the gate as a marker suppressing nothing.)
+
+**Current figures bound or dropped.** F2's acceptance-criteria item 5 said
+PIC10F322 "remains the binding capacity case at 502/512 words for the mute
+variant": the claim is kept and the number is gone. Its PIC10F320 note said "the
+current one is 242/256" and now says the image measured that at `v0.9.10`. F1's
+three measured recovery pulses are bound to `v0.9.10` and reframed as fixing the
+size of the harness's own 1 ms reset-detection artifact rather than as current
+measurements; each lane's actual requirement -- clear the relay's 4 ms datasheet
+minimum -- is what the paragraph now leads with, and the 13.5 ms design-pulse
+figure it was contrasted against is dropped in favour of that requirement.
+
+**Retained deliberately.** F1's residual-risk list keeps all five entries even
+though two of them restate guarantee boundaries the design document also states:
+an exclusions list with holes in it is not reviewable, which is the whole point
+of keeping a separate safety case. Each is reduced to the claim plus what this
+policy adds, and the list says which two are specified elsewhere. Also retained
+in full: both Decisions tables, F2's priced alternatives and flash margin note,
+F1's comparator-mode evidence table with its DS41190G Figure 6-2 and Section 6.4
+citations and the two gpsim model limits that bound it, both harness/oracle
+tables, and both mutation-resistance lists. These are argument and evidence, not
+requirement.
+
+**Sizes:** F2 334 -> 235, F1 407 -> 368, `test/README.md` 642 -> 661. Net -119
+lines, and three fewer maintained copies of a design requirement.
+
+**Reference disposition:** `test/test_resource_tables.py`'s docstring names F2's
+"Resource qualification" table among the copies that gate once kept
+synchronized. It is written in the past tense, describing why the gate no longer
+reads documentation at all, so it stays accurate with the table gone and was not
+edited.
 
 **Acceptance:**
 
@@ -2652,15 +2726,15 @@ dependencies and acceptance criteria.
 | BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
 | BR-PIC-02 | Merge PIC10F322 phase notes | DONE `3a3b661` |
 | BR-PIC-03 | Consolidate PIC10F320 documents | DONE `b8b4af1` |
-| BR-PIC-04 | Consolidate PIC12F675 feasibility | DONE `<commit>` |
-| BR-PIC-05 | Update firmware document references | DONE `<commit>` |
+| BR-PIC-04 | Consolidate PIC12F675 feasibility | DONE `f968de7` |
+| BR-PIC-05 | Update firmware document references | DONE `f968de7` |
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
 | BR-FLASH-02 | Generate release programming guide | TODO |
 | BR-FLASH-03 | Delete flashing proposal journal | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |
-| BR-DOC-04 | Classify feature safety records | TODO |
+| BR-DOC-04 | Classify feature safety records | DONE `<commit>` |
 | BR-README-01 | Reduce root README | TODO |
 | BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
 | BR-TODO-01 | Reduce TODO to registry | TODO |

@@ -148,6 +148,25 @@ full duration in release qualification.
 | Static frame bound | `test-stack-bound` | Every fresh `-fstack-usage` frame in the shared core and drivers fits its reviewed byte budget. This is a per-function frame limit, not a whole call-chain high-water measurement. | avr-gcc + host checker |
 | Flash budget | `test-flash-budget`; `test-flash-budget-regression` | Every Classic AVR variant's measured image size stays inside its configured percentage of the part's flash, and the complete variant matrix is required before any measurement is accepted. The fake-size regression proves missing, malformed, and partial measurements fail rather than passing unmeasured. | avr-size; host fake tool |
 
+### Simulator fidelity: the classic-AVR footswitch
+
+One harness workaround here answers a **simavr fidelity gap**, not a firmware
+behavior. The relay coil clear is a full-`PORTB` read-modify-write, so it
+re-asserts PB0's internal pull-up. simavr, left alone, lets that write override
+the externally driven footswitch level, and presses stop registering. On real
+hardware this cannot happen: a footswitch closed to ground overrides the weak
+internal pull-up, and re-writing an already-enabled pull-up is a no-op.
+
+`footsw_set` in `test/avr/test_sim.c` therefore drives the footswitch as a
+persistent external pull through simavr's
+<!-- name-contract: exempt (AVR_IOCTL_IOPORT_SET_EXTERNAL is a simavr C macro, not a make variable) -->
+`AVR_IOCTL_IOPORT_SET_EXTERNAL`, plus an immediate `avr_raise_irq` for
+zero-latency edges. The external pull survives PORT writes -- the switch beats
+the pull-up, as on hardware -- and the raise avoids the one-tick input latency
+the persistent-pull-alone path introduced. The AVR-XT (yasimavr) already models
+this faithfully (`set_external_state`), and the PIC gpsim and shadow harnesses
+were never affected.
+
 ## ATtiny202 (AVR-XT) target validation layers
 
 The AVR-XT lane needs two inputs a normal AVR machine does not have: Microchip's

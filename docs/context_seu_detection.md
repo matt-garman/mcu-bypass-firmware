@@ -1,17 +1,27 @@
 # In-range debounce-context SEU detection (F2)
 
-> **Design and evidence record.** The repository owner authored the firmware
-> changes. The evidence below is a complete local run on a fully provisioned
-> host — target toolchains, simulators and the mutation suite included — and is
-> reported as observed. *Retained release* evidence for these gates now exists:
-> `release/v0.9.10/` carries a MANIFEST and signed image set bound to one commit,
-> inside the signed `v0.9.10` tag. That cut was never published, so no published
+> **Scope.** This is the F2 decision and safety case: the hazard, the
+> alternatives that were priced and refused, the measured cost of the spelling
+> that shipped, and the oracles that hold the result in place. It is not a
+> second copy of anything. The normative design of the mechanism is in
+> "Failsafe Mechanisms" in
+> [`DESIGN_DOCUMENTATION.adoc`](../DESIGN_DOCUMENTATION.adoc); the shipped
+> transaction is in `src/`; per-part enablement is `BYPASS_CTX_CHECK_FLAG` in
+> the `Makefile`; the reviewed ceilings are that document's Resource
+> Utilization section; and what each image occupies is release evidence, bound
+> to a source commit and a pinned toolchain.
+>
+> **Claim boundary.** The repository owner authored the firmware changes. The
+> gates named below were run to completion on a fully provisioned host — target
+> toolchains, simulators and the mutation suite included — and became
+> *retained* release evidence when the `v0.9.10` cut recorded them in a signed
+> MANIFEST bound to one commit. That cut was never published, so no published
 > release binds them yet — see [release/README.md](../release/README.md). Local
-> completion, retained release qualification and publication are separate claims.
-> None of them is hardware qualification — see
+> completion, retained release qualification and publication are separate
+> claims. None of them is hardware qualification — see
 > [HARDWARE_VALIDATION_LOG.md](../HARDWARE_VALIDATION_LOG.md).
 
-## Summary
+## The hazard
 
 Every shell's per-tick sanity gate rejects only **out-of-range** context
 (`program_state > RELEASE_DEBOUNCE_WAIT`, `effect_state > ENGAGED`,
@@ -23,107 +33,40 @@ or bit 4 flips becomes `8` or `16` — both `<= 25` (passes the range gate) and
 That is a **phantom bypass/engage switch with no footswitch press**, invisible to
 every existing guard.
 
-F2 adds a **complemented XOR-fold** shadow of the debounce context and makes
-every enabled shell's use of persisted state transactional. A tick snapshots
-`ctx_`, validates that snapshot against `ctx_check_`, computes only from the
-validated local value, then publishes the successor context and its check word.
-A single-bit upset confined to persisted `ctx_` or `ctx_check_` therefore either
-fails validation and forces watchdog recovery, is safely overwritten by a
-successor derived from the earlier valid snapshot, or remains as a mismatch for
-the next validation. It is never consumed and then legitimized by re-folding
-the corrupted persisted value.
-
-The guarantee is intentionally bounded. It assumes program code, control flow,
-registers, and automatic local objects execute correctly; it does not claim to
-cover a fault in `next_ctx`, `res`, the stack, a CPU register, or an output
-peripheral. The fold arithmetic lives in the **pure core** (`bypass_pure.c`), so
-its static single-bit property is host-compiled and CBMC/unit-testable. Storage,
-transaction boundaries, watchdog recovery, and AVR ISR/main atomicity remain in
-the hardware shells.
+F2's answer — a complemented XOR-fold shadow of the debounce context, and a
+transactional snapshot/validate/compute/publish sequence in every enabled shell
+— is specified in "Failsafe Mechanisms", along with the guarantee it makes and
+the coverage it explicitly does not claim. Everything below is *why* it takes
+that shape.
 
 ## Decisions (2026-08-17)
 
 | Question | Decision | Rationale |
 | --- | --- | --- |
 | Representation | Complemented XOR-fold: one byte `= ~(program_state ^ effect_state ^ debounce_counter)` | Detects every single-bit flip in any member or the shadow — identical detection to per-member complement under the single-event threat model — at one byte and one check instead of three. The complement makes the all-zeros stuck-at case non-trivial. |
-| Location of the math | Pure function `debounce_ctx_check_word()` in `bypass_pure.c` | Host- and CBMC-testable single source of truth. |
+| Location of the math | Pure function `debounce_ctx_check_word()` in `bypass_pure.c` | Host- and CBMC-testable single source of truth. The static single-bit property is therefore host-compiled and formally checkable; storage, transaction boundaries, watchdog recovery and AVR ISR/main atomicity stay in the hardware shells. |
 | Storage / transaction / recovery | Shell | The pure core is stateless. Each shell owns the persisted pair, snapshots it, validates the snapshot, computes locally, and publishes the successor. |
 | Recovery action | Reset on mismatch; safe overwrite after a valid snapshot | A mismatch has no known-good persisted member. A later upset that was not consumed may instead be overwritten by the already validated transaction. |
 | Member scope | All three members | The fold covers the whole context uniformly. |
 | Enablement | Compile-time opt-in macro `BYPASS_CTX_CHECK` | Makes the per-part decision explicit and lets the mutation harness build a feature-off baseline. |
 | Part scope | **PIC12F675, AVR classic, AVR-XT, PIC10F322** | Every part that links the pure core and has flash room. |
-| **PIC10F320 excluded** | Capacity limit | 320 does not link `bypass_pure.c` at all (self-contained inlined logic), and when this was priced even the cheapest fold overflowed its 256-word flash on the relay variant. Its range-only gate stays; the exclusion is documented and tested. The relay image has since shrunk, so the margin that decision rested on has moved -- see "PIC10F320 -- excluded, and why that is safe". |
+| **PIC10F320 excluded** | Capacity limit | 320 does not link `bypass_pure.c` at all (self-contained inlined logic), and when this was priced even the cheapest fold overflowed its 256-word flash on the relay variant. Its range-only gate stays; the exclusion is documented and tested. See "The PIC10F320 exclusion". |
 
-## The pure-core addition
+## Priced alternatives
 
-`bypass_pure.h` — declare (place after `debounce_step`'s declaration):
+**Pass the context by value, not by pointer.** On the PIC the FSR pointer
+dereference is costlier than a 3-byte struct copy — the by-pointer form
+overflowed PIC10F322 in measurement. `static inline` gives no benefit either:
+XC8 at `-O2` does not inline the function.
 
-```c
-// F2: complemented XOR-fold over the persisted debounce context, for
-// in-range single-event-upset detection.  The shell stores the returned word
-// alongside its context, re-derives it after every legitimate mutation, and
-// forces recovery when a later tick's re-derivation no longer matches the
-// stored word.  Pure and host/CBMC-testable.
-uint8_t debounce_ctx_check_word(debounce_context_t const ctx);
-```
+**Compile the pure function unconditionally, gate only its callers.**
+`bypass_pure.c` defines `debounce_ctx_check_word()` on every build, so the host
+suite exercises it even for a part that does not enable the feature; the shells
+reference it only under `BYPASS_CTX_CHECK`. The alternative -- compiling the
+function itself behind the macro -- would have left the fold's own arithmetic
+untested wherever the feature is off.
 
-`bypass_pure.c` — define:
-
-```c
-uint8_t debounce_ctx_check_word(debounce_context_t const ctx) {
-    return (uint8_t)~(uint8_t)(
-            (uint8_t)ctx.program_state
-          ^ (uint8_t)ctx.effect_state
-          ^ ctx.debounce_counter);
-}
-```
-
-By **value**, not by pointer: on the PIC the FSR pointer dereference is costlier
-than a 3-byte struct copy — the by-pointer form overflowed PIC10F322 in
-measurement. `static inline` gives no benefit (XC8 at `-O2` does not inline it).
-The function is always compiled into `bypass_pure.c` (so the host suite always
-exercises it) and is referenced by the shells only under `BYPASS_CTX_CHECK`.
-
-## Shell wiring — PIC polled shells (`pic10f322`, `pic12f675`)
-
-These shells have one owner and no ISR. `ctx_` and `ctx_check_` are volatile so
-the transaction performs an actual persisted snapshot and publication. Each
-tick follows this sequence:
-
-1. Copy `ctx_` to `next_ctx` exactly once.
-2. Compare `ctx_check_` with `debounce_ctx_check_word(next_ctx)` and apply every
-   range/output/SFR guard to `next_ctx`.
-3. Integrate and call `debounce_step()` using only `next_ctx`.
-4. Apply the returned state and lockout to `next_ctx`.
-5. Derive the check from `next_ctx`, then publish `next_ctx` to `ctx_`.
-6. Act on `res` only after that transaction has completed.
-
-The essential shape is:
-
-```c
-debounce_context_t next_ctx = ctx_;
-if ((ctx_check_ != debounce_ctx_check_word(next_ctx)) ||
-        /* range and hardware guards using next_ctx */) {
-    hw_force_wdt_reset();
-}
-
-next_ctx.debounce_counter = debounce_integrate(
-        hw_read_footswitch(), next_ctx.debounce_counter);
-debounce_step_result_t res = debounce_step(next_ctx);
-/* apply res to next_ctx */
-ctx_check_ = debounce_ctx_check_word(next_ctx);
-ctx_ = next_ctx;
-/* act on res */
-```
-
-If persisted SRAM changes after a byte has already been copied, the local
-snapshot remains the computation source and publication overwrites the upset.
-If the changed value enters the snapshot, or survives after publication, the
-context/check pair mismatches and recovery follows. The publication order
-briefly leaves two different generations in SRAM, but no check or consumer runs
-between those stores in these single-owner loops.
-
-**Flash margin note (PIC10F322):** the pre-transaction F2 image used 507/512
+**Flash margin note (PIC10F322).** The pre-transaction F2 image used 507/512
 words in the relay variant, so the transaction did not fit as first written. The
 snapshot and publication struct copies cost 18 words -- 12 in `main()`, 6 in
 `init()` -- taking the simple/mute/relay variants to 496/522/525 of 512 and
@@ -139,8 +82,7 @@ chain costs 32 words rather than saving them -- its terms are calls and
 comparisons that need an explicit `? 1U : 0U` -- so that chain is deliberately
 left short-circuit. At F2 landing the folded image measured 476/502/505 words,
 two words better in the relay variant than the pre-transaction image. The later
-masked relay-coil clear reduced only the relay image; see Resource
-qualification below.
+masked relay-coil clear reduced only the relay image.
 
 That margin is thin enough that the *spelling* of the fold matters, not just its
 logic, and the accumulator must stay `diff |= term`. Respelling it as the
@@ -159,109 +101,76 @@ fits the destination. The fold therefore keeps the compact spelling and the
 rewrite was reverted. Any future rewrite of these three functions must be
 re-measured against the 512-word gate rather than assumed free.
 
-## Shell wiring — AVR ISR shells (`avr_classic`, `avr_xt`)
+## Why the two shell families transact differently
 
-The AVR shells keep integration in the timer ISR so a blocking relay pulse does
-not starve sampling. Both the ISR and `main()` therefore own a complete
-transaction:
+The transaction sequence itself is in "Failsafe Mechanisms" and in `src/`. What
+is a decision, and not derivable from either, is why the two families place its
+boundaries where they do.
 
-- The ISR snapshots `ctx_`, validates that snapshot, integrates only the local
-  counter, derives the check from the local successor, and publishes only the
-  counter. A mismatch skips integration and publication. `main()` then observes
-  the unchanged mismatched pair and enters watchdog recovery.
-- `main()` enters `ATOMIC_BLOCK(ATOMIC_RESTORESTATE)` before taking its snapshot.
-  The block validates, runs `debounce_step()`, applies the result locally,
-  derives the check from the local successor, and publishes the whole context.
-  Disabling interrupts makes this one transaction with respect to the ISR.
-- The watchdog is petted only after a valid main transaction. Output actuation
-  uses `res`, which was derived from that validated local snapshot.
+**PIC polled shells (`pic10f322`, `pic12f675`).** One owner, no ISR, so the
+whole tick is a single transaction and no interrupt discipline is needed.
+`ctx_` and `ctx_check_` are volatile so the snapshot and the publication are
+real persisted accesses rather than something the optimizer may elide. If
+persisted SRAM changes after a byte has already been copied, the local snapshot
+remains the computation source and publication overwrites the upset. If the
+changed value enters the snapshot, or survives after publication, the
+context/check pair mismatches and recovery follows. The publication order
+briefly leaves two different generations in SRAM, but no check or consumer runs
+between those stores in these single-owner loops.
 
-The essential ISR shape is:
+**AVR ISR shells (`avr_classic`, `avr_xt`).** Integration stays in the timer ISR
+so a blocking relay pulse cannot starve sampling. That gives the context two
+owners, so both must run a complete transaction:
 
-```c
-debounce_context_t next_ctx = ctx_;
-if (ctx_check_ == debounce_ctx_check_word(next_ctx)) {
-    next_ctx.debounce_counter = debounce_integrate(
-            hw_read_footswitch(), next_ctx.debounce_counter);
-    ctx_check_ = debounce_ctx_check_word(next_ctx);
-    ctx_.debounce_counter = next_ctx.debounce_counter;
-}
-```
+- The ISR validates its own snapshot, integrates only the local counter, and
+  publishes only the counter. A mismatch skips both, leaving the mismatched pair
+  for `main()` to observe and escalate.
+- `main()` runs snapshot, validation, `debounce_step()`, apply and publication
+  inside `ATOMIC_BLOCK(ATOMIC_RESTORESTATE)`, which is what makes it one
+  transaction with respect to the ISR. That the block now encloses the whole
+  transaction rather than only apply-and-re-derive is the change F2 made; see
+  [`MISRA_COMPLIANCE.md`](../MISRA_COMPLIANCE.md) for the deviations the
+  avr-libc macro costs.
+- The watchdog is petted only after a valid main transaction, and output
+  actuation uses `res`, derived from that validated local snapshot.
 
-The essential main-loop shape is:
+This design needs only `ctx_check_`; the former `ctx_fault_` handshake is gone,
+so persistent F2 storage is one check byte rather than two.
 
-```c
-debounce_step_result_t res;
-ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    debounce_context_t next_ctx = ctx_;
-    timer_isr_called_ = TIMER_ISR_NOT_CALLED;
-    if (ctx_check_ != debounce_ctx_check_word(next_ctx)) {
-        hw_force_wdt_reset();
-    }
-    res = debounce_step(next_ctx);
-    /* apply res to next_ctx */
-    ctx_check_ = debounce_ctx_check_word(next_ctx);
-    ctx_ = next_ctx;
-}
-hw_wdt_pet();
-/* act on res */
-```
+## The PIC10F320 exclusion
 
-This design needs only `ctx_check_`; the former `ctx_fault_` handshake is gone.
-The atomic block is still required, but now encloses snapshot, validation,
-computation, and publication rather than only apply-and-re-derive.
+"Failsafe Mechanisms" records the exclusion and why it is safe. What belongs
+here is the margin it was decided against, and the fact that the margin has
+moved.
 
-## PIC10F320 — excluded, and why that is safe
+When the fold was priced, the 320's relay variant sat at 245/256 words (11
+free), and even the one-byte XOR-fold overflowed the device (linker: `can't find
+words for psect ... CODE`). The relay figure has moved twice since: at `v0.9.10`
+it measured 242/256 (14 free), after three words went to the coil-latch
+integrity term and six came back from making the coil clear a single masked
+`LATA` write.
 
-PIC10F320 is the self-contained special-case shell: it does not link
-`bypass_pure.c`, inlining its own `debounce_integrate`/`debounce_step` to fit
-256 words. When this was priced its relay variant sat at 245/256 (11 free), and
-even the one-byte XOR-fold overflowed the device (linker: `can't find words for
-psect ... CODE`). So 320 keeps its existing range-only gate and does **not**
-define `BYPASS_CTX_CHECK`.
+The exclusion is **not** re-opened on that basis here. Doing so would need the
+fold re-priced against the current image on all three variants, and
+`cd4053_with_mute` was untouched by any of it. But the margin this decision was
+made against no longer holds, so re-price rather than cite the paragraph above
+if the question is raised again.
 
-> The relay figure has moved twice since, and the current one is 242/256
-> (14 free): `v0.9.10` added three words for the coil-latch integrity term and
-> then returned six by making the coil clear a single masked `LATA` write. The
-> exclusion is **not** re-opened on that basis here -- doing so would need the
-> fold re-priced against the current image on all three variants, and
-> `cd4053_with_mute` at 241/256 is untouched by any of it -- but the margin this
-> decision was made against no longer holds, so re-price rather than cite the
-> paragraph above if the question is raised again. This is recorded as a per-target capacity difference (per the
-review's "document and test per-target differences rather than silently weaken
-one target"), and a focused test asserts the 320 images never reference the F2
-symbol. Mixing the feature onto only 320's lighter `cd4053_simple` variant
-(36 free) was considered and rejected: per-variant-within-a-part inconsistency is
-worse than a clean part-level line.
-
-## Enablement
-
-`-DBYPASS_CTX_CHECK` is present in the CFLAGS of the four enabled parts:
-`PIC10F322_CFLAGS`, `PIC12F675_CFLAGS`, and the AVR classic + AVR-XT flag sets.
-Do **not** add it to `PIC10F320_CFLAGS`. `bypass_pure.c` always compiles the pure
-function regardless (the host suite links it unconditionally).
+Mixing the feature onto only the 320's lighter `cd4053_simple` variant was
+considered and rejected: per-variant-within-a-part inconsistency is worse than a
+clean part-level line.
 
 ## Resource qualification
 
-This change had to fit inside budgets it did not set. Those budgets, and the
-gates that enforce them, are the durable part; what each image occupies today is
-release evidence, retained per release with its source commit and pinned
-toolchain, and is not restated here.
-
-| Part | Flash budget | Enforced by |
-| --- | --- | --- |
-| PIC10F322 | 512 words | `make pic10f322` |
-| PIC12F675 | 1024 words | `make pic12f675` |
-| ATtiny13a (AVR classic) | 90% of 1024 B | `make test-flash-budget` |
-| ATtiny202 (AVR-XT) | 2048 B | `make attiny202` |
-| PIC10F320 | 256 words | `make pic10f320` |
+This change had to fit inside budgets it did not set. Those budgets, the parts
+they bound and the goal that enforces each are in `DESIGN_DOCUMENTATION.adoc`'s
+Resource Utilization section, which owns them; what each image occupies today is
+release evidence and is not restated anywhere.
 
 PIC10F322 is the binding constraint. It stays inside 512 words in every variant
 only because the integrity-check fold pays for the transaction -- see the flash
 margin note above, including the one-word-per-term cost of respelling that fold.
-The ATtiny13a budget is the gate's 90%-of-1024 utilisation limit, not the raw
-device size. PIC10F320 carries no F2 at all; it is listed because the part still
-builds, and because its own margin is the reason it carries none.
+PIC10F320 carries no F2 at all; its own margin is the reason.
 
 RAM and stack: the AVR `next_ctx` snapshot is an automatic, so it lands on the
 stack. The stack high-water gate in the simulator suite (`make test` and
@@ -272,9 +181,6 @@ tightest of them. On PIC10F322 this design leaves the return-stack depth
 unchanged, and every variant holds a 2-level reserve inside the part's 8
 hardware levels. The image, RAM, stack and static-analysis gates all passed with
 the automatic `next_ctx`/`res` objects in place.
-
-The transaction also removes the former AVR `ctx_fault_`, so persistent F2
-storage is one check byte rather than two bytes.
 
 ## Test and mutation evidence
 
@@ -297,14 +203,9 @@ storage is one check byte rather than two bytes.
   reference `debounce_ctx_check_word` and that `BYPASS_CTX_CHECK` is undefined
   there.
 
-The initial host PIC coverage and ATtiny fault-oracle checks passed. A subsequent
-fully provisioned run passed the AVR/XC8 builds and resource gates,
-simavr/yasimavr/gpsim lanes, CBMC and static analysis, and the complete mutation
-suite: 132 killed, 0 survived, 0 errored, and no skipped PIC or ATtiny202 rows.
-Both were local runs on the maintainer's provisioned host. The same gates became
-*retained* release evidence when the `v0.9.10` cut recorded them in a signed
-MANIFEST bound to one commit. That release was never published; see
-[release/README.md](../release/README.md).
+Which lane runs on which substrate, and what each may claim there, is
+[`test/README.md`](../test/README.md)'s subject. Pass/fail counts for any one
+run are release evidence, not a fact this file maintains.
 
 ## Acceptance-criteria mapping (F2)
 
@@ -317,8 +218,8 @@ MANIFEST bound to one commit. That release was never published; see
 4. One-shot post-check probes and transaction-seam mutants provide the temporal
    evidence; repeated favorable-phase injection is not accepted as proof.
 5. Flash, RAM, stack, MISRA, mutation, simulator, and shipping-source
-   qualification passed on the provisioned host. PIC10F322 remains the binding
-   capacity case at 502/512 words for the mute variant.
+   qualification passed on the provisioned host, with PIC10F322 the binding
+   capacity case.
 
 ## Related
 
