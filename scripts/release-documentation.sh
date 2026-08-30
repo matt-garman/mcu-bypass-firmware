@@ -34,9 +34,15 @@ release_validate_current_documentation() {
 	local release_number=${version#v} changelog="$repo_root/CHANGELOG.md"
 	local document block contract_line section_count previous_version link_count
 	local transition_line referenced release_heading dated_heading unreleased_heading
+	# ONE human authority for the release contract. It was four documents, then
+	# two, and every copy was correct only because this validator held all of
+	# them to the same canonical counts -- controlled duplication is still
+	# duplication, and it made release topology a multi-place hand edit whose
+	# copies drifted in the parts no gate compared. release/README.md keeps it
+	# because a reader who needs the topology is already reading the release
+	# document; everything else points there.
 	local -a current_documents=(
 		"$repo_root/release/README.md"
-		"$repo_root/TODO.md"
 	)
 
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
@@ -155,6 +161,49 @@ release_validate_current_documentation() {
 		done < <(grep -oE 'release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?/' <<<"$block" \
 			| sed -e 's#^release/##' -e 's#/$##' | sort -u)
 	done
+
+	_release_reject_extra_current_blocks "$repo_root" \
+		"${current_documents[0]#$repo_root/}"
+}
+
+# The declaration is singular, and stays singular.
+#
+# The set above is one document. This is what keeps it one: a bounded block
+# written into any OTHER current document fails here, named, on the day it is
+# written, rather than quietly becoming the next copy someone has to remember
+# on every release. The loop above cannot notice such a copy -- it only reads
+# the documents it was given -- which is exactly how the count reached four.
+#
+# Two kinds of document legitimately carry a declaration that is not the live
+# one, and neither is a copy to maintain:
+#
+#   * a shipped release directory, an immutable artifact that records the
+#     contract current when it was published; and
+#   * a root-level working document, which quotes the markers while describing
+#     them and is deleted before release source finalization.
+_release_reject_extra_current_blocks() {
+	[ "$#" -eq 2 ] || return 2
+	local repo_root=$1 designated=$2
+	local document label find_pid
+	local -a extra=()
+
+	while IFS= read -r -d '' document; do
+		label=${document#$repo_root/}
+		[ "$label" != "$designated" ] || continue
+		grep -Fq '<!-- current-release:start -->' "$document" || continue
+		if _release_is_branch_only_document "$document" "$label"; then
+			continue
+		fi
+		extra+=("$label")
+	done < <(find "$repo_root" \
+		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
+		-type f \( -name '*.md' -o -name '*.adoc' \) -print0)
+	find_pid=$!
+	# A failed scan is a policy failure, not an empty result set.
+	wait "$find_pid" \
+		|| _release_documentation_error "could not scan for duplicate current-release declarations" || return
+	[ "${#extra[@]}" -eq 0 ] \
+		|| _release_documentation_error "the current release contract is declared in $designated alone; remove the bounded current-release block from: ${extra[*]}" || return
 }
 
 # Bind the bounded current-release declarations to the inventory that was

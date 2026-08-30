@@ -29,6 +29,12 @@ shipped HEX files and their `SHA256SUMS` entries.
 > The images cover three output stages; PIC10F320 is the self-contained target.
 <!-- current-release:end -->
 
+That block is the project's single live declaration of the release contract; no
+other document restates it. It describes the *source* contract this tree stands
+on. The measured results, the qualified source commit, and the image hashes for
+any given release are in that release's own retained record under `vX.Y.Z/`,
+which is written by the release cut and never edited afterwards.
+
 `v0.9.6` was the first unified 18-image release and introduced the first
 ATtiny202 and PIC10F320 images in this release line.
 

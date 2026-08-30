@@ -936,13 +936,17 @@ $release_entry
 [1.2.3]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/matt-garman/mcu-bypass-firmware/releases/tag/v1.2.2
 EOF
-	for document in release/README.md TODO.md; do
-		cat > "$documentation_root/$document" <<EOF
+	cat > "$documentation_root/release/README.md" <<EOF
 <!-- current-release:start -->
 $declaration
 <!-- current-release:end -->
 EOF
-	done
+	# Present, durable, and deliberately carrying no declaration of its own:
+	# TODO.md held a second copy of the contract until the declaration was made
+	# singular, so the fixture keeps it here as the document the duplicate-block
+	# scan must find nothing in.
+	printf '%s\n' '# Remaining work' 'Open actions only.' \
+		> "$documentation_root/TODO.md"
 }
 
 assert_documentation_rejected() {
@@ -1032,7 +1036,15 @@ checks=$((checks + 1))
 transition_line='**Pre-tag transition:** `release/v1.2.3/` is created by the release cut and published with the signed `v1.2.3` tag, so the source tree that declares this contract does not contain it yet.'
 
 declare_in_block() {
-	local document=$1 line=$2 target="$documentation_root/$document"
+	# The two `local` statements are separate on purpose. Bash expands every
+	# word of a `local` assignment list BEFORE creating any of the names, so
+	# `local document=$1 target=".../$document"` reads whatever `document` the
+	# CALLER happens to have in scope, not the argument just passed. That is not
+	# hypothetical: while the fixture wrote its declaration through a
+	# `for document in ...` loop, this helper silently edited the loop's last
+	# value and ignored its own first argument entirely.
+	local document=$1 line=$2
+	local target="$documentation_root/$document"
 	awk -v line="$line" '
 		$0 == "<!-- current-release:end -->" { print line }
 		{ print }
@@ -1041,12 +1053,12 @@ declare_in_block() {
 }
 
 write_documentation_fixture v1.2.3 21 18 six four
-declare_in_block TODO.md 'Evidence is retained under `release/v1.2.3/`.'
+declare_in_block release/README.md 'Evidence is retained under `release/v1.2.3/`.'
 assert_documentation_rejected 'an undisclosed claim on the not-yet-staged release directory'
 
 write_documentation_fixture v1.2.3 21 18 six four
-declare_in_block TODO.md 'Evidence is retained under `release/v1.2.3/`.'
-declare_in_block TODO.md "$transition_line"
+declare_in_block release/README.md 'Evidence is retained under `release/v1.2.3/`.'
+declare_in_block release/README.md "$transition_line"
 release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator rejected a disclosed pre-tag transition"
 checks=$((checks + 1))
@@ -1055,13 +1067,13 @@ checks=$((checks + 1))
 # directory a block names is evidence claimed to be retained now, so an abandoned
 # or postponed cut cannot leave the claim standing behind the transition line.
 write_documentation_fixture v1.2.3 21 18 six four
-declare_in_block TODO.md 'Evidence is retained under `release/v1.2.2/`.'
-declare_in_block TODO.md "$transition_line"
+declare_in_block release/README.md 'Evidence is retained under `release/v1.2.2/`.'
+declare_in_block release/README.md "$transition_line"
 assert_documentation_rejected 'a bounded claim on a release directory that does not exist'
 
 write_documentation_fixture v1.2.3 21 18 six four
 mkdir -p "$documentation_root/release/v1.2.2"
-declare_in_block TODO.md 'Evidence is retained under `release/v1.2.2/`.'
+declare_in_block release/README.md 'Evidence is retained under `release/v1.2.2/`.'
 release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator rejected a present retained-evidence directory"
 checks=$((checks + 1))
@@ -1070,10 +1082,68 @@ checks=$((checks + 1))
 # other field of the declaration.
 write_documentation_fixture v1.2.3 21 18 six four
 printf '%s\n' 'The abandoned `release/v9.9.9/` cut was never published.' \
-	>> "$documentation_root/TODO.md"
+	>> "$documentation_root/release/README.md"
 release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
 	|| fail "documentation validator treated prose outside the bounds as a declaration"
 checks=$((checks + 1))
+
+# The declaration is singular. Four documents carried it once, then two, and
+# every copy passed this validator because it was compared with the same
+# canonical counts -- so the duplication was invisible here and expensive
+# everywhere else. A bounded block in any other current document now fails, and
+# the diagnostic names it.
+write_documentation_fixture v1.2.3 21 18 six four
+cat >> "$documentation_root/TODO.md" <<'EOF'
+<!-- current-release:start -->
+**Current release contract:** `v1.2.3`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+<!-- current-release:end -->
+EOF
+assert_documentation_rejected 'a second document declaring the release contract'
+grep -Fq 'TODO.md' "$output" \
+	|| fail "the duplicate-declaration refusal did not name the offending document"
+checks=$((checks + 1))
+
+# ... and an EXACT copy fails just as an inconsistent one does. A second copy
+# that happens to agree today is the copy that silently disagrees next release;
+# there is nothing left for this gate to catch once both are compared against
+# the canonical counts, which is why the count is what it checks.
+grep -Fq 'seven release parts' "$documentation_root/TODO.md" \
+	|| fail "the duplicate-declaration fixture did not restate the contract verbatim"
+checks=$((checks + 1))
+
+# Two kinds of document legitimately carry a declaration that is not the live
+# one. A shipped release directory records the contract current when it was
+# published...
+write_documentation_fixture v1.2.3 21 18 six four
+mkdir -p "$documentation_root/release/v1.2.2"
+cat > "$documentation_root/release/v1.2.2/MANIFEST.md" <<'EOF'
+<!-- current-release:start -->
+**Current release contract:** `v1.2.2`; seven release parts; 20 images; 17 soak combinations; six modular targets; four shell source files.
+<!-- current-release:end -->
+EOF
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator read a shipped release directory as a live declaration"
+checks=$((checks + 1))
+
+# ... and a root-level working document quotes the markers while describing
+# them, and is deleted before release source finalization.
+write_documentation_fixture v1.2.3 21 18 six four
+cat > "$documentation_root/v1.2.3-notes.md" <<'EOF'
+# Release notes work plan
+
+> **Branch-only working document.** Deleted before release source
+> finalization.
+
+The declaration this branch is retiring reads:
+
+<!-- current-release:start -->
+**Current release contract:** `v1.2.2`; seven release parts; 20 images; 17 soak combinations; six modular targets; four shell source files.
+<!-- current-release:end -->
+EOF
+release_validate_current_documentation "$documentation_root" v1.2.3 21 18 \
+	|| fail "documentation validator read a branch-only working document as a live declaration"
+checks=$((checks + 1))
+rm -f "$documentation_root/v1.2.3-notes.md"
 
 # release/README.md carries its block as a blockquote, so the transition line
 # must be read through the same `> ` strip as the contract line.
@@ -1116,8 +1186,8 @@ assert_staged_rejected() {
 }
 
 write_documentation_fixture v1.2.3 21 18 six four
-declare_in_block TODO.md 'Evidence is retained under `release/v1.2.3/`.'
-declare_in_block TODO.md "$transition_line"
+declare_in_block release/README.md 'Evidence is retained under `release/v1.2.3/`.'
+declare_in_block release/README.md "$transition_line"
 write_staged_fixture 21 18
 release_validate_staged_documentation "$documentation_root" "$staged_root" v1.2.3 \
 	|| fail "staged documentation validator rejected a matching inventory"

@@ -117,6 +117,7 @@ mean editing two documents, the fact is in the wrong place.
 | User-visible change history | [CHANGELOG.md](CHANGELOG.md) |
 | Current development status | the `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md) |
 | Release process, trust model, errata, and reproduction | [release/README.md](release/README.md) |
+| Current release contract: version, parts, images, soaks, topology | the one bounded declaration in [release/README.md](release/README.md) |
 | Exact per-release source, image, resource, and qualification results | that release's own retained record under [release/](release) |
 | Scoped design decisions and per-part safety records | the topic documents under [docs/](docs) |
 | Historical implementation reasoning | Git history |

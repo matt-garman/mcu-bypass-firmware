@@ -1569,7 +1569,7 @@ edited.
 
 ## BR-README-01 - Reduce the root README to overview and entry points
 
-**Status:** DONE `<commit>`
+**Status:** DONE `d7104c9`
 
 **Current size:** 335 lines at plan time; 320 at implementation, now 230.
 
@@ -1881,13 +1881,13 @@ image naming convention, including extensive pre-v0.9.8 archaeology.
 
 ## BR-STATE-01 - Remove four-way current-release declarations from live docs
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Current copies:**
 
 - `TODO.md:3-15`
-- `docs/pic10f320_special_case.md:3-10`
-- `docs/pic10f320_validation.md:16-27`
+- `docs/pic10f320_special_case.md:3-10` (deleted by BR-PIC-03)
+- `docs/pic10f320_validation.md:16-27` (deleted by BR-PIC-03)
 - `release/README.md:27-30`
 
 Tests currently enforce these copies, so they are controlled duplication rather
@@ -1904,11 +1904,72 @@ topology into target-specific and TODO documents.
 - [ ] Replace occurrence/prose synchronization tests with semantic release
   identity checks.
 
+**Work:**
+
+- [x] Define one human release-state authority.
+- [x] Keep literal release identity in the Makefile where it serves as an
+  independent fail-closed production pin.
+- [x] Remove global topology declarations from TODO and target-specific docs.
+- [ ] Generate human release topology where needed from canonical data.
+- [x] Replace occurrence/prose synchronization tests with semantic release
+  identity checks.
+
 **Acceptance:**
 
 - Updating release topology does not require four prose edits.
 - Release production still compares selected values with an independent literal
   reviewed identity.
+
+**Result:**
+
+- Two of the four copies were already gone: BR-PIC-03 deleted
+  `docs/pic10f320_special_case.md` and `docs/pic10f320_validation.md`. The
+  remaining two were `TODO.md` and `release/README.md`.
+- `release/README.md` is the single live authority. It is where release policy,
+  the trust model, the errata and the reproduction instructions already live, so
+  a reader who needs the topology is already in that document. `TODO.md` now
+  says where the contract is declared and keeps only what is its own: the dated
+  open-work status.
+- The declaration is now enforced as *singular*, not merely as *consistent*.
+  `release_validate_current_documentation` previously read a fixed list of
+  documents and held each to the same canonical counts, which is why the count
+  could reach four without any gate objecting -- every copy was correct.
+  `_release_reject_extra_current_blocks()` scans every current Markdown and
+  AsciiDoc file and fails, by name, on a bounded block anywhere but the
+  designated document. An exact copy fails exactly as an inconsistent one does,
+  because an exact copy today is the one that disagrees next release. Shipped
+  release directories and declared branch-only working documents are exempt:
+  neither is a copy anyone maintains.
+- Removing the block also removed a false claim no gate could catch. TODO.md's
+  pre-tag transition line said `release/v0.9.11/` "does not contain it yet",
+  and the tree has contained it since `760f5fd`. The validator skips the
+  transition-line requirement once the directory exists, so the sentence was
+  stale, load-bearing-looking, and unchecked.
+- Work item 2 needed nothing: `RELEASE_IDENTITY_PINNED` in the Makefile is
+  already the independent literal production pin, and `make-release.sh` already
+  refuses a release goal whose selected identity drifts from it.
+- Work item 4 (generate human release topology from canonical data) is left
+  open. With one hand-maintained declaration held to canonical counts at
+  release time, generation would buy correctness that is already enforced; it
+  belongs with BR-RES-03 and BR-FLASH-02, which are the generated-view tasks.
+- A latent defect in `test_release_preflight.sh` surfaced and was fixed.
+  `declare_in_block()` read `local document=$1 line=$2 target=".../$document"`
+  on one line; bash expands every word of a `local` assignment list *before*
+  creating any of the names, so `$document` there resolved to whatever the
+  caller had in scope -- which was the fixture loop's last value, `TODO.md`.
+  The helper had been ignoring its first argument, and the case that claimed to
+  test `release/README.md`'s blockquoted block was editing `TODO.md`. The two
+  declarations are now separate statements, with the reason recorded. A
+  repository-wide scan found no other instance of the pattern.
+- `test_release_history.sh`'s D3 fixture -- an artifact commit may not restate a
+  bounded declaration -- now carries its declaration in `release/README.md`,
+  the document the rule is actually about.
+- BR-FINAL-01's "search for duplicated current-release declarations" is now
+  mechanical rather than a manual sweep.
+- Verified: `test-release-preflight` (216 -> 221 checks, 0 failures),
+  `test-release-history`, `test-release-qualification`,
+  `test-makefile-name-contract`, and `make test`. A negative control on the live
+  tree confirmed a second copy in `TODO.md` is refused by name.
 
 ## BR-STATE-02 - Treat main as development and releases as immutable snapshots
 
@@ -2792,13 +2853,13 @@ dependencies and acceptance criteria.
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |
 | BR-DOC-04 | Classify feature safety records | DONE `8180569` |
-| BR-README-01 | Reduce root README | DONE `<commit>` |
+| BR-README-01 | Reduce root README | DONE `d7104c9` |
 | BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
 | BR-TODO-01 | Reduce TODO to registry | TODO |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
 | BR-RELEASEDOC-01 | Reduce release README | TODO |
 | BR-COMMENT-01 | Trim live historical comments | TODO |
-| BR-STATE-01 | Remove repeated release declarations | TODO |
+| BR-STATE-01 | Remove repeated release declarations | DONE `<commit>` |
 | BR-STATE-02 | Make development/release state explicit | TODO |
 | BR-TEST-01 | Delete retired rename lane | DONE `893d647` |
 | BR-TEST-02 | Remove duplicate CI mutation run | DONE `b86a5a7` |

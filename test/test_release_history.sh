@@ -113,9 +113,13 @@ setup_fixture() {
 	git -C "$repo" config user.name "Release History Test"
 	git -C "$repo" config user.email "release-history@example.invalid"
 	printf 'base\n' > "$repo/base.txt"
+	# The project's one live current-release declaration lives here, so this is
+	# the document the `documentation` case below must not be allowed to
+	# restate in an artifact commit.
+	mkdir -p "$repo/release"
 	printf '<!-- current-release:start -->\ndeclaration\n<!-- current-release:end -->\n' \
-		> "$repo/TODO.md"
-	git -C "$repo" add base.txt TODO.md scripts/verify-release-history.sh
+		> "$repo/release/README.md"
+	git -C "$repo" add base.txt release/README.md scripts/verify-release-history.sh
 	git -C "$repo" -c commit.gpgsign=false commit -qm base
 	base_sha=$(git -C "$repo" rev-parse HEAD)
 	primary=$(git -C "$repo" symbolic-ref --short HEAD)
@@ -165,8 +169,8 @@ setup_fixture() {
 		# Source finalization is a SEPARATE, earlier commit precisely so the
 		# artifact commit cannot restate a bounded current-release declaration
 		# that no qualification run ever measured.
-		printf 'restated release contract\n' >> "$repo/TODO.md"
-		git -C "$repo" add TODO.md
+		printf 'restated release contract\n' >> "$repo/release/README.md"
+		git -C "$repo" add release/README.md
 	fi
 	git -C "$repo" -c commit.gpgsign=false commit -qm release
 	if [ "$merge_mode" = merge ]; then

@@ -1,18 +1,13 @@
 # Remaining work toward textbook reference quality
 
-<!-- current-release:start -->
-**Current release contract:** `v0.9.11`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
-
 **Status (2026-08-29):** No nominal-path firmware correctness defect is
-currently known. PIC10F320 remains the self-contained exception. This tree is
-the `v0.9.11` *source* contract; the authoritative evidence for the release it
-qualifies is retained under `release/v0.9.11/`, and that retained record --
-not this file -- identifies the qualified source commit and measured results.
+currently known. PIC10F320 remains the self-contained exception.
 
-**Pre-tag transition:** `release/v0.9.11/` is created by the release cut and published with the signed `v0.9.11` tag, so the source tree that declares this contract does not contain it yet.
-
-Open work is enumerated below.
-<!-- current-release:end -->
+The release contract this source tree stands on -- the version, the part and
+image counts, and the modular topology -- is declared once, in
+[`release/README.md`](release/README.md). The retained record under
+`release/<version>/`, not this file, identifies the qualified source commit and
+the measured results for any given release.
 
 This file contains open actions only. Completed work is removed rather than
 kept as implementation journals; Git history and `CHANGELOG.md` are the record.
