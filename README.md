@@ -76,14 +76,9 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
     host-compilable for exhaustive fuzz testing
   - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
     for PIC10F322, PIC10F320, and PIC12F675 provide functional, fault-injection,
-    lock-step, target-I/O, and soak tests; yasimavr for AVR-XT (ATtiny202) provides functional,
-    fault-injection, lock-step, PA2/PA3 transition ordering, polarity,
-    pulse-presence, and soak tests. A separate built-image disassembly oracle
-    verifies the compiled 5 ms mute and 12 ms relay delay-body cycle counts. The
-    PIC10F320's directly implemented algorithm is additionally compared with the
-    verified core, tick for tick, by scoped host and real-image lock-step lanes.
-    PIC12F675 additionally proves that its simulator-only calibration derivation
-    leaves all three shipping images byte-identical
+    lock-step, target-I/O, and soak tests; yasimavr does the same for the AVR-XT
+    ATtiny202, plus its PA2/PA3 transition ordering. Which layer establishes
+    which property, over which substrate, is [test/README.md](test/README.md)
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
@@ -158,7 +153,7 @@ how it is edited and when it may be deleted.
   Correct the input, never the rendered copy.
 
 
-# Quickstart
+## Quickstart
 
 Programming a downloaded release does not require the firmware development
 toolchain or a repository checkout. Most targets require only the released HEX
@@ -172,16 +167,15 @@ combinations builders have reported working and why a shared pinout does not
 make two parts interchangeable to flash. The rest of this section is about
 building from source.
 
+Upgrading a worktree last used to build `v0.9.7` or earlier: run `make clean`
+once before the first new build, or retired and current image names will
+coexist. If that build set a custom PIC build directory, its variable was
+renamed too; the override mapping is under
+[Renamed in v0.9.8](release/README.md#renamed-in-v098-v097-and-earlier-used-different-names).
+
 Requires avrtools, assumes a USBtiny programmer, and a fresh
 ATtiny13a chip (see `make help` for how to build/program other
 MCUs):
-
-If this existing worktree was used to build `v0.9.7` or earlier, after updating
-run `make clean` once before the first new build. Custom PIC build-directory
-variables were renamed too; if the old build used any custom build directory,
-follow the cleanup override mapping under
-[Renamed in v0.9.8](release/README.md#renamed-in-v098-v097-and-earlier-used-different-names).
-Without that one-time clean, retired and current image names can coexist.
 
 ```
 make
@@ -195,126 +189,42 @@ validation, so a failed build cannot leave a device carrying the design's
 clock/watchdog/BOD fuses with no matching firmware. `attiny13a-fuses` and
 `attiny13a-flash` remain available when you want exactly one of the two steps.
 
-To build and validate the PIC ports instead requires a host C compiler (GCC 10
+The PIC and AVR-XT ports build and validate through their own lanes,
+independent of the AVR Classic build. All of them need a host C compiler (GCC 10
 or newer, or Clang — see [TOOLCHAIN](TOOLCHAIN.adoc)), matching `gcov`, Python
-3.7 or newer, and Bash for source coverage, plus the Microchip XC8 compiler,
-PIC10-12Fxxx device pack, `gpsim`, and `gpsim-dev` for the target-level gates:
+3.7 or newer, and Bash. Beyond that, the `pic10f322-*`, `pic10f320-*` and
+`pic12f675-*` lanes need the Microchip XC8 compiler, the PIC10-12Fxxx device
+pack, `gpsim` and `gpsim-dev`; the `attiny202-*` lane needs avr-gcc plus the
+fetched-on-demand Microchip device files and the patched `yasimavr` that
+`scripts/fetch_yasimavr.sh` builds. Each lane has a build goal, a pre-hardware
+aggregate, and a fail-closed target aggregate:
 
 ```
-make pic10f322                         # build all variants + 512-word flash-budget gate
-make pic10f322-test                    # CONFIG, analysis, source coverage, and gpsim checks
-make pic10f322-test-target-variants    # fail-closed libgpsim fault/lock-step/I/O gates
+make pic10f322 && make pic10f322-test pic10f322-test-target-variants
+make pic10f320-variants && make pic10f320-test pic10f320-test-target-variants
+make pic12f675 && make pic12f675-test pic12f675-test-target-variants
+make attiny202 && make attiny202-test attiny202-test-target
 ```
 
-The PIC10F320 has its own lane, using the same toolchain (`pic10f320-*` targets,
-`PIC10F320_*` variables):
+`make help` lists every goal and the variables that select its behavior.
+[test/README.md](test/README.md) says what each aggregate establishes, which
+lanes fail closed rather than skipping when a tool is absent, and why the two
+PIC12F675 aggregates belong in one Make invocation rather than two.
 
-```
-make pic10f320-variants             # build all variants + flash-budget/return-stack gates
-make pic10f320-test-build           # rebuild + enforce reviewed SHA-256 image baseline
-make pic10f320-test-return-stack    # rebuild + recheck/report all three final HEX images
-make pic10f320-test                 # host equivalence/actuation/fault/coverage,
-                                 #   hashes, CONFIG, return stack, analysis/gpsim
-make pic10f320-test-target-variants # fail-closed libgpsim fault/lock-step/I/O gates
-```
+Programming an ATtiny202 is over UPDI rather than ISP. `make attiny202-program
+VARIANT=<v> XT_UPDI_PORT=<port>` is the same ordered transaction the AVR Classic
+parts use, and defaults to avrdude's `serialupdi`, which needs only a USB-serial
+adapter and a series resistor.
 
-The PIC12F675 has its own lane on the same XC8 installation (`pic12f675-*`
-targets, `PIC12F675_*` variables, and the 322's `PIC_CC`/`PIC_DFP` pair):
-
-```
-make pic12f675                      # build all variants + 1024-word flash/48-byte data gates
-make pic12f675-test pic12f675-test-target-variants
-                                    # one retained hash-qualified matrix across
-                                    # CONFIG, analysis, coverage, calibration,
-                                    # gpsim, stack, and all libgpsim variants
-```
-
-Programming a real PIC12F675 is a guarded transaction rather than a command,
-because a bulk erase destroys per-device factory trim the image cannot supply.
-Which transaction applies depends on what you have, and each has one home:
-[FLASHING.md](FLASHING.md) carries the downloaded-release route through
-`flash-pic12f675.py`, and [release/README.md](release/README.md) carries the
-development and release-provenance route (`make pic12f675-preflight`, then
-`make pic12f675-release-program`, with `make pic12f675-finalize` to resolve an
-interrupted transaction). `pic12f675-program` remains an explicit
-development/bench path and does not claim signed-release provenance. Neither
-Make goal offers an operator `ipecmd` procedure, published or qualified: that
-route would need pk2cmd reads immediately before and after the IPE write, and
-no safe dual-programmer attachment or handoff has been validated.
-
-Its simulator lanes run *derived* images: `make pic12f675-simcal` injects the
-oscillator calibration word that a real device carries in its last program word
-and that an erased simulator image does not, and `make pic12f675-test-calibration`
-proves the injection leaves the shipping images byte-identical. That is why this
-part has one aggregate lane the others do not.
-
-Request the two PIC12F675 aggregates in one Make invocation as shown above. Make
-then builds one retained shipping/derived matrix and records SHA-256 for all six
-images plus the six assembly/symbol sidecars consumed by the target lanes. It
-promotes that record to the qualified manifest only after the discarded private
-compiler build and calibration probes agree, then rechecks it after every
-consumer. Every aggregate PASS names the same twelve-artifact identity. Release
-qualification retains that JSON manifest and binds its digest, the final shipped
-HEX bytes, and their `SHA256SUMS` entries into one verified evidence chain. Separate
-invocations remain valid standalone qualifications, but necessarily create
-separate retained matrices and therefore cannot be combined as one evidence set.
-
-The same asymmetry is why both PIC12F675 programming goals rebuild the complete matrix,
-derives one image only from validated `VARIANT`, and checks a private read-only
-snapshot before writing it. A derived image carries a *fabricated* calibration
-value, and putting one on a real device would overwrite that device's factory
-oscillator trim irreversibly — and silently, since the part still runs
-afterwards. The snapshot must leave that word unprogrammed, carry the intended
-CONFIG, and retain one SHA-256 digest through every check; the programmer gets
-that same snapshot through directly constructed argv. External image and
-whole-command overrides are deliberately unsupported. The release goal adds the
-signed-byte gate; the development/bench goal deliberately does not impersonate it.
-
-Both goals also require a baseline captured by the read-only
-`pic12f675-preflight` target, re-read the device immediately before writing,
-and publish an exclusive PASS/FAIL result afterwards; pk2cmd is the pinned
-readback dialect, and [release/README.md](release/README.md) states the rules
-that go with it. Those records enable the silicon check but do not replace it:
-closing the two open PIC12F675 hardware items needs retained real-hardware
-evidence, which is the `1.x.y` hardware-validation pass (TODO
-`T3-pic12f675-bench`) that every part in this repository still awaits — not a
-`0.9.x` release blocker for this one.
-
-These targets are independent of the AVR build. Individual optional-tool targets
-generally skip cleanly if their primary compiler/simulator is absent. The
-PIC10F320 exception is deliberate: every generated `pic10f320` image must pass the
-Python return-stack oracle. `pic10f320-test-build` additionally requires the
-complete rebuilt matrix to match the reviewed XC8/DFP SHA-256 baseline, and
-`pic10f320-test-return-stack` rechecks all three images. These targets feed
-`pic10f320-test` and fail closed if Python, the baseline, or an image is missing.
-Host source coverage is mandatory when `pic10f322-test` runs. The target aggregates
-are the authoritative simulator gates and fail closed on any missing/skipped
-libgpsim layer.
-
-To build and validate the ATtiny202 (AVR-XT) port (uses the open-source avr-gcc
-toolchain plus the fetched-on-demand Microchip device files and a patched
-`yasimavr` simulator built by `scripts/fetch_yasimavr.sh`):
-
-```
-make attiny202             # build all variants + 2 KB flash/16-byte static-RAM gates
-make attiny202-test        # pre-hardware checks (fuses, resources, stack, analysis, widths)
-make attiny202-sim         # yasimavr functional + PA2/PA3 transition/pulse test (incl. delivered width)
-make attiny202-fault       # fault-injection: corrupt a guarded SFR/state, assert recovery
-make attiny202-lockstep    # ctx_-vs-verified-core co-simulation, every settled tick
-make attiny202-soak        # long-duration liveness soak (XT_SOAK_DURATION_MS=)
-make attiny202-test-target # the fail-closed aggregate release qualification runs
-```
-
-Programming is over UPDI rather than ISP. `make attiny202-program VARIANT=<v>
-XT_UPDI_PORT=<port>` builds and validates the selected image, then writes the
-seven AVR8X fuse bytes, then flashes — the same ordered transaction the AVR
-Classic parts use, so a missing device pack or a failed build reaches no
-programmer at all. It defaults to avrdude's `serialupdi`, which needs only a
-USB-serial adapter and a series resistor.
-
-These targets are also independent of the AVR Classic build and skip cleanly if
-the device pack or the `yasimavr` venv is not present — everywhere except release
-qualification, which runs them with `STRICT_TOOLS=1` so a missing simulator is a
-hard failure rather than silent evidence of nothing.
+> **PIC12F675 is not a raw write target.** A bulk erase destroys the per-device
+> factory oscillator trim and bandgap calibration that no image can supply, and
+> a part that has lost either still appears to run. Programming one is a guarded
+> transaction rather than a command, and each route has exactly one home:
+> [FLASHING.md](FLASHING.md) carries the downloaded-release route through
+> `flash-pic12f675.py`, and [release/README.md](release/README.md) carries the
+> development and release-provenance route, including how to resolve an
+> interrupted transaction. Never hand a PIC12F675 image to a programmer
+> directly, and never program a simulator-derived image onto a real device: the
+> calibration word such an image carries is fabricated.
 
 See [TOOLCHAIN](TOOLCHAIN.adoc) for full environmental details.  

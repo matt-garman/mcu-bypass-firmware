@@ -1457,7 +1457,7 @@ the cited record exists; it is not a current authority.
 
 ## BR-DOC-04 - Decide the fate of feature-specific design records
 
-**Status:** DONE `<commit>`
+**Status:** DONE `8180569`
 
 **Candidates:**
 
@@ -1569,9 +1569,9 @@ edited.
 
 ## BR-README-01 - Reduce the root README to overview and entry points
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
-**Current size:** 335 lines
+**Current size:** 335 lines at plan time; 320 at implementation, now 230.
 
 **Keep:**
 
@@ -1598,6 +1598,63 @@ edited.
 - A new user can choose a target and find the correct next document quickly.
 - README is not an alternative operator manual, test manual, or release policy.
 - Safety warnings remain visible without duplicating procedures.
+
+**Work:**
+
+- [x] Remove the per-target test command inventories and the PIC12F675
+  programming transaction.
+- [x] Reduce the surviving build guidance to one lane summary plus the goals a
+  reader needs to get started.
+- [x] Keep every safety warning, and check that each names the document that
+  owns the procedure behind it.
+- [x] Confirm no live gate depends on a removed sentence.
+
+**Result:**
+
+- What went: the three per-target lane inventories (PIC10F322, PIC10F320,
+  PIC12F675) and the ATtiny202 one, 33 and 25 lines of `make` goals with
+  per-goal commentary; the PIC12F675 programming transaction (which route
+  applies, the `simcal` derivation, the retained twelve-artifact matrix and its
+  promotion rules, the preflight/readback requirements, the `TMPDIR` policy),
+  50 lines whose live owners are `FLASHING.md` and `release/README.md`; and the
+  skip-clean/fail-closed paragraphs, whose owner is `test/README.md`. The
+  simulator-features bullet lost its per-lane inventory and the disassembly
+  oracle's compiled cycle counts.
+- What replaced them: one paragraph naming the four lanes and what each needs
+  beyond the host toolchain, one four-line block of build-plus-aggregate goals,
+  and a pointer to `make help` and `test/README.md`. Nothing in the README now
+  restates a test's content.
+- The PIC12F675 warning was *promoted*, not reduced. It was previously the
+  conclusion of a 50-line procedure a reader had to finish to reach; it is now a
+  blockquote that states the hazard (a bulk erase destroys per-device factory
+  trim, and a part that has lost it still appears to run), forbids the two
+  unsafe acts, and names the one home of each route.
+- The v0.9.8 cleanup instruction stays, because a user upgrading an old checkout
+  still needs it, but the renamed-variable mechanics are now a link to
+  `release/README.md`'s override mapping rather than a summary of it. It also
+  moved above the ATtiny13a quickstart lead-in, which it had been separating
+  from its own code block.
+- Retained deliberately, because live gates require this document to publish
+  them: `seven release parts across four microcontroller core generations`, the
+  `PIC10F322, PIC10F320, and PIC12F675 provide functional, fault-injection`
+  clause, and the 21-image scope sentence (`test-release-qualification`); the
+  `GCC 10 or newer` host compiler floor, which `test-release-preflight` holds in
+  agreement with `MINIMUM_GCC` in `test/host_compiler_version.sh` and with
+  `TOOLCHAIN.adoc` and `test/README.md`; and the flashing-helper name, the exact
+  downloaded-release programming claim, and the exact
+  published/software-tested/not-hardware-qualified helper status, all three
+  required of `README.md` by `release_validate_pic12f675_flashing_helper`.
+- The README remains a non-publisher of PIC12F675 programming commands, which is
+  what `release_validate_pic12f675_finalization` expects of it: the goals it
+  names now appear only as prose or as build/test commands, so it is not
+  scanned as a document that must also publish a recovery.
+- The document map, lifecycle table and standing rules are untouched. They are
+  BR-AUTH-01's product and they are the "entry points" half of this task's
+  title.
+- `# Quickstart` became `## Quickstart`; the file had two top-level headings.
+- Verified: `test-makefile-name-contract` (axis B 440 -> 423 commands, axis D
+  149 -> 144 mentions, both far above their 200 and 40 floors),
+  `test-release-preflight`, `test-release-qualification`, and `make test`.
 
 ## BR-TESTDOC-01 - Convert test/README.md into a concise assurance map
 
@@ -2734,8 +2791,8 @@ dependencies and acceptance criteria.
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |
-| BR-DOC-04 | Classify feature safety records | DONE `<commit>` |
-| BR-README-01 | Reduce root README | TODO |
+| BR-DOC-04 | Classify feature safety records | DONE `8180569` |
+| BR-README-01 | Reduce root README | DONE `<commit>` |
 | BR-TESTDOC-01 | Reduce test README | DONE `a64c25e` |
 | BR-TODO-01 | Reduce TODO to registry | TODO |
 | BR-CHANGELOG-01 | Adopt concise changelog policy | DONE `da1d62d` |
