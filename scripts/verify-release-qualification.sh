@@ -51,11 +51,17 @@ command -v python3 >/dev/null 2>&1 \
 
 qualification="$release_dir/QUALIFICATION"
 manifest="$release_dir/MANIFEST.md"
+readme="$release_dir/README.md"
+checksums="$release_dir/SHA256SUMS"
 evidence_dir="$release_dir/evidence"
 [ -f "$qualification" ] && [ ! -L "$qualification" ] && [ -s "$qualification" ] \
 	|| die "QUALIFICATION is missing, empty, or not a regular file"
 [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -s "$manifest" ] \
 	|| die "MANIFEST.md is missing, empty, or not a regular file"
+[ -f "$readme" ] && [ ! -L "$readme" ] && [ -s "$readme" ] \
+	|| die "README.md is missing, empty, or not a regular file"
+[ -f "$checksums" ] && [ ! -L "$checksums" ] && [ -s "$checksums" ] \
+	|| die "SHA256SUMS is missing, empty, or not a regular file"
 [ -d "$evidence_dir" ] && [ ! -L "$evidence_dir" ] \
 	|| die "evidence is missing or not a real directory"
 
@@ -87,7 +93,14 @@ done
 [ "${#q[@]}" -eq "${#required_keys[@]}" ] \
 	|| die "QUALIFICATION does not contain the exact required schema"
 
-[ "${q[format]}" = 3 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+# format=4 is the contract in which SHA256SUMS covers the provenance files as
+# well as the images and helpers, so one signature verification reaches where
+# the firmware came from. format=3 releases (v0.9.0-v0.9.11) signed the
+# firmware only. Exactly one format is accepted: this verifier runs on a
+# freshly staged directory and on the tag CI is publishing, never on a
+# historical release, so a compatibility branch for 3 would be unreachable
+# code claiming a capability nothing exercises.
+[ "${q[format]}" = 4 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -330,5 +343,73 @@ case "${q[release_mode]}" in
 		;;
 esac
 
-printf 'QUALIFIED: %s records clean %s qualification with %d exact %s-ms soak results.\n' \
+# --- the provenance files are inside the signature ---------------------------
+# verify-release-images.sh proves SHA256SUMS LISTS exactly the declared
+# provenance set. That is a different claim from the listed digests being the
+# digests of the files actually sitting here: a release could name
+# QUALIFICATION in its checksum list and ship a QUALIFICATION that does not
+# hash to the listed value, and `sha256sum -c` would fail only for whoever
+# thought to run it. Recompute here, at the point the release is qualified.
+provenance_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-RELEASE_PROVENANCE_FILES) \
+	|| die "could not read RELEASE_PROVENANCE_FILES from the Makefile"
+read -r -a provenance_list <<<"$provenance_raw"
+[ "${#provenance_list[@]}" -gt 0 ] \
+	|| die "the provenance file set is empty (Makefile RELEASE_PROVENANCE_FILES)"
+# Parsed in bash rather than through awk: this script deliberately depends on
+# make, python3 and coreutils and nothing else, and SHA256SUMS is committed
+# input to a privileged workflow. One pass, strict form, duplicates rejected.
+declare -A listed_digest=()
+sums_line_no=0
+while IFS= read -r line || [ -n "$line" ]; do
+	sums_line_no=$((sums_line_no + 1))
+	[[ "$line" != *$'\r'* ]] \
+		|| die "SHA256SUMS line $sums_line_no contains a carriage return"
+	[[ "$line" =~ ^([0-9a-f]{64})\ [\ *]([^/]+)$ ]] \
+		|| die "malformed SHA256SUMS line $sums_line_no: $line"
+	sums_name=${BASH_REMATCH[2]}
+	[ -z "${listed_digest[$sums_name]+set}" ] \
+		|| die "SHA256SUMS lists $sums_name more than once"
+	listed_digest[$sums_name]=${BASH_REMATCH[1]}
+done < "$checksums"
+for provenance_base in "${provenance_list[@]}"; do
+	[ -n "${listed_digest[$provenance_base]+set}" ] \
+		|| die "$provenance_base is not covered by SHA256SUMS; the release signature does not reach its own provenance"
+	actual=$(sha256sum -- "$release_dir/$provenance_base") \
+		|| die "could not hash $provenance_base"
+	[ "${actual%% *}" = "${listed_digest[$provenance_base]}" ] \
+		|| die "$provenance_base does not hash to the value SHA256SUMS records for it"
+done
+
+# --- the per-release README states the same release as QUALIFICATION ---------
+# Until v0.9.12 nothing read this file. It is the first thing a recipient opens,
+# it names the version and carries the shortened-soak banner, and a wrong
+# version or a missing banner here contradicts the machine record while every
+# gate stayed green. It is checked exactly as MANIFEST.md is, against the same
+# authority, because it makes the same claims to a less careful reader.
+grep -Fxq "# $expected_version" "$readme" \
+	|| die "README.md heading does not match QUALIFICATION version $expected_version"
+case "${q[release_mode]}" in
+	production)
+		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$readme"; then
+			die "production README.md contains the dry-run banner"
+		fi
+		if grep -Fq "$EXPRESS_BANNER" "$readme"; then
+			die "production README.md contains the express banner"
+		fi
+		;;
+	express)
+		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$readme"; then
+			die "express README.md contains the dry-run banner"
+		fi
+		grep -Fq "$EXPRESS_BANNER" "$readme" \
+			|| die "express README.md is missing its shortened-soak banner"
+		;;
+	*)
+		grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$readme" \
+			|| die "dry-run README.md is missing its warning banner"
+		;;
+esac
+
+printf 'QUALIFIED: %s records clean %s qualification with %d exact %s-ms soak results, provenance inside the signature.\n' \
 	"$expected_version" "${q[release_mode]}" "${#canonical_soaks[@]}" "$duration"

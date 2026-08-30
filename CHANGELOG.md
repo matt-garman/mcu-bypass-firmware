@@ -76,6 +76,29 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **A release signature now covers where the release came from, not just the
+  firmware.** Through v0.9.11 `SHA256SUMS` listed the images and the required
+  programming helper and nothing else, so `gpg --verify SHA256SUMS.asc
+  SHA256SUMS` followed by `sha256sum -c SHA256SUMS` -- the two commands
+  `release/README.md` gives a recipient -- authenticated the firmware and
+  nothing about its origin: not the source commit, not whether qualification
+  was production or express, not the soak duration, not the PIC12F675
+  raw-write hazard text. `QUALIFICATION`, `MANIFEST.md` and `README.md` sat
+  outside the signature and could be replaced with no verification failing.
+  From v0.9.12 they are inside it, declared in one place as
+  `RELEASE_PROVENANCE_FILES`, published as release assets so the checksum list
+  and the published set stay the same set, and held by
+  `verify-release-images.sh` as a third exactly-declared set beside the images
+  and the helpers. `QUALIFICATION` moves to `format=4` to mark the new
+  contract; `format=3` is rejected rather than accepted as a legacy mode,
+  since the verifier only ever runs on a directory being staged or a tag being
+  published. The per-release `README.md`, which no verifier had ever read, is
+  now bound to `QUALIFICATION` for its version heading and its qualification
+  banner in both directions, exactly as `MANIFEST.md` already was. Releases
+  through v0.9.11 are left as published -- bringing their provenance inside
+  their signatures would invalidate a published signature -- and are covered
+  instead by `make test-published-release-immutability` and their signed tags.
+
 - **Published releases are now held to what was published.** Every release
   directory ships `SHA256SUMS` over its images and programming helpers, so
   those stay verifiable by a recipient holding only that directory. That list

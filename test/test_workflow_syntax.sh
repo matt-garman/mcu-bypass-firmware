@@ -427,14 +427,19 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 "sudo", "install", "-o", "root", "-g", "root", "-m", "0444",
                 "--", "$publish_stage/$asset", "$publish/$asset",
             ]
+            # The provenance files are no longer named here: they come from
+            # Makefile RELEASE_PROVENANCE_FILES, so the checksum list and the
+            # published set cannot drift apart. What stays pinned is that the
+            # checksum list and its detached signature are added exactly once.
             metadata_command = [
-                "expected_assets+=(SHA256SUMS", "SHA256SUMS.asc", "MANIFEST.md",
-                "QUALIFICATION)",
+                "expected_assets+=(SHA256SUMS", "SHA256SUMS.asc)",
+            ]
+            provenance_command = [
+                "expected_assets+=(${release_provenance_names[@]})",
             ]
             snapshot_command = [
                 "cp", "-p", "--", "$dir/*.hex", "$dir/SHA256SUMS",
-                "$dir/SHA256SUMS.asc", "$dir/MANIFEST.md", "$dir/QUALIFICATION",
-                "$publish_stage/",
+                "$dir/SHA256SUMS.asc", "$publish_stage/",
             ]
             inventory_mode_command = [
                 "sudo", "chmod", "0444", "--", "$inventory",
@@ -454,6 +459,9 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
             ]
             metadata_indices = [
                 i for i, command in enumerate(commands) if command == metadata_command
+            ]
+            provenance_indices = [
+                i for i, command in enumerate(commands) if command == provenance_command
             ]
             snapshot_indices = [
                 i for i, command in enumerate(commands) if command == snapshot_command
@@ -486,7 +494,8 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
             )
             check(
                 len(private_dir_indices) == 1 and len(asset_install_indices) == 1
-                and len(metadata_indices) == 1 and len(snapshot_indices) == 1
+                and len(metadata_indices) == 1 and len(provenance_indices) == 1
+                and len(snapshot_indices) == 1
                 and len(record_indices) == 1 and len(inventory_mode_indices) == 1
                 and len(harden_indices) == 1
                 and len(initial_verify_indices) == 1 and len(output_indices) == 1,

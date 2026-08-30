@@ -327,7 +327,7 @@ SOAK_RESULT format=1 status=pass combination=$name duration_ms=$duration livenes
 EOF
 	done
 	cat > "$release/QUALIFICATION" <<EOF
-format=3
+format=4
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -353,6 +353,31 @@ EOF
 		printf -- '- **Final resource evidence:** `evidence/resource-tables.log` (SHA-256 `%s`)\n' \
 			"$resource_digest"
 	} > "$release/MANIFEST.md"
+	{
+		printf '# %s\n\n' "$version"
+		[ "$mode" != dry-run ] \
+			|| printf '> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n\n'
+		[ "$mode" != express ] \
+			|| printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.\n\n'
+		printf 'Prebuilt firmware for %s. See **MANIFEST.md** for provenance.\n' "$version"
+	} > "$release/README.md"
+	reseal_provenance
+}
+
+# The provenance files are inside SHA256SUMS as of QUALIFICATION format=4, so
+# anything that legitimately rewrites one has to re-pin it. A test that mutates
+# a provenance file to make the verifier reject it must NOT call this -- the
+# unsealed digest is part of what such an edit breaks in a real release.
+reseal_provenance() {
+	local provenance_names
+	provenance_names=$(make -s --no-print-directory -C "$ROOT" print-RELEASE_PROVENANCE_FILES)
+	(
+		cd "$release"
+		grep -v -E '  (QUALIFICATION|MANIFEST\.md|README\.md)$' SHA256SUMS > SHA256SUMS.tmp || true
+		mv SHA256SUMS.tmp SHA256SUMS
+		# shellcheck disable=SC2086
+		sha256sum -- $provenance_names >> SHA256SUMS
+	)
 }
 
 refresh_matrix_digest() {
@@ -363,6 +388,7 @@ refresh_matrix_digest() {
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" \
 		"$release/QUALIFICATION" "$release/MANIFEST.md"
+	reseal_provenance
 }
 
 refresh_resource_digest() {
@@ -373,6 +399,7 @@ refresh_resource_digest() {
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" \
 		"$release/QUALIFICATION" "$release/MANIFEST.md"
+	reseal_provenance
 }
 
 expect_pass() {
@@ -448,11 +475,20 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=3\n' >> "$release/QUALIFICATION"
+printf 'format=4\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
+# format=3 is every release through v0.9.11: the contract in which SHA256SUMS
+# covered the images and the helper and left QUALIFICATION, MANIFEST.md and
+# README.md outside the signature. It is rejected rather than accepted as a
+# legacy mode, because this verifier only ever runs on a directory being staged
+# or a tag being published -- both of which must sign their own provenance.
 reset_fixture
-sed -i 's/^format=3$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=4$/format=3/' "$release/QUALIFICATION"
+expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
+
+reset_fixture
+sed -i 's/^format=4$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
@@ -506,6 +542,91 @@ sed -i '2i > **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran i
 	"$release/MANIFEST.md"
 expect_fail "production manifest carrying the express banner" \
 	"production MANIFEST.md contains the express banner"
+
+# --- the per-release README, which nothing read until QUALIFICATION format=4 --
+# It is the first file a recipient opens and it makes the same two claims the
+# manifest does: which release this is, and whether the soak was shortened. Held
+# to the same authority, in both directions, for the same reason.
+reset_fixture
+rm -f "$release/README.md"
+expect_fail "missing per-release README" "README.md is missing"
+
+reset_fixture
+rm -f "$release/README.md"
+printf 'real readme\n' > "$release/real-readme"
+ln -s real-readme "$release/README.md"
+expect_fail "symlink per-release README" "README.md is missing"
+
+reset_fixture
+sed -i '1s/.*/# v99.0.1/' "$release/README.md"
+reseal_provenance
+expect_fail "README naming another release" \
+	"README.md heading does not match QUALIFICATION version"
+
+reset_fixture express 3600000 60000 0
+sed -i '/EXPRESS QUALIFICATION -- SHORTENED SOAK/d' "$release/README.md"
+reseal_provenance
+expect_fail "express README without its banner" \
+	"express README.md is missing its shortened-soak banner"
+
+reset_fixture production 86400000 60000 0
+sed -i '2i > **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.' \
+	"$release/README.md"
+reseal_provenance
+expect_fail "production README carrying the express banner" \
+	"production README.md contains the express banner"
+
+reset_fixture production 86400000 60000 0
+sed -i '2i > **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.' \
+	"$release/README.md"
+reseal_provenance
+expect_fail "production README carrying the dry-run banner" \
+	"production README.md contains the dry-run banner"
+
+reset_fixture dry-run 60000 60000 1
+sed -i '/DRY RUN -- NOT A VALIDATED RELEASE/d' "$release/README.md"
+reseal_provenance
+expect_fail "dry-run README without its warning" \
+	"dry-run README.md is missing its warning banner" --allow-dry-run
+
+# --- the signature has to reach the provenance --------------------------------
+# Every release through v0.9.11 signed its images and left QUALIFICATION,
+# MANIFEST.md and README.md outside the checksum list. These four hold the new
+# contract from both sides: the entry has to be there, and it has to be the
+# digest of the file that is actually there.
+reset_fixture
+grep -v '  QUALIFICATION$' "$release/SHA256SUMS" > "$release/SHA256SUMS.tmp"
+mv "$release/SHA256SUMS.tmp" "$release/SHA256SUMS"
+expect_fail "QUALIFICATION outside the signed checksum list" \
+	"QUALIFICATION is not covered by SHA256SUMS"
+
+reset_fixture
+grep -v '  MANIFEST\.md$' "$release/SHA256SUMS" > "$release/SHA256SUMS.tmp"
+mv "$release/SHA256SUMS.tmp" "$release/SHA256SUMS"
+expect_fail "MANIFEST.md outside the signed checksum list" \
+	"MANIFEST.md is not covered by SHA256SUMS"
+
+reset_fixture
+grep -v '  README\.md$' "$release/SHA256SUMS" > "$release/SHA256SUMS.tmp"
+mv "$release/SHA256SUMS.tmp" "$release/SHA256SUMS"
+expect_fail "README.md outside the signed checksum list" \
+	"README.md is not covered by SHA256SUMS"
+
+# The edit that the whole change exists to catch: provenance rewritten after
+# the release was sealed. Deliberately NOT resealed.
+reset_fixture
+printf '\nappended after sealing\n' >> "$release/README.md"
+expect_fail "provenance edited after sealing" \
+	"README.md does not hash to the value SHA256SUMS records for it"
+
+# The manifest gains a paragraph that contradicts nothing the cross-checks
+# above read -- the version, mode, commit, digests and banner all still agree.
+# Before format=4 this was an undetectable edit to a published release; now the
+# only thing that catches it is the digest the release signed for itself.
+reset_fixture
+printf '\nAn amendment nobody sealed.\n' >> "$release/MANIFEST.md"
+expect_fail "manifest gains an unsealed paragraph" \
+	"MANIFEST.md does not hash to the value SHA256SUMS records for it"
 
 reset_fixture express 3600000 60000 0
 sed -i '2i > **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.' \

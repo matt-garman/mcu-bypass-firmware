@@ -344,14 +344,30 @@ jobs:
               || { echo "::error::required release artifact is missing: $helper_base"; exit 1; }
           done
           expected_assets+=("${release_helper_names[@]}")
-          expected_assets+=(SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)
+          # Provenance files, read from the same Makefile rather than named
+          # here. As of QUALIFICATION format=4 these are INSIDE SHA256SUMS, so
+          # publishing a set narrower than the checksum list would hand every
+          # asset downloader a `sha256sum -c` that fails on a file GitHub never
+          # served them. One declaration keeps the signed set and the published
+          # set the same set.
+          release_provenance_text=$(make -s --no-print-directory \
+            print-RELEASE_PROVENANCE_FILES)
+          read -r -a release_provenance_names <<< "$release_provenance_text"
+          ((${#release_provenance_names[@]} > 0)) \
+            || { echo "::error::Makefile RELEASE_PROVENANCE_FILES is empty"; exit 1; }
+          for provenance_base in "${release_provenance_names[@]}"; do
+            test -f "$dir/$provenance_base" && test ! -L "$dir/$provenance_base" \
+              || { echo "::error::$dir/$provenance_base is missing or not a regular file"; exit 1; }
+            cp -p -- "$dir/$provenance_base" "$publish_stage"/ \
+              || { echo "::error::provenance file is missing: $provenance_base"; exit 1; }
+          done
+          expected_assets+=("${release_provenance_names[@]}")
+          expected_assets+=(SHA256SUMS SHA256SUMS.asc)
 
           # Freeze the verified release assets before later test targets run.
           # Publication consumes only this snapshot, never the mutable tree.
-          test -f "$dir/MANIFEST.md" && test ! -L "$dir/MANIFEST.md" \
-            || { echo "::error::$dir/MANIFEST.md is missing or not a regular file"; exit 1; }
           cp -p -- "$dir"/*.hex "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
-            "$dir/MANIFEST.md" "$dir/QUALIFICATION" "$publish_stage"/
+            "$publish_stage"/
           sudo install -d -o root -g root -m 0700 -- "$frozen_root" "$publish"
           for asset in "${expected_assets[@]}"; do
             sudo install -o root -g root -m 0444 -- \
@@ -370,6 +386,7 @@ jobs:
             echo "inventory=$inventory"
             echo "inventory_sha256=$inventory_sha256"
             echo "helper_assets=${release_helper_names[*]}"
+            echo "provenance_assets=${release_provenance_names[*]}"
           } >> "$GITHUB_OUTPUT"
 
       # --- re-run the gates on the clean runner -----------------------------
@@ -449,6 +466,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           VERIFIED_RELEASE_COMMIT: ${{ steps.rel.outputs.commit }}
           RELEASE_HELPER_ASSETS: ${{ steps.repro.outputs.helper_assets }}
+          RELEASE_PROVENANCE_ASSETS: ${{ steps.repro.outputs.provenance_assets }}
         run: |
           set -euo pipefail
           dir=$RELEASE_DIR
@@ -469,9 +487,24 @@ jobs:
               || { echo "::error::frozen bundle is missing required artifact: $helper_base"; exit 1; }
             helper_assets+=( "$dir/$helper_base" )
           done
-          assets=( "$dir"/*.hex "${helper_assets[@]}" \
-            "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" \
-            "$dir/MANIFEST.md" "$dir/QUALIFICATION" )
+          # The provenance files, carried forward for the same reason as the
+          # helpers. They are inside SHA256SUMS, so uploading a narrower set
+          # than the checksum list would give every downloader a `sha256sum -c`
+          # that fails on a file that was never published.
+          read -r -a provenance_names <<< "${RELEASE_PROVENANCE_ASSETS:-}"
+          ((${#provenance_names[@]} > 0)) \
+            || { echo "::error::no provenance files were carried forward"; exit 1; }
+          provenance_assets=()
+          for provenance_base in "${provenance_names[@]}"; do
+            case "$provenance_base" in
+              */*|.*|"") echo "::error::invalid provenance file: $provenance_base"; exit 1 ;;
+            esac
+            test -f "$dir/$provenance_base" && test ! -L "$dir/$provenance_base" \
+              || { echo "::error::frozen bundle is missing provenance file: $provenance_base"; exit 1; }
+            provenance_assets+=( "$dir/$provenance_base" )
+          done
+          assets=( "$dir"/*.hex "${helper_assets[@]}" "${provenance_assets[@]}" \
+            "$dir/SHA256SUMS" "$dir/SHA256SUMS.asc" )
           notes="$dir/MANIFEST.md"; [ -f "$notes" ] || notes=/dev/null
           # Publication kind, decided from the tag alone. A bare vX.Y.Z is an
           # ordinary release; every accepted suffix (v1.0.0-rc.1) publishes as a

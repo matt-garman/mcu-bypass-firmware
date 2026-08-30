@@ -134,6 +134,37 @@ for entry in "${helper_map[@]}"; do
 done
 LC_ALL=C sort -o "$helper_expected" "$helper_expected"
 
+# --- provenance files, a third set with its own exact comparison -------------
+# Images say what the firmware is; helpers say how to program it; provenance
+# says where it came from and under what qualification. All three are inside
+# one signature, so all three need an exact declared set -- an entry that
+# belongs to none of them is a file that got signed without being reviewed,
+# and a declared file that is absent is provenance that quietly stopped being
+# covered. Neither is visible if the checksum list is partitioned in two.
+provenance_raw=$(mkv_from_repo RELEASE_PROVENANCE_FILES) \
+	|| die "could not read RELEASE_PROVENANCE_FILES from the Makefile"
+read -r -a provenance_list <<<"$provenance_raw"
+[ "${#provenance_list[@]}" -gt 0 ] \
+	|| die "the provenance file set is empty (Makefile RELEASE_PROVENANCE_FILES)"
+declare -A provenance_declared=()
+provenance_expected="$work/provenance-expected.txt"
+: > "$provenance_expected"
+for provenance_base in "${provenance_list[@]}"; do
+	[[ "$provenance_base" =~ $helper_name_re ]] \
+		|| die "provenance file has an invalid staged name: $provenance_base (Makefile RELEASE_PROVENANCE_FILES)"
+	case "$provenance_base" in
+		*.hex) die "a provenance file may not be named like a firmware image: $provenance_base (Makefile RELEASE_PROVENANCE_FILES)" ;;
+		SHA256SUMS|SHA256SUMS.asc) die "$provenance_base cannot be listed in itself (Makefile RELEASE_PROVENANCE_FILES)" ;;
+	esac
+	[ -z "${provenance_declared[$provenance_base]+set}" ] \
+		|| die "duplicate provenance file: $provenance_base (Makefile RELEASE_PROVENANCE_FILES)"
+	[ -z "${helper_source[$provenance_base]+set}" ] \
+		|| die "$provenance_base is declared as both a release artifact and a provenance file"
+	provenance_declared[$provenance_base]=1
+	printf '%s\n' "$provenance_base" >> "$provenance_expected"
+done
+LC_ALL=C sort -o "$provenance_expected" "$provenance_expected"
+
 expected="$work/expected.txt"
 : > "$expected"
 for base in "${expected_images[@]}"; do
@@ -184,12 +215,15 @@ listed_raw="$work/listed-raw.txt"
 listed="$work/listed.txt"
 listed_helpers_raw="$work/listed-helpers-raw.txt"
 listed_helpers="$work/listed-helpers.txt"
+listed_provenance_raw="$work/listed-provenance-raw.txt"
+listed_provenance="$work/listed-provenance.txt"
 listed_all="$work/listed-all.txt"
 # A fresh build produces images, not tools, so the fresh leg is checked against
 # an image-only view of the same signed file rather than a second manifest.
 checksum_images="$work/SHA256SUMS.images"
 : > "$listed_raw"
 : > "$listed_helpers_raw"
+: > "$listed_provenance_raw"
 : > "$listed_all"
 : > "$checksum_images"
 while IFS= read -r line || [ -n "$line" ]; do
@@ -199,6 +233,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 	printf '%s\n' "$entry_name" >> "$listed_all"
 	if [ -n "${helper_source[$entry_name]+set}" ]; then
 		printf '%s\n' "$entry_name" >> "$listed_helpers_raw"
+	elif [ -n "${provenance_declared[$entry_name]+set}" ]; then
+		printf '%s\n' "$entry_name" >> "$listed_provenance_raw"
 	else
 		printf '%s\n' "$entry_name" >> "$listed_raw"
 		printf '%s\n' "$line" >> "$checksum_images"
@@ -209,6 +245,7 @@ duplicates=$(LC_ALL=C sort "$listed_all" | uniq -d)
 [ -z "$duplicates" ] || die "duplicate SHA256SUMS entry: $duplicates"
 LC_ALL=C sort "$listed_raw" > "$listed"
 LC_ALL=C sort "$listed_helpers_raw" > "$listed_helpers"
+LC_ALL=C sort "$listed_provenance_raw" > "$listed_provenance"
 
 committed="$work/committed.txt"
 fresh="$work/fresh.txt"
@@ -234,6 +271,21 @@ fi
 if ! diff -u "$helper_expected" "$listed_helpers"; then
 	die "SHA256SUMS entries do not exactly match the required release artifact set (Makefile RELEASE_HELPER_MAP)"
 fi
+# The provenance leg. A release whose signature does not reach its own
+# QUALIFICATION, MANIFEST.md and README.md authenticates the firmware and
+# nothing about where the firmware came from -- which is what every release
+# through v0.9.11 did.
+if ! diff -u "$provenance_expected" "$listed_provenance"; then
+	die "SHA256SUMS entries do not exactly match the provenance file set (Makefile RELEASE_PROVENANCE_FILES)"
+fi
+# Listing a provenance file is not the same as having one. The digest leg
+# below covers the images; these are checked here because nothing else in this
+# script opens them.
+for provenance_base in "${provenance_list[@]}"; do
+	provenance_path="$release_dir/$provenance_base"
+	[ -f "$provenance_path" ] && [ ! -L "$provenance_path" ] && [ -s "$provenance_path" ] \
+		|| die "provenance file is missing, empty, or not a regular file: $provenance_base"
+done
 
 # The committed directory must hold each required artifact, and each must be the
 # tracked source byte for byte. No build step produces these files, so "the
@@ -255,6 +307,20 @@ for helper_base in $(LC_ALL=C sort "$helper_expected"); do
 		|| die "could not hash tracked release artifact source: ${helper_source[$helper_base]}"
 	[ "${staged_digest%% *}" = "${source_digest%% *}" ] \
 		|| die "staged release artifact $helper_base differs from its tracked source ${helper_source[$helper_base]}"
+done
+
+# Provenance files join the snapshot for the same reason the helpers do: the
+# `sha256sum -c` below runs over the WHOLE checksum file, so anything listed
+# has to be present here or the check cannot speak for it. This is also the
+# leg that proves the listed provenance digests are the digests of the files
+# actually committed, not merely that the names appear.
+for provenance_base in "${provenance_list[@]}"; do
+	provenance_path="$release_dir/$provenance_base"
+	cp -a -- "$provenance_path" "$committed_snapshot/$provenance_base" \
+		|| die "could not snapshot provenance file: $provenance_base"
+	[ -f "$committed_snapshot/$provenance_base" ] \
+		&& [ ! -L "$committed_snapshot/$provenance_base" ] \
+		|| die "provenance file is not a regular file: $provenance_path"
 done
 
 printf '%s\n' '== committed release checksums =='

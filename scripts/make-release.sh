@@ -55,6 +55,11 @@
 #      .hex images, SHA256SUMS, a provenance MANIFEST, a README, the
 #      soak/validation evidence, and a commit message. Re-validate the bounded
 #      current-release declarations against the inventory actually staged.
+#      SHA256SUMS covers the images, the required helpers AND the provenance
+#      files (QUALIFICATION, MANIFEST.md, README.md) as of v0.9.12, so the one
+#      detached signature in step 5 authenticates where the firmware came from
+#      as well as the firmware. Through v0.9.11 it authenticated only the
+#      firmware, and the provenance could be swapped with nothing failing.
 #   5. STOP. Print the exact git + signing commands for the human to run. This
 #      script NEVER commits, tags, signs, or pushes -- per project policy all
 #      modifying git operations are done by hand.
@@ -819,6 +824,30 @@ for helper_entry in $RELEASE_HELPER_MAP; do
 		|| die "required release artifact source is missing or not a regular file: $helper_src"
 	RELEASE_HELPER_SOURCE[$helper_base]=$helper_src
 	RELEASE_HELPER_NAMES+=("$helper_base")
+done
+
+# The provenance files this release will sign. Read and validated here, beside
+# the helper set and long before the soak, so a misdeclared list fails in the
+# first minute rather than after 24 hours. These have no tracked source: they
+# are generated from the qualified run further down, so all that can be checked
+# now is that the declaration itself is well formed.
+RELEASE_PROVENANCE_FILES=$(mkv RELEASE_PROVENANCE_FILES)
+[ -n "${RELEASE_PROVENANCE_FILES// /}" ] \
+	|| die "Makefile RELEASE_PROVENANCE_FILES is empty; a release must sign its own provenance"
+RELEASE_PROVENANCE_NAMES=()
+for provenance_base in $RELEASE_PROVENANCE_FILES; do
+	case "$provenance_base" in
+		*/*|.*|*.hex) die "invalid staged name for a provenance file: $provenance_base" ;;
+		SHA256SUMS|SHA256SUMS.asc)
+			die "$provenance_base cannot be signed by itself; remove it from RELEASE_PROVENANCE_FILES" ;;
+	esac
+	for seen in ${RELEASE_PROVENANCE_NAMES[@]+"${RELEASE_PROVENANCE_NAMES[@]}"}; do
+		[ "$seen" != "$provenance_base" ] \
+			|| die "duplicate provenance file: $provenance_base"
+	done
+	[ -z "${RELEASE_HELPER_SOURCE[$provenance_base]+set}" ] \
+		|| die "$provenance_base is declared as both a release artifact and a provenance file"
+	RELEASE_PROVENANCE_NAMES+=("$provenance_base")
 done
 
 # A production or versioned rehearsal must start from finalized release prose.
@@ -2314,6 +2343,22 @@ ok "wrote MANIFEST.md"
 	printf '\nVerify the required checksum signature first:\n'
 	printf '```\ngpg --verify SHA256SUMS.asc SHA256SUMS\n```\n'
 } > "$OUTPUT_DIR/README.md"
+
+# Fold the provenance files into the checksum list. This has to happen HERE,
+# after they are generated, and it is why SHA256SUMS is appended to rather than
+# written once: the images are checksummed the moment they are proven, so a
+# later failure cannot leave an unverified image in a list that already exists,
+# while the provenance files do not exist until the run that describes them has
+# finished. Appending in a second pass keeps both properties.
+#
+# Named from the Makefile declaration, never globbed, exactly like the images:
+# `sha256sum ./*.md` in a staging directory is how a stray file becomes a signed
+# release artifact. The entries are relative names in the same format as the
+# rest of the file, so `sha256sum -c SHA256SUMS` covers them with no special
+# case for the recipient.
+( cd "$OUTPUT_DIR" && sha256sum -- "${RELEASE_PROVENANCE_NAMES[@]}" >> SHA256SUMS ) \
+	|| die "could not checksum the staged provenance files"
+ok "extended SHA256SUMS over ${#RELEASE_PROVENANCE_NAMES[@]} provenance file(s): ${RELEASE_PROVENANCE_NAMES[*]}"
 
 if [ "$DRY_RUN" -eq 1 ]; then qualification_args=(--allow-dry-run); else qualification_args=(); fi
 scripts/verify-release-qualification.sh "${qualification_args[@]}" "$OUTPUT_DIR" "$VERSION" \

@@ -7747,6 +7747,27 @@ override RELEASE_HELPER_ARTIFACTS := flash-pic12f675.py
 override RELEASE_HELPER_SOURCES := scripts/flash-pic12f675.py
 override RELEASE_HELPER_MAP := flash-pic12f675.py=scripts/flash-pic12f675.py
 
+# --- provenance files, inside the signature since v0.9.12 --------------------
+# Through v0.9.11 a release signed its images and its helper, and nothing else.
+# A recipient who ran the two commands release/README.md gives them --
+# `gpg --verify SHA256SUMS.asc SHA256SUMS` then `sha256sum -c SHA256SUMS` --
+# authenticated the firmware and NOTHING about where it came from: not the
+# source commit, not whether qualification was production or express, not the
+# soak duration, not the PIC12F675 raw-write hazard text. QUALIFICATION,
+# MANIFEST.md and README.md sat outside the signed list and could be replaced
+# without any verification failing.
+#
+# They are named here, never globbed, for the same reason the image set is: a
+# verifier that accepts "whatever provenance files happen to be present" cannot
+# report one that went missing. Unlike the helpers these have no tracked source
+# -- make-release.sh generates them from the qualified run -- so this is a list
+# of staged names rather than a name=source map.
+#
+# Adding a file here widens what the release signature covers. Removing one
+# narrows it, silently, for every future release: that is the edit to think
+# hardest about in this block.
+override RELEASE_PROVENANCE_FILES := QUALIFICATION MANIFEST.md README.md
+
 # --- nothing is staged: every part this repository builds is released ---------
 # There is no longer a "built but deliberately withheld" set. The PIC12F675 was
 # the one staged part, and it graduated into RELEASE_IMAGES above alongside the

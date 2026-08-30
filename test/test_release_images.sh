@@ -27,13 +27,17 @@ cat > "$fixture_root/Makefile" <<'EOF'
 override RELEASE_IMAGES := $(shell cat expected-images.txt)
 override RELEASE_IDENTITY_IMAGES := $(shell cat expected-identity.txt)
 override RELEASE_HELPER_MAP := $(shell cat expected-helpers.txt)
+override RELEASE_PROVENANCE_FILES := $(shell cat expected-provenance.txt)
 .PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES print-RELEASE_HELPER_MAP
+.PHONY: print-RELEASE_PROVENANCE_FILES
 print-RELEASE_IMAGES:
 	@printf '%s\n' "$(RELEASE_IMAGES)"
 print-RELEASE_IDENTITY_IMAGES:
 	@printf '%s\n' "$(RELEASE_IDENTITY_IMAGES)"
 print-RELEASE_HELPER_MAP:
 	@printf '%s\n' "$(RELEASE_HELPER_MAP)"
+print-RELEASE_PROVENANCE_FILES:
+	@printf '%s\n' "$(RELEASE_PROVENANCE_FILES)"
 EOF
 
 # The canonical set and the pinned identity agree in every synthetic case except
@@ -56,6 +60,20 @@ set_fixture_helper_map() {
 	printf '%s\n' "$1" > "$fixture_root/expected-helpers.txt"
 }
 
+# The provenance files a release signs for itself. Declared as bare staged
+# names: unlike the helpers they have no tracked source, because make-release.sh
+# generates them from the qualified run.
+set_fixture_provenance_files() {
+	printf '%s\n' "$1" > "$fixture_root/expected-provenance.txt"
+}
+
+# Every fixture that rebuilds SHA256SUMS still has to sign its own provenance,
+# so the checksum list stays a complete partition of images, helpers and
+# provenance. Named once here rather than repeated at each site: a test that
+# rebuilds the list to exercise an IMAGE or HELPER failure must not
+# accidentally start exercising a provenance failure instead.
+FIXTURE_PROVENANCE='QUALIFICATION MANIFEST.md README.md'
+
 reset_fixture() {
 	rm -rf "$release" "$fresh" "$fresh2" "$release_alias" "$fresh_alias" \
 		"$fakebin"
@@ -68,11 +86,19 @@ reset_fixture() {
 	printf '#!/usr/bin/env python3\nprint("fixture helper")\n' \
 		> "$fixture_root/scripts/helper.py"
 	cp -p "$fixture_root/scripts/helper.py" "$release/helper.py"
-	(cd "$release" && sha256sum a.hex b.hex helper.py > SHA256SUMS)
+	# The provenance files. A fresh build never produces these either: they are
+	# written from the qualified run, and as of QUALIFICATION format=4 they are
+	# inside the checksum list so one signature reaches them.
+	printf 'format=4\n' > "$release/QUALIFICATION"
+	printf '# Firmware release fixture\n' > "$release/MANIFEST.md"
+	printf '# fixture\n' > "$release/README.md"
+	(cd "$release" && sha256sum a.hex b.hex helper.py \
+		QUALIFICATION MANIFEST.md README.md > SHA256SUMS)
 	# Synthetic tests use the production verifier unchanged beside a test-only
 	# Makefile. Production therefore retains exactly one canonical-set input.
 	set_fixture_expected_images 'a.hex b.hex'
 	set_fixture_helper_map 'helper.py=scripts/helper.py'
+	set_fixture_provenance_files 'QUALIFICATION MANIFEST.md README.md'
 }
 
 real_sha256sum=$(command -v sha256sum) \
@@ -265,13 +291,13 @@ expect_fail "required artifact absent from the committed release" \
 	"committed release is missing required artifact"
 
 reset_fixture
-(cd "$release" && sha256sum a.hex b.hex > SHA256SUMS)
+(cd "$release" && sha256sum a.hex b.hex $FIXTURE_PROVENANCE > SHA256SUMS)
 expect_fail "required artifact absent from SHA256SUMS" \
 	"do not exactly match the required release artifact set"
 
 reset_fixture
 printf '# staged bytes that are not the tracked source\n' >> "$release/helper.py"
-(cd "$release" && sha256sum a.hex b.hex helper.py > SHA256SUMS)
+(cd "$release" && sha256sum a.hex b.hex helper.py $FIXTURE_PROVENANCE > SHA256SUMS)
 expect_fail "staged artifact drifted from its tracked source" \
 	"differs from its tracked source"
 
@@ -308,6 +334,63 @@ printf '%064d  stowaway.txt\n' 0 >> "$release/SHA256SUMS"
 expect_fail "undeclared non-image checksum entry" \
 	"do not exactly match the canonical release product set"
 
+# --- the provenance leg -------------------------------------------------------
+# A release signs three things about itself: what the firmware is, how to
+# program it, and where it came from. The third set is held exactly like the
+# other two, so a provenance file cannot go missing from the signature, appear
+# in it undeclared, or be listed without being there.
+reset_fixture
+grep -v '  QUALIFICATION$' "$release/SHA256SUMS" > "$release/SHA256SUMS.tmp"
+mv "$release/SHA256SUMS.tmp" "$release/SHA256SUMS"
+expect_fail "provenance file absent from SHA256SUMS" \
+	"do not exactly match the provenance file set"
+
+reset_fixture
+rm -f "$release/README.md"
+expect_fail "declared provenance file absent from the release" \
+	"provenance file is missing, empty, or not a regular file"
+
+reset_fixture
+rm -f "$release/README.md"
+printf 'elsewhere\n' > "$release/real-readme"
+ln -s real-readme "$release/README.md"
+expect_fail "symlinked provenance file" \
+	"provenance file is missing, empty, or not a regular file"
+
+# The digest leg: listed under the right name, wrong bytes. `sha256sum -c` over
+# the committed snapshot is what makes the listing mean something.
+reset_fixture
+printf 'rewritten after sealing\n' >> "$release/MANIFEST.md"
+expect_fail "provenance file edited after sealing" \
+	"committed release checksum verification failed"
+
+# Fail closed, exactly as the helper set does.
+reset_fixture
+set_fixture_provenance_files ''
+expect_fail "empty provenance set" "provenance file set is empty"
+
+reset_fixture
+set_fixture_provenance_files 'QUALIFICATION MANIFEST.md README.md QUALIFICATION'
+expect_fail "duplicate provenance declaration" "duplicate provenance file"
+
+reset_fixture
+set_fixture_provenance_files 'QUALIFICATION MANIFEST.md README.md SHA256SUMS'
+expect_fail "checksum list declared as its own provenance" \
+	"cannot be listed in itself"
+
+reset_fixture
+set_fixture_provenance_files 'QUALIFICATION MANIFEST.md README.md provenance.hex'
+expect_fail "provenance named like a firmware image" \
+	"may not be named like a firmware image"
+
+# A name cannot be both a tool and a provenance file: the two sets carry
+# different reproduction claims, and an entry in both would satisfy whichever
+# comparison ran first.
+reset_fixture
+set_fixture_provenance_files 'QUALIFICATION MANIFEST.md README.md helper.py'
+expect_fail "name declared as both artifact and provenance" \
+	"declared as both a release artifact and a provenance file"
+
 # The reproduction leg rebuilds IMAGES. A tool sitting in a fresh build
 # directory is not part of what a compiler reproduced, and is ignored.
 reset_fixture
@@ -327,7 +410,7 @@ expect_pass "a stray tool in the fresh build directory is ignored"
 # existed it PASSED.
 reset_fixture
 rm "$release/b.hex" "$fresh/b.hex"
-(cd "$release" && sha256sum a.hex helper.py > SHA256SUMS)
+(cd "$release" && sha256sum a.hex helper.py $FIXTURE_PROVENANCE > SHA256SUMS)
 expect_fail "image omitted from all three observed sets" \
 	"do not exactly match the canonical release product set"
 
@@ -401,7 +484,7 @@ checks=$((checks + 1))
 # to GNU Make's inherited option, variable and injected-makefile channels.
 reset_fixture
 rm "$release/b.hex" "$fresh/b.hex"
-(cd "$release" && sha256sum a.hex helper.py > SHA256SUMS)
+(cd "$release" && sha256sum a.hex helper.py $FIXTURE_PROVENANCE > SHA256SUMS)
 injected_makefile="$work/injected-release-images.mk"
 printf 'override RELEASE_IMAGES := a.hex\n' > "$injected_makefile"
 
@@ -1127,13 +1210,17 @@ EOF
 override RELEASE_IMAGES := $binding_canonical
 override RELEASE_IDENTITY_IMAGES := $binding_canonical
 override RELEASE_HELPER_MAP := $binding_helper=scripts/$binding_helper
+override RELEASE_PROVENANCE_FILES := $FIXTURE_PROVENANCE
 .PHONY: print-RELEASE_IMAGES print-RELEASE_IDENTITY_IMAGES print-RELEASE_HELPER_MAP
+.PHONY: print-RELEASE_PROVENANCE_FILES
 print-RELEASE_IMAGES:
 	@printf '%s\\n' "\$(RELEASE_IMAGES)"
 print-RELEASE_IDENTITY_IMAGES:
 	@printf '%s\\n' "\$(RELEASE_IDENTITY_IMAGES)"
 print-RELEASE_HELPER_MAP:
 	@printf '%s\\n' "\$(RELEASE_HELPER_MAP)"
+print-RELEASE_PROVENANCE_FILES:
+	@printf '%s\\n' "\$(RELEASE_PROVENANCE_FILES)"
 EOF
 	printf '#!/usr/bin/env python3\nprint("binding fixture helper")\n' \
 		> "$binding_repo/scripts/$binding_helper"
@@ -1144,9 +1231,13 @@ EOF
 		> "$binding_release/bypass-pic12f675-cd4053_with_mute.hex"
 	printf 'relay release bytes\n' \
 		> "$binding_release/bypass-pic12f675-tq2_l2_5v_relay.hex"
+	printf 'format=4\n' > "$binding_release/QUALIFICATION"
+	printf '# Firmware release binding fixture\n' > "$binding_release/MANIFEST.md"
+	printf '# binding fixture\n' > "$binding_release/README.md"
 	(
 		cd "$binding_release"
-		sha256sum $binding_canonical "$binding_helper" > SHA256SUMS
+		sha256sum $binding_canonical "$binding_helper" $FIXTURE_PROVENANCE \
+			> SHA256SUMS
 	)
 	printf 'fixture detached signature\n' > "$binding_release/SHA256SUMS.asc"
 	case "$mutation" in
@@ -1181,7 +1272,8 @@ EOF
 				>> "$binding_release/$binding_helper"
 			(
 				cd "$binding_release"
-				sha256sum $binding_canonical "$binding_helper" > SHA256SUMS
+				sha256sum $binding_canonical "$binding_helper" \
+					$FIXTURE_PROVENANCE > SHA256SUMS
 			)
 			;;
 		*) fail "unknown release-program binding fixture mutation: $mutation" ;;

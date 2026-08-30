@@ -2591,7 +2591,7 @@ branches may not be covered under `--max-configs=1` without explicit selectors.
 
 ## BR-REL-01 - Define one canonical signed release index
 
-**Status:** TODO
+**Status:** IN PROGRESS -- first half done `<commit>`
 
 **Risk:** High. This changes provenance representation and must be independently
 reviewed before old mechanisms are retired.
@@ -2623,25 +2623,120 @@ reviewed before old mechanisms are retired.
 
 **Work:**
 
-- [ ] Decide whether to evolve `QUALIFICATION` or introduce a clearly versioned
-  `release-index.json` rather than create parallel authorities.
-- [ ] Define canonical serialization and parser behavior.
-- [ ] Sign the canonical root or bind its digest in the signed tag.
+- [x] Decide whether to evolve `QUALIFICATION` or introduce a clearly versioned
+  `release-index.json` rather than create parallel authorities. **Decided by the
+  user: evolve `QUALIFICATION`.** It is already the versioned machine authority
+  with a closed schema, it already extends by binding evidence digests
+  (`pic12f675_matrix_sha256`, `resource_tables_sha256`), and a JSON root would
+  be a second authority during transition -- the thing this item warns against.
+  Offline verification also stays `sha256sum` + `gpg` with no JSON tooling.
+- [x] Define canonical serialization and parser behavior. Unchanged and already
+  strict: `key=value`, closed key set, unknown keys rejected, duplicates
+  rejected, never sourced. `format` moves 3 -> 4.
+- [x] Sign the canonical root or bind its digest in the signed tag. Done by
+  bringing `QUALIFICATION`, `MANIFEST.md` and `README.md` inside `SHA256SUMS`,
+  which the detached signature already covers.
 - [ ] Generate human manifest, release notes, programming guide, and checksums
-  from canonical data where practical.
-- [ ] Ensure every published payload is transitively authenticated.
-- [ ] Keep `SHA256SUMS` as a standard user verification view if useful, but do
-  not maintain a conflicting independent hash table.
-- [ ] Reject unknown fields/versions according to an explicit compatibility
-  policy; do not add speculative backward compatibility.
+  from canonical data where practical. **Deferred to the second half.** The
+  toolchain table, the `Built:` / `Validation:` / `Release set:` lines and the
+  per-asset records are still authored prose with no machine authority behind
+  them; binding them needs new `QUALIFICATION` keys and an evidence artifact,
+  which is a larger change than closing the signing gap.
+- [x] Ensure every published payload is transitively authenticated. Every file
+  in a release directory is now either inside `SHA256SUMS` or inside
+  `evidence/`; the evidence set is separately bound by exact digest from
+  `QUALIFICATION` for the two artifacts that carry release claims.
+- [x] Keep `SHA256SUMS` as a standard user verification view if useful, but do
+  not maintain a conflicting independent hash table. `SHA256SUMS` remains the
+  single list and simply got wider. No second table was introduced.
+- [x] Reject unknown fields/versions according to an explicit compatibility
+  policy; do not add speculative backward compatibility. `format=4` only.
+  `format=3` is rejected, not accepted as a legacy mode: this verifier runs on a
+  directory being staged or a tag being published and never on a historical
+  release, so a compatibility branch would be unreachable code claiming a
+  capability nothing exercises.
 
 **Acceptance:**
 
-- Every per-release fact has one machine authority.
-- Human views cannot drift because they are generated and checked.
-- Offline integrity verification remains possible.
+- Every per-release fact has one machine authority. *Partly: the facts
+  `QUALIFICATION` carries do; the toolchain table and the `Built:` /
+  `Validation:` / `Release set:` lines still do not. Second half.*
+- Human views cannot drift because they are generated and checked. *`MANIFEST.md`
+  was already checked on 7 facts; `README.md` now is too. Generation from
+  canonical data is deferred.*
+- Offline integrity verification remains possible. *Improved: the same two
+  commands now authenticate provenance as well as firmware.*
 - Qualification, reproducibility, integrity, and hardware validation remain
-  distinct claims.
+  distinct claims. *Unchanged; nothing was merged.*
+
+**Result of the first half.**
+
+**The measurement that reframed this item.** Its "current duplication" list
+names eight surfaces, implying eight authorities that disagree. The tree says
+otherwise. `QUALIFICATION` is already a versioned machine authority --
+`format=3`, closed key set, unknown keys rejected, duplicates rejected, never
+sourced. `verify-release-qualification.sh` already binds seven `MANIFEST.md`
+facts to it by exact-line match, plus the express/production banner in both
+directions. Evidence logs already carry exact source-bound machine records
+(`SOAK_RESULT format=1`, `TEST_LONG_RESULT format=1`,
+`RESOURCE_TABLES_RESULT format=1`). The gap was never duplication. It was facts
+with *no* authority, and one of them was structural.
+
+**The structural one.** In all twelve published releases, `SHA256SUMS` covered
+the 21 images and `flash-pic12f675.py` -- and not `QUALIFICATION`, not
+`MANIFEST.md`, not `README.md`. A recipient who ran exactly the two commands
+`release/README.md` gives them authenticated the firmware and nothing about
+where it came from: not the source commit, not the qualification mode, not the
+soak duration, not the PIC12F675 raw-write hazard. Those three files could be
+replaced with no verification failing. `scripts/make-release.sh` asserted the
+opposite in its own express-release warning -- "MANIFEST.md carries the express
+banner and QUALIFICATION records release_mode=express; both are signed by the
+checksum signature below" -- which was false when written and is true now.
+
+**What changed.** `RELEASE_PROVENANCE_FILES` is declared once in the Makefile
+and read by everything that needs it. `make-release.sh` appends those files to
+`SHA256SUMS` after generating them, in a second pass, so images are still
+checksummed the moment they are proven while provenance is checksummed once it
+exists. `verify-release-images.sh` partitions `SHA256SUMS` into three
+exactly-declared sets instead of two -- images, helpers, provenance -- and
+snapshots the provenance files so its `sha256sum -c` leg speaks for them.
+`verify-release-qualification.sh` moves to `format=4`, re-checks each provenance
+digest against the file on disk, and binds the per-release `README.md` to
+`QUALIFICATION` for its version heading and its banner in both directions.
+`release.yml` derives the published asset set from the same declaration, because
+publishing a set narrower than the checksum list would hand every downloader a
+`sha256sum -c` that fails on a file GitHub never served.
+
+**The one thing that had to be checked in the workflow, not the scripts.**
+`README.md` was not previously a published release asset. Adding it to
+`SHA256SUMS` without adding it to the upload set would have broken verification
+for everyone who downloads assets rather than cloning -- a regression invisible
+to every local gate. Both the freeze step and the publish step now read the
+declaration instead of naming files.
+
+**Historical releases are untouched, and that is not laziness.** Bringing their
+provenance inside their signatures would require reissuing a published
+signature. They stay as published, and `release/README.md` now says so and gives
+the tag-diff command; `test-published-release-immutability` (BR-REL-07) already
+pins every one of those files by digest.
+
+**Verification.** `test-release-qualification` 89 -> 101 checks with twelve new
+controls: README missing, symlinked, naming another release, express without its
+banner, production carrying the express banner, production carrying the dry-run
+banner, dry-run missing its warning; each provenance file removed from the
+checksum list; a provenance file edited after sealing; and a manifest that gains
+a paragraph contradicting nothing the other checks read, which only the sealed
+digest catches. `test-release-images` 240 -> 249 with nine: provenance absent
+from `SHA256SUMS`, declared but absent from the release, symlinked, edited after
+sealing, an empty set, a duplicate, `SHA256SUMS` declared as its own provenance,
+a provenance name shaped like an image, and a name declared as both helper and
+provenance. `test-release-preflight`'s Makefile-query tripwire moves 91 -> 92 for
+the one new query.
+
+**Not done here.** The second half: binding the toolchain table and the
+per-asset records, which needs new `QUALIFICATION` keys plus a bound evidence
+artifact, and generating the human views from that data rather than checking
+them against it.
 
 ## BR-REL-02 - Package future release evidence as one deterministic archive
 
@@ -3446,7 +3541,7 @@ dependencies and acceptance criteria.
 | BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
 | BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
-| BR-REL-01 | Define canonical signed release index | TODO |
+| BR-REL-01 | Define canonical signed release index | IN PROGRESS `<commit>` |
 | BR-REL-02 | Package deterministic evidence archive | TODO |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |

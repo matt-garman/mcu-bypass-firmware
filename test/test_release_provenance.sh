@@ -455,7 +455,9 @@ for required in \
 	'scripts/verify-release-images.sh "$dir" "${fresh_dirs[@]}"' \
 	'release_images_text=$(make -s --no-print-directory print-RELEASE_IMAGES)' \
 	'release_helper_text=$(make -s --no-print-directory print-RELEASE_HELPER_MAP)' \
-	'expected_assets+=(SHA256SUMS SHA256SUMS.asc MANIFEST.md QUALIFICATION)' \
+	'print-RELEASE_PROVENANCE_FILES)' \
+	'expected_assets+=("${release_provenance_names[@]}")' \
+	'expected_assets+=(SHA256SUMS SHA256SUMS.asc)' \
 	'frozen_root=/opt/mcu-bypass-publication' \
 	'sudo install -d -o root -g root -m 0700 -- "$frozen_root" "$publish"' \
 	'record "$publish" "$inventory" "${expected_assets[@]}"' \
@@ -526,16 +528,21 @@ printf ':00000001FF\n' > "$publish_assets/a.hex"
 # carried-forward name list beside the file itself.
 printf '#!/usr/bin/env python3\n' > "$publish_assets/flash-pic12f675.py"
 publish_helper_assets='flash-pic12f675.py'
+publish_provenance_assets='QUALIFICATION MANIFEST.md README.md'
 publish_image_hash=$(sha256sum -- "$publish_assets/a.hex")
 printf '%s  a.hex\n' "${publish_image_hash%% *}" > "$publish_assets/SHA256SUMS"
 printf 'dummy signature\n' > "$publish_assets/SHA256SUMS.asc"
 printf '# Test release\n' > "$publish_assets/MANIFEST.md"
 printf 'dummy qualification\n' > "$publish_assets/QUALIFICATION"
+printf '# v1.2.3\n' > "$publish_assets/README.md"
 tag_verify_log="$work/tag-verify.log"
 publish_inventory="$publish_fixture/publication.inventory.json"
 publish_inventory_sha256=
-publish_expected=(a.hex flash-pic12f675.py SHA256SUMS SHA256SUMS.asc \
-	MANIFEST.md QUALIFICATION)
+# Upload order mirrors the workflow's assets array: images, helpers, provenance
+# in declaration order, then the checksum list and its detached signature.
+publish_expected=(a.hex flash-pic12f675.py \
+	QUALIFICATION MANIFEST.md README.md \
+	SHA256SUMS SHA256SUMS.asc)
 
 record_publish_inventory() {
 	rm -f "$publish_inventory"
@@ -556,6 +563,7 @@ run_publish_step() {
 			RELEASE_INVENTORY_SHA256="$publish_inventory_sha256" \
 			VERIFIED_RELEASE_COMMIT=0000000000000000000000000000000000000000 \
 			RELEASE_HELPER_ASSETS="${TEST_HELPER_ASSETS-$publish_helper_assets}" \
+			RELEASE_PROVENANCE_ASSETS="${TEST_PROVENANCE_ASSETS-$publish_provenance_assets}" \
 			TEST_TAG_VERIFY_FAIL="${TEST_TAG_VERIFY_FAIL:-0}" \
 			TEST_SIGNATURE_FAIL="${TEST_SIGNATURE_FAIL:-0}" \
 			TEST_SIGNATURE_MUTATE="${TEST_SIGNATURE_MUTATE:-0}" \
@@ -710,10 +718,25 @@ for entry in "${repro_helper_entries[@]}"; do
 		|| fail "could not stage required release artifact $helper_name"
 	repro_helper_names+=("$helper_name")
 done
+# The provenance files a release signs for itself, staged from the same
+# declaration the verifier reads. Content is irrelevant to this fixture -- it
+# exercises image reproduction -- but their presence in SHA256SUMS is not: the
+# checksum list must partition into all three declared sets or nothing here
+# gets as far as the image comparison.
+repro_provenance_raw=$(cd "$ROOT" \
+	&& make -s --no-print-directory print-RELEASE_PROVENANCE_FILES) \
+	|| fail "could not read RELEASE_PROVENANCE_FILES from the Makefile"
+read -r -a repro_provenance_names <<<"$repro_provenance_raw"
+[ "${#repro_provenance_names[@]}" -gt 0 ] \
+	|| fail "Makefile declares no provenance files"
+for provenance_name in "${repro_provenance_names[@]}"; do
+	printf 'fixture provenance: %s\n' "$provenance_name" \
+		> "$repro_release/$provenance_name"
+done
 (
 	cd "$repro_release"
 	sha256sum -- "${repro_image_names[@]}" "${repro_helper_names[@]}" \
-		> SHA256SUMS
+		"${repro_provenance_names[@]}" > SHA256SUMS
 )
 
 ambient_release_expected=${repro_image_names[0]}

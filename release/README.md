@@ -182,6 +182,28 @@ Publication fails if either signature is absent, invalid, or made by another
 key; verification uses an isolated keyring containing only the pinned key rather
 than trusting whatever keys happen to be installed on the CI runner.
 
+### What the signature covers
+
+From v0.9.12 on, `SHA256SUMS` covers the firmware images, the required
+programming helpers, **and** the release's own provenance: `QUALIFICATION`,
+`MANIFEST.md` and `README.md`. So one `gpg --verify` followed by one
+`sha256sum -c` authenticates both the firmware and the account of where it came
+from — the source commit, whether qualification was production or express, the
+soak duration, and the part-specific programming warnings.
+
+Through **v0.9.11** the checksum list covered the images and the helper only.
+Those releases' provenance files sit outside their signatures and cannot be
+brought inside without invalidating a published signature, so they are left as
+published. To check one of them, compare its directory against its signed tag:
+
+```
+git diff --stat v0.9.11 -- release/v0.9.11
+```
+
+In this repository `make test-published-release-immutability` does that for
+every published release, and additionally pins every published file no
+`SHA256SUMS` signs.
+
 ## How a release is sequenced
 
 A release is not one commit. Four steps produce it, in this order, and the
