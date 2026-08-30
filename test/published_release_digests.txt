@@ -1,0 +1,424 @@
+# Every published file a release does not sign for itself.
+#
+# A release ships SHA256SUMS over its images and programming helpers, so those
+# stay verifiable from the release directory alone. Nothing covered the rest --
+# the evidence logs, QUALIFICATION, MANIFEST.md, README.md, and SHA256SUMS.asc
+# itself. Those files are the qualification record; they are not reproducible
+# from source, and once published they are the only account of what was run.
+# This is their record.
+#
+# Together with each release's own SHA256SUMS this partitions every published
+# file exactly once. test_published_release_immutability.py enforces the
+# partition, so a file added to a published release is covered by one list or
+# the other, never by neither.
+#
+# It is an ordinary sha256sum check file, deliberately: from the repository
+# root,
+#
+#     sha256sum -c test/published_release_digests.txt
+#
+# reproduces the central claim with coreutils and no Python at all.
+#
+# release/README.md is not here. It is current documentation -- the trust model
+# and the standing safety warning -- and it is meant to change.
+#
+# CHANGING A LINE HERE REWRITES HISTORY. A published release is what its
+# recipients already hold; a digest edited until the run goes green retires
+# that account silently. Amendments to a published release are possible and
+# have happened once (the v0.9.0-v0.9.2 TMUX errata), but they are a deliberate
+# act recorded in the gate beside the reason, not a number replaced here.
+#
+# A new release appends a block. Generate it with:
+#
+#     ./test/test_published_release_immutability.py --print-record vX.Y.Z
+
+# v0.9.0 -- 20 files signed by its own SHA256SUMS, 24 recorded here
+41af4f525ccc7d459a82fa773f20fd428b1088052d14e4a20325191617f54c4f  release/v0.9.0/MANIFEST.md
+350b5dd43ddb83d72a85eaacafdfb4f36e489be6e1cd2cee0f7e40a163ff16e8  release/v0.9.0/README.md
+ed0244d36d569814404cd2c0dca7acfec48689c53d3a1d2cb5bf3a88c372862e  release/v0.9.0/SHA256SUMS
+a67b87bc246fd1fdef0a9bd5c83c80a40789363ee7e5eea48b0dd72c61c03365  release/v0.9.0/SHA256SUMS.asc
+b50389acb161f7ba1cb0f9aff93927565b5431e1bf5a77057f172ec6d70c713a  release/v0.9.0/evidence/build-avr.log
+89fdeafef57a9573e8b046224c2c64091d0056fa4583f9c6755edf541c3bc5ff  release/v0.9.0/evidence/build-pic.log
+fe9f5dba66897721c6dea527cc826c8d64a5345e647c9c060abd3906b495dabe  release/v0.9.0/evidence/pic-test.log
+d136d6e126c1af1a6aa32084c5406d1e1be9e4b741e6436a6665fde4cb727d58  release/v0.9.0/evidence/soak-avr_cd4053_t45.log
+69e55c69a3bb34059ddc6b3e3ae46fd837b0c3f3d5851c810163164015a98459  release/v0.9.0/evidence/soak-avr_cd4053_t85.log
+d7756116428d9249d9d00c9bde816434243706c2ab4fbe9687143e1b9166cbc3  release/v0.9.0/evidence/soak-avr_cd4053_tmux_t45.log
+368ebb7d98d0ce571920a5ec98cf94e2a7e09d9efe9f4af555bf78fb25d3e2a7  release/v0.9.0/evidence/soak-avr_cd4053_tmux_t85.log
+380c06bd0d0393350d2ffa25f399e8c1e242eefe069fe64fb7cf9328a2ac7a7a  release/v0.9.0/evidence/soak-avr_mute_t45.log
+a945eba8808fa25deb5870e7975d20b72101cda195596e70dba90d7109735b94  release/v0.9.0/evidence/soak-avr_mute_t85.log
+322e8065f58f5ebef49a835fc755f1b40e6bf008996771696225a8544e1bf8ae  release/v0.9.0/evidence/soak-avr_mute_tmux_t45.log
+a6f16db3f8411df5b4df3870abe6a9497a93187035d4d527633b6f6161b903b7  release/v0.9.0/evidence/soak-avr_mute_tmux_t85.log
+f0b13776c99fe95898311d2d02089479cdd73e7fc764d708211cb86fca0ee5bd  release/v0.9.0/evidence/soak-avr_relay_t45.log
+0672327fd09a6102f84a7c4dbb58df7306b7f91be904402bc34c9d9432d62399  release/v0.9.0/evidence/soak-avr_relay_t85.log
+259c1204b95b9501119d06915607e46c637bcd7399ca59e5c7a770744a48f2d4  release/v0.9.0/evidence/soak-build.log
+22be74c75bf0802b0cc1abfadef0fd4992a37627c93e9e9f8737d204707b1d03  release/v0.9.0/evidence/soak-pic_cd4053.log
+c9a4a459362fdd98f21f7e8303b5e62d53bb1921f42cf508b1a3bed08c73a1a2  release/v0.9.0/evidence/soak-pic_cd4053_tmux.log
+b30ea35bef6036a8c1b50674ead7772812f33507f6275365bd5a7f62a8bc0dfe  release/v0.9.0/evidence/soak-pic_mute.log
+fbfe9ee81d34cc24061a2084aa804847a296c3f944174a79e899abcaa42fd993  release/v0.9.0/evidence/soak-pic_mute_tmux.log
+4fd02e2baab7ed4467547fe3daa98f6e201a93adbb87e99f618cc008303bfc8b  release/v0.9.0/evidence/soak-pic_relay.log
+09e81ce97aab2dd5772ec98de0ee74205c974b7df5b284f6487399af2177151d  release/v0.9.0/evidence/test-long.summary.txt
+
+# v0.9.1 -- 20 files signed by its own SHA256SUMS, 29 recorded here
+b4f8d83257a493a17b6d26a248bd88921e283d91d034169985b770c5b699be15  release/v0.9.1/MANIFEST.md
+ed490c0d4758c97037b28a3b750e300a21f18c874e622aecdd26c394f434f605  release/v0.9.1/README.md
+079822331ac57826d8a2257c32c5ad63a1dbe6beb6658e14a15c2ee952b244dc  release/v0.9.1/SHA256SUMS
+eac9e5a62c55446bbc8e862791d18f0c12e3ecb7d68f14d58a1aea9811b25b53  release/v0.9.1/SHA256SUMS.asc
+af560cc4a88e2fcd4520ab09950ef3bf0d2a193d96ffa91215cd3b2b6a3d2fae  release/v0.9.1/evidence/build-avr.log
+40c8279e09523ee2da4eb9110c57f4b08d8afb01c474c0221c468bc1fbb1cde4  release/v0.9.1/evidence/build-pic.log
+18058809e9b188e034de58658b0a50718460c5327b8f11aa186425812a7addc5  release/v0.9.1/evidence/pic-fault-cd4053.log
+19769c7c271b6f90aefbbd341f884b23704d2deb1734e3330aef2081290d5796  release/v0.9.1/evidence/pic-fault-cd4053_tmux.log
+7e0af9976a98d625f645a9bfd5548507fd3fd92686a0fdc0987c57f1e9ebbad2  release/v0.9.1/evidence/pic-fault-mute.log
+acfcc2e3896f0ae29db86bcb8f59e4a01df9ecb554f5810621704a7455408b47  release/v0.9.1/evidence/pic-fault-mute_tmux.log
+e00b9ea06ca94cf38e9f7e5e875100b34e51ecefe975b66ffcbad0aa6020cef0  release/v0.9.1/evidence/pic-fault-relay.log
+3622ca055f9bf1f9cc2e50e962950eeef97d2582ef67fd4d70e0ecbd0c688c99  release/v0.9.1/evidence/pic-test.log
+9db1d67ba04eb9bb5e7a672c319ccf691624c9a14d753ec6d17d706ddc344896  release/v0.9.1/evidence/soak-avr_cd4053_t45.log
+94aa70fc2f900bd9c3cdcb17ae6d0eda12c93a8ebb2975d0b6c4eb7198f4ed69  release/v0.9.1/evidence/soak-avr_cd4053_t85.log
+8027255603d93969f966e6b906bef317dd55210daa696fd19ad05166c61c50cb  release/v0.9.1/evidence/soak-avr_cd4053_tmux_t45.log
+d3dc8f931017970c692c59232e224b9ccf5cfd660443464e0f8fd6f23f6796c8  release/v0.9.1/evidence/soak-avr_cd4053_tmux_t85.log
+1c0679a57aad9dcf1e25f87289499eb5a52eb21da8cca41dcb49463721a3884d  release/v0.9.1/evidence/soak-avr_mute_t45.log
+01b7fec725c10337f6d6a9d67ce54d49a9ecfcea7c9a2f1d3005297ebc8bd8f8  release/v0.9.1/evidence/soak-avr_mute_t85.log
+761872b034c7a300104547343aeb76a9d3bea8286505af5841ac8707e77543d4  release/v0.9.1/evidence/soak-avr_mute_tmux_t45.log
+e3374dc5b132ac4b46853da85b9cae9f87cd7ed3366cc6c3ce03f27970ba9b92  release/v0.9.1/evidence/soak-avr_mute_tmux_t85.log
+17c100db958af5f495f38f116cb0a64bfcf8759556a4d57678d452da7a534e51  release/v0.9.1/evidence/soak-avr_relay_t45.log
+20c8aa7510e6b8b3dc012f45d041c721ce1994e2dfff5615cd2bb29c411efac6  release/v0.9.1/evidence/soak-avr_relay_t85.log
+95f0928d1cfbe62f323062de133280c0c0637da60e4ee3ca18a9c81cfd4decdf  release/v0.9.1/evidence/soak-build.log
+22be74c75bf0802b0cc1abfadef0fd4992a37627c93e9e9f8737d204707b1d03  release/v0.9.1/evidence/soak-pic_cd4053.log
+c9a4a459362fdd98f21f7e8303b5e62d53bb1921f42cf508b1a3bed08c73a1a2  release/v0.9.1/evidence/soak-pic_cd4053_tmux.log
+b30ea35bef6036a8c1b50674ead7772812f33507f6275365bd5a7f62a8bc0dfe  release/v0.9.1/evidence/soak-pic_mute.log
+fbfe9ee81d34cc24061a2084aa804847a296c3f944174a79e899abcaa42fd993  release/v0.9.1/evidence/soak-pic_mute_tmux.log
+4fd02e2baab7ed4467547fe3daa98f6e201a93adbb87e99f618cc008303bfc8b  release/v0.9.1/evidence/soak-pic_relay.log
+0a7d81a4821993b4af05e59154cc977818790195959792110a571d2d9063b122  release/v0.9.1/evidence/test-long.summary.txt
+
+# v0.9.2 -- 20 files signed by its own SHA256SUMS, 29 recorded here
+9f92f247e8ab8b993faa8dedb3a12ea9471d0f64eb2883337c6c58814ff5bab8  release/v0.9.2/MANIFEST.md
+0d3c2f1d86bc08de5ff7eecf5ffbb003003d674556095fc6b55d883b148e819e  release/v0.9.2/README.md
+45495893957a1842322cf2d8eb3493ec4aac0e234f36b6ce1e63f87550b323d2  release/v0.9.2/SHA256SUMS
+2cadb96e9b17043e9463579f0ba9689bf9ab838a4895a0e83437a4b823e6bb14  release/v0.9.2/SHA256SUMS.asc
+af560cc4a88e2fcd4520ab09950ef3bf0d2a193d96ffa91215cd3b2b6a3d2fae  release/v0.9.2/evidence/build-avr.log
+3a79959405594973a4d3f9bdcafc9ed8b3d9d30153236960af54045afa07eb26  release/v0.9.2/evidence/build-pic.log
+aab5be8d16e3aa193f04190ca404d4774bc7d505fc7254faaad54719accdb825  release/v0.9.2/evidence/pic-fault-cd4053.log
+d91fdb5da6c0f7044c45658d4ed6f571169595d1b5f1273571a738dc99b8d0ee  release/v0.9.2/evidence/pic-fault-cd4053_tmux.log
+8d6cd3718ff2a65b5655e3ec35a04ad1617e9608af29826829e03f7525db45c2  release/v0.9.2/evidence/pic-fault-mute.log
+e88fe23c703448f161bb1d2d2936f34c82f0f9f36574e52054b5228715f61532  release/v0.9.2/evidence/pic-fault-mute_tmux.log
+eeae1034f2cee593b57d09c445acd0a24f80a3b97d78b93b6c7c499cef6f47f9  release/v0.9.2/evidence/pic-fault-relay.log
+861f8a97c6e5636e53b72e3cc6b36cef180742631aac50ca0e4f42241714e748  release/v0.9.2/evidence/pic-test.log
+9db1d67ba04eb9bb5e7a672c319ccf691624c9a14d753ec6d17d706ddc344896  release/v0.9.2/evidence/soak-avr_cd4053_t45.log
+94aa70fc2f900bd9c3cdcb17ae6d0eda12c93a8ebb2975d0b6c4eb7198f4ed69  release/v0.9.2/evidence/soak-avr_cd4053_t85.log
+8027255603d93969f966e6b906bef317dd55210daa696fd19ad05166c61c50cb  release/v0.9.2/evidence/soak-avr_cd4053_tmux_t45.log
+d3dc8f931017970c692c59232e224b9ccf5cfd660443464e0f8fd6f23f6796c8  release/v0.9.2/evidence/soak-avr_cd4053_tmux_t85.log
+1c0679a57aad9dcf1e25f87289499eb5a52eb21da8cca41dcb49463721a3884d  release/v0.9.2/evidence/soak-avr_mute_t45.log
+01b7fec725c10337f6d6a9d67ce54d49a9ecfcea7c9a2f1d3005297ebc8bd8f8  release/v0.9.2/evidence/soak-avr_mute_t85.log
+761872b034c7a300104547343aeb76a9d3bea8286505af5841ac8707e77543d4  release/v0.9.2/evidence/soak-avr_mute_tmux_t45.log
+e3374dc5b132ac4b46853da85b9cae9f87cd7ed3366cc6c3ce03f27970ba9b92  release/v0.9.2/evidence/soak-avr_mute_tmux_t85.log
+17c100db958af5f495f38f116cb0a64bfcf8759556a4d57678d452da7a534e51  release/v0.9.2/evidence/soak-avr_relay_t45.log
+20c8aa7510e6b8b3dc012f45d041c721ce1994e2dfff5615cd2bb29c411efac6  release/v0.9.2/evidence/soak-avr_relay_t85.log
+913768b6e35d05af426d6a82abd1c6e952461b2aa370d7c0e1279f52bc852d9d  release/v0.9.2/evidence/soak-build.log
+9ab1594acbef3648c54d992c5eb85121c6d5968eea4ef2d3c681474c982d33b1  release/v0.9.2/evidence/soak-pic_cd4053.log
+799d779084347acf1a68bfb6ed5c4ccb1aa8c6906bbf3e7266bd42687df1306a  release/v0.9.2/evidence/soak-pic_cd4053_tmux.log
+4158af7cfbb29d65daa7aa38d3ad09af0d67ab83ef1086cb13bcc21973067851  release/v0.9.2/evidence/soak-pic_mute.log
+5fcb6000c6152f0ac6c2c5bef5a1ecdfadaf545fd1f840aab4d0c2adafbb3b23  release/v0.9.2/evidence/soak-pic_mute_tmux.log
+97a29289dd94abf1c608b6a7c3a539325fbe721cc3eaa976211f424e74768f2d  release/v0.9.2/evidence/soak-pic_relay.log
+0a7d81a4821993b4af05e59154cc977818790195959792110a571d2d9063b122  release/v0.9.2/evidence/test-long.summary.txt
+
+# v0.9.3 -- 12 files signed by its own SHA256SUMS, 21 recorded here
+607c52d12b3fe5e7d7222044660ba6e4dfbf7d81260e30148d8977511c7c1ca5  release/v0.9.3/MANIFEST.md
+72076c2fd37c7d292e2edb930ff001ab2d6ff95f779296d17b12df4653865ca4  release/v0.9.3/README.md
+7851319ce7b6b2eef2236b1aef52e678d795f877deab75244d0610de77dd5c82  release/v0.9.3/SHA256SUMS
+20e0608cd9a2287fc0c78f9fb0629d65ee4f92c763397de5985d08b23e73a2ed  release/v0.9.3/SHA256SUMS.asc
+3e92e44c8d223d3cda30e105edce5a6ab7d19110ee0bcd924f241314a20f4f2d  release/v0.9.3/evidence/build-avr.log
+2f2bef7c9b386702e8caf82808e94e69944d84ffb0ee616a047e2fc0d55e7f8d  release/v0.9.3/evidence/build-pic.log
+908f8ecc4a4fe473b345b3a4a640c34aec793a312c57bbb4bb55d0e2cf993bad  release/v0.9.3/evidence/pic-fault-cd4053.log
+de9375829814d8537d3efc73c660026ce5a94970a8664ef45e575c25231c2e3e  release/v0.9.3/evidence/pic-fault-mute.log
+c4c9c5a65c258f847dce2b4197e70da0486bfd7d09108444042ab78db1c6a4e1  release/v0.9.3/evidence/pic-fault-relay.log
+741988d2023056935498b733b3aab0c8283469b0db0088ab39bc8c1b39bf84b4  release/v0.9.3/evidence/pic-test.log
+9db1d67ba04eb9bb5e7a672c319ccf691624c9a14d753ec6d17d706ddc344896  release/v0.9.3/evidence/soak-avr_cd4053_t45.log
+94aa70fc2f900bd9c3cdcb17ae6d0eda12c93a8ebb2975d0b6c4eb7198f4ed69  release/v0.9.3/evidence/soak-avr_cd4053_t85.log
+1c0679a57aad9dcf1e25f87289499eb5a52eb21da8cca41dcb49463721a3884d  release/v0.9.3/evidence/soak-avr_mute_t45.log
+01b7fec725c10337f6d6a9d67ce54d49a9ecfcea7c9a2f1d3005297ebc8bd8f8  release/v0.9.3/evidence/soak-avr_mute_t85.log
+17c100db958af5f495f38f116cb0a64bfcf8759556a4d57678d452da7a534e51  release/v0.9.3/evidence/soak-avr_relay_t45.log
+20c8aa7510e6b8b3dc012f45d041c721ce1994e2dfff5615cd2bb29c411efac6  release/v0.9.3/evidence/soak-avr_relay_t85.log
+7fdc00ffd0d4c04791d2fe061b0d34ab496ab0f46e7a15f5c8eaa881ff5ed7a1  release/v0.9.3/evidence/soak-build.log
+9ab1594acbef3648c54d992c5eb85121c6d5968eea4ef2d3c681474c982d33b1  release/v0.9.3/evidence/soak-pic_cd4053.log
+4158af7cfbb29d65daa7aa38d3ad09af0d67ab83ef1086cb13bcc21973067851  release/v0.9.3/evidence/soak-pic_mute.log
+97a29289dd94abf1c608b6a7c3a539325fbe721cc3eaa976211f424e74768f2d  release/v0.9.3/evidence/soak-pic_relay.log
+0c71a78d92e5382b3c6463a9e77f357c65b15898f10f04d42ab881945d54eb95  release/v0.9.3/evidence/test-long.summary.txt
+
+# v0.9.4 -- 12 files signed by its own SHA256SUMS, 19 recorded here
+aa15aa65d44328b36f33baf498f8e2f6df70a850db0ba0bdab956de564335334  release/v0.9.4/MANIFEST.md
+adfc2750283bec5fa63b61cf681bac9b57da615cc8366f16373e2b5b6cb1b5aa  release/v0.9.4/README.md
+381337412e7dbe3bbb0bcea31837ddf1cbf72df94ebd313ea0ef9099bbf4a1f4  release/v0.9.4/SHA256SUMS
+89d5e9bba7ae03be54f5db9edc5782697cd5858585e5595df1bef34b86976f05  release/v0.9.4/SHA256SUMS.asc
+860778a5bc2f9626eb3b587e5bd3e48f9240b4eb818b379b52f5b9503e64200e  release/v0.9.4/evidence/build-avr.log
+10ad9dabae1beceef505e4663cda1be15d837f3e6859e1b8a9b30df518dda11a  release/v0.9.4/evidence/build-pic.log
+56ae5f1d25e28585a4b27b368b9b2bd483c378f6b2113135a4f3a4c6056ab110  release/v0.9.4/evidence/pic-test-target-variants.log
+2020efc5b24d7b5ed07f140587cc380340a48c2520f8d7e274c518eb4be083aa  release/v0.9.4/evidence/pic-test.log
+9db1d67ba04eb9bb5e7a672c319ccf691624c9a14d753ec6d17d706ddc344896  release/v0.9.4/evidence/soak-avr_cd4053_t45.log
+94aa70fc2f900bd9c3cdcb17ae6d0eda12c93a8ebb2975d0b6c4eb7198f4ed69  release/v0.9.4/evidence/soak-avr_cd4053_t85.log
+dcb258697682a2a1244f65d7c306446b0f430c0d3deda9693f6446478c47a687  release/v0.9.4/evidence/soak-avr_mute_t45.log
+c65ec955528471027bdb3d755bb0b8d9f91d908b0b9d2ca5fd054dd4714ef7f6  release/v0.9.4/evidence/soak-avr_mute_t85.log
+17c100db958af5f495f38f116cb0a64bfcf8759556a4d57678d452da7a534e51  release/v0.9.4/evidence/soak-avr_relay_t45.log
+20c8aa7510e6b8b3dc012f45d041c721ce1994e2dfff5615cd2bb29c411efac6  release/v0.9.4/evidence/soak-avr_relay_t85.log
+18b8bbc03be1f18a589ad466f0ca85552bf096a6bbebeb1f4ca8a8c250d82de0  release/v0.9.4/evidence/soak-build.log
+7f7a5e448f2be0382cbba03097f88cb69a0dccf867567865689b1c56b280074c  release/v0.9.4/evidence/soak-pic_cd4053.log
+bd5582815d214f3a1a82b0d1dacb939145efd43f0a83154efb9ce758deba62a4  release/v0.9.4/evidence/soak-pic_mute.log
+74f8a47f8274691e3c54c046c44ef025eb7d2cdd01c49d9976f7d854248fee91  release/v0.9.4/evidence/soak-pic_relay.log
+c7ed87540e49c70a398f5931d2a834d6ed596dd23a5656a17fbd48a43e847158  release/v0.9.4/evidence/test-long.summary.txt
+
+# v0.9.5 -- 12 files signed by its own SHA256SUMS, 20 recorded here
+59982a74d4065aa4eb5669022e67c7b8608300971e4b2d3c39e9e75b3aaaab79  release/v0.9.5/MANIFEST.md
+4c03f4068bc7cc0f628a9982f8f3bd853f85f191283f482da4fa3f7efd29a49f  release/v0.9.5/README.md
+755f2dd1cae7afb451f38fb98613ebc4552fa81dd69a5c7e9a4dbd66b7bd71c0  release/v0.9.5/SHA256SUMS
+de4a925fcc5136bc4c5549901c887b58cac346f2b472920b84ddf970308eb4af  release/v0.9.5/SHA256SUMS.asc
+f0f075a429c75f65bdebe711cfcada8414f8dc6590337e6e9447179afc1da334  release/v0.9.5/evidence/build-avr.log
+28f8c1eb8f0fee05289311d7d0a57d1bc0b98d63ba2ac0a31c42bba910d538c9  release/v0.9.5/evidence/build-pic.log
+f0f075a429c75f65bdebe711cfcada8414f8dc6590337e6e9447179afc1da334  release/v0.9.5/evidence/final-image-build.log
+6a4d0b7346eeda9b91241276eda8786eed6d9b31ebdb28b0f8849caf8a275940  release/v0.9.5/evidence/pic-test-target-variants.log
+a9829c81dc2e79a5aab41ef0a0a594b7d25654b69e4266e8c42f7d05d82345bc  release/v0.9.5/evidence/pic-test.log
+0abb7016acce71ef77ac27d42d40c871be6b595fe4996ea765fa0e1c531d8ae0  release/v0.9.5/evidence/soak-avr_cd4053_t45.log
+6f4cbb8c9f50fa7cd802c8445aecd6efb8d8b726c8f8ebfbf388c9d052055414  release/v0.9.5/evidence/soak-avr_cd4053_t85.log
+003223d7507ca69cfb5b6d422087f8a5f2e3657fb4c162a657f9ddff8ec5c365  release/v0.9.5/evidence/soak-avr_mute_t45.log
+7005bfce2801e67eb130a726e66723a064ee9621a44c5ea7aca59a496a7bed53  release/v0.9.5/evidence/soak-avr_mute_t85.log
+d2a30ec1999c656080c5214f44738793ff1df4c5948cce33efc241e546359a8c  release/v0.9.5/evidence/soak-avr_relay_t45.log
+7d19a709927133ae365341c6925f9eb44b8d567427908c80655931309f17799b  release/v0.9.5/evidence/soak-avr_relay_t85.log
+39250723651eb2b225396b094f4d9aae8fb98accf6e607541d24cf0dbd59b71a  release/v0.9.5/evidence/soak-build.log
+9ab1594acbef3648c54d992c5eb85121c6d5968eea4ef2d3c681474c982d33b1  release/v0.9.5/evidence/soak-pic_cd4053.log
+4158af7cfbb29d65daa7aa38d3ad09af0d67ab83ef1086cb13bcc21973067851  release/v0.9.5/evidence/soak-pic_mute.log
+97a29289dd94abf1c608b6a7c3a539325fbe721cc3eaa976211f424e74768f2d  release/v0.9.5/evidence/soak-pic_relay.log
+8896d7745dfc37b8b9f18755c98d196e72c6683257f80c73f622b6f4c287937d  release/v0.9.5/evidence/test-long.summary.txt
+
+# v0.9.6 -- 18 files signed by its own SHA256SUMS, 33 recorded here
+acc8c43ff44a091fdc2647d6f0f7afed316923dea3f1fdae49bb11a95aa26adf  release/v0.9.6/MANIFEST.md
+cb4d50825b75f6777b6226c716e5146c7ad5ae0375126213b74ecabcdf7fc3d8  release/v0.9.6/QUALIFICATION
+616df12e7a3e7a7846dea5e648dc7fe7f060d9beadaa290137b4ed62612c43c5  release/v0.9.6/README.md
+dbad37c5f070462a89b36a1c2c35a63f1358ecc71aa3ee0ada993a04e407acc5  release/v0.9.6/SHA256SUMS
+0ae332000f324aa1ed0a7c0173d1c10367ad2377887e8690b079be54ca2a20c6  release/v0.9.6/SHA256SUMS.asc
+f40e7d93c43e5ef1e4664db77d30f847884f9694d309994a63c43ad16b6947b5  release/v0.9.6/evidence/attiny202-test-target.log
+4456d57ad0932af96b0c8650371d8f5022a926e62f92b1b69d96b2e2fe7db467  release/v0.9.6/evidence/attiny202-test.log
+a26c6eee738d19f46a4b9a2010e569c8bb717621bedf215a03abf531d6c24108  release/v0.9.6/evidence/build-avr-xt.log
+f0f075a429c75f65bdebe711cfcada8414f8dc6590337e6e9447179afc1da334  release/v0.9.6/evidence/build-avr.log
+28f8c1eb8f0fee05289311d7d0a57d1bc0b98d63ba2ac0a31c42bba910d538c9  release/v0.9.6/evidence/build-pic.log
+e11f35aab070abfa59de27dbaea516fec97af950a31e99c292b3e6cfe1c27def  release/v0.9.6/evidence/build-pic320.log
+f0f075a429c75f65bdebe711cfcada8414f8dc6590337e6e9447179afc1da334  release/v0.9.6/evidence/final-image-build.log
+4351d732f7b26da4572f1161c2fda55b22ed737290068e17d81acf6498d7f2ba  release/v0.9.6/evidence/pic-test-target-variants.log
+77180f356a9244bb915c932086f9edb042892eea3c0949bbc8f44f5ef70eb91f  release/v0.9.6/evidence/pic-test.log
+b10df7e4085e0b4e30f3351a34ac661d2ef18b6c5369a0333d3208de243c5621  release/v0.9.6/evidence/pic320-test-target-variants.log
+1d9825a9661e036ec24ac20fb7a7bbb94a44e6324370e315bc45794790aa4a7c  release/v0.9.6/evidence/pic320-test.log
+9ba166b7ddb07f393c5bcdb962160c82f730c05dd614fabd63825036c0570eae  release/v0.9.6/evidence/soak-attiny202_cd4053.log
+6f2089198d1c2541c59d8643bd2f73205f01916b3297b4e90af82e70e8484740  release/v0.9.6/evidence/soak-attiny202_mute.log
+94f9a367f30bac6880872bb4b0875bc2b795835a049d63cd32b39d37296336da  release/v0.9.6/evidence/soak-attiny202_relay.log
+55b69846acc5f415c90e34602fc083e790afad1cba0f1613aa9361277701a941  release/v0.9.6/evidence/soak-avr_cd4053_t45.log
+6984acb7a8db9822ef2dbc9a473982599e387226884ba654de78c7ea6441ae02  release/v0.9.6/evidence/soak-avr_cd4053_t85.log
+950e5864971085a111c4deb60fb2adb13406d4f2699689d9a225513d81406bee  release/v0.9.6/evidence/soak-avr_mute_t45.log
+251c3082aaa88ae508d9f8822c50e74c56ad991f8aa45ba62f456be67501121e  release/v0.9.6/evidence/soak-avr_mute_t85.log
+8f47c9f0b905b1dc2d667211001db6c48aeda1abffa029be81b29885300ce92b  release/v0.9.6/evidence/soak-avr_relay_t45.log
+715ecefc122163a9e3270fbd1ceebce60f5dc44b2c0f971573f74db5db4770bb  release/v0.9.6/evidence/soak-avr_relay_t85.log
+f446e7dcecf370376acb4309e7dbb097467f4279e87191ab966d675c6db87915  release/v0.9.6/evidence/soak-build.log
+68f126186fd730802f056fcbf2604a98cf2d3f3f51ead20465c7dcb74c4402a3  release/v0.9.6/evidence/soak-pic320_cd4053-mute.log
+84fdeed058891e6e171cf18f3f7c7ef017ec23cf7ac61146158df63ffd2aa21f  release/v0.9.6/evidence/soak-pic320_cd4053-simple.log
+7e0234285f14d97f44d25a861344ed27bef057633aa4ae895684770bdc8eecd0  release/v0.9.6/evidence/soak-pic320_tq2-relay.log
+c5aacd476a3f4c47d301e0498f691c0190113427b4e942b36747fd6aa7bd7b7d  release/v0.9.6/evidence/soak-pic_cd4053.log
+c3178889965ce7d42b62ca625b45077ca7018cc69374371fd1590d001735c422  release/v0.9.6/evidence/soak-pic_mute.log
+ec1221a35b8e1c4dd5ef5334bb96fd107550b8c7cbd76297a6293dca795fb47c  release/v0.9.6/evidence/soak-pic_relay.log
+036bd2c7738d502470fc738ee3f7f0da11dda45eeeff7733397bd800ba2943ab  release/v0.9.6/evidence/test-long.summary.txt
+
+# v0.9.7 -- 18 files signed by its own SHA256SUMS, 33 recorded here
+cb860b50d061b089be252663bc7b9cd46ade6fa042d4e584cec02a1db33832dd  release/v0.9.7/MANIFEST.md
+5b9d20bef0c98c51e6f67f6e769349f77f9fbd17d681169c3dedcc3f89dabfee  release/v0.9.7/QUALIFICATION
+1b037ea325bc64ba4b3a7b72cf479d81d073fd8c5a800007d824ce7c31a668a4  release/v0.9.7/README.md
+dbad37c5f070462a89b36a1c2c35a63f1358ecc71aa3ee0ada993a04e407acc5  release/v0.9.7/SHA256SUMS
+74b52f2890c5d497030fbe305693582cb8fba0b14b8fed4f34b80fee84c605a5  release/v0.9.7/SHA256SUMS.asc
+1bc3413452a694a5d95a613eaf8b7a66a8ec791f06701a73fbd7dd104af243c7  release/v0.9.7/evidence/attiny202-test-target.log
+4456d57ad0932af96b0c8650371d8f5022a926e62f92b1b69d96b2e2fe7db467  release/v0.9.7/evidence/attiny202-test.log
+a26c6eee738d19f46a4b9a2010e569c8bb717621bedf215a03abf531d6c24108  release/v0.9.7/evidence/build-avr-xt.log
+f0f075a429c75f65bdebe711cfcada8414f8dc6590337e6e9447179afc1da334  release/v0.9.7/evidence/build-avr.log
+28f8c1eb8f0fee05289311d7d0a57d1bc0b98d63ba2ac0a31c42bba910d538c9  release/v0.9.7/evidence/build-pic.log
+e11f35aab070abfa59de27dbaea516fec97af950a31e99c292b3e6cfe1c27def  release/v0.9.7/evidence/build-pic320.log
+f0f075a429c75f65bdebe711cfcada8414f8dc6590337e6e9447179afc1da334  release/v0.9.7/evidence/final-image-build.log
+a1657920a5976d0ccdea9d0efd2265f0eef01896f0ec96f57071537a98f9159f  release/v0.9.7/evidence/pic-test-target-variants.log
+77180f356a9244bb915c932086f9edb042892eea3c0949bbc8f44f5ef70eb91f  release/v0.9.7/evidence/pic-test.log
+89246b613b9f8eb8a7a6d79523d9668e03409ce21480e07b3149d9504e1f9d7c  release/v0.9.7/evidence/pic320-test-target-variants.log
+9eea7aae840db4b31e177ae3f5a355ec19627911e345f53c94d4ae05e9446cf0  release/v0.9.7/evidence/pic320-test.log
+9ad7538809d6e2d46e3f3a3df9ec713fabeb7408b94e79f9160ecc9bea381a21  release/v0.9.7/evidence/soak-attiny202_cd4053.log
+137fdc05ecc845564ca6b7166e654ceda898618cbfe2787c51898c97ca4beac9  release/v0.9.7/evidence/soak-attiny202_mute.log
+d4b45fd8f2f3d0384e05391baaaa234a596701694fa1f1c4f348eb588c771ed4  release/v0.9.7/evidence/soak-attiny202_relay.log
+b2d72a5c0aebc91777b9a75dc7a21642b1cf774f2dac9ac3fa763e3277b4426e  release/v0.9.7/evidence/soak-avr_cd4053_t45.log
+300c41e71622fa30f1f7c403eedaba483e6354a0899f25a0a3dd882dde533efd  release/v0.9.7/evidence/soak-avr_cd4053_t85.log
+185cca6a4c37500bc8f94e19c1ceb6e693aba4ea05efe9ad602c788445d2c9e2  release/v0.9.7/evidence/soak-avr_mute_t45.log
+e7dcb4b278c8c007ec8b8a7d454394d6aa7a7d2088dce867dbb5fa1d3150b8f7  release/v0.9.7/evidence/soak-avr_mute_t85.log
+b140f68de7f30f2eebcb5e9c5f61f4eb1a0e81f8ada272bd367d44d4dea27236  release/v0.9.7/evidence/soak-avr_relay_t45.log
+fbcc276dfbb7ec8963c754e86ea263cda9d7053db3205d797391959dfd9704d6  release/v0.9.7/evidence/soak-avr_relay_t85.log
+477cf0b1a88521c14ba0c6f3a26492033d1d744e4a6feb655d120ebba4125abd  release/v0.9.7/evidence/soak-build.log
+b87a97c3e9ee67cd02dc8cb8337d2d861003fe49f4724372a50d41f3d3de76a1  release/v0.9.7/evidence/soak-pic320_cd4053-mute.log
+abf4f2f87afd078109cf2a1f4109214e10f4d17cb58afee0c4ef0ac633e04dff  release/v0.9.7/evidence/soak-pic320_cd4053-simple.log
+21781f67e7fb1e8613074c585a8052ae6cbc0a6f3cd78eaa62fa2e75a827915a  release/v0.9.7/evidence/soak-pic320_tq2-relay.log
+3773b07c323f52bc50cc89151a40b78961ff4fd57dd242fa3e5fdd8c9650ad24  release/v0.9.7/evidence/soak-pic_cd4053.log
+bfdf2bd35b5bcc7c545e10668d9e4388167a4e0668c5d82f61748b9628b3ee4f  release/v0.9.7/evidence/soak-pic_mute.log
+97ca2397440d764a921e01872f9f596e50552dc0521ae6eaf0bc2f0f2e5428d9  release/v0.9.7/evidence/soak-pic_relay.log
+582843de52d5fb06fd72d4ddcc3bd4586eb3a2cc04705290990ad9f399bffce8  release/v0.9.7/evidence/test-long.summary.txt
+
+# v0.9.8 -- 18 files signed by its own SHA256SUMS, 34 recorded here
+687b8064c77d7819a3a380676e73d47e9b2b0195074ceb4f90c9a79b71c18f91  release/v0.9.8/MANIFEST.md
+65edc07d3c72ed7bb7fc86593155f271faecad5ec703f4aebf2a1028ca66ff37  release/v0.9.8/QUALIFICATION
+087298729283be63890065273181dc855b35fea98625290e81a74de322cb9347  release/v0.9.8/README.md
+069f42bcd1996c70fbdaca854b2debf87d43062e28ff022e424c01fdfb40a805  release/v0.9.8/RENAME_IDENTITY.md
+35580651f5f271045b217e071391cff4e33ca8e258c187c908f4a25be705048f  release/v0.9.8/SHA256SUMS
+87b59150e053ec7dea1453ef1dd46d6b66ac2728126d797a00fd18d2a795f8c8  release/v0.9.8/SHA256SUMS.asc
+d1299a309f3ac809ba7227ffde565fb4185470d4db441369bb64f9f5610b12ec  release/v0.9.8/evidence/attiny202-test-target.log
+8ca1d754b1797ec05978a4901967af3307105d6cd5edd14a26a435dbda3a3f6c  release/v0.9.8/evidence/attiny202-test.log
+70a2feef1c6bd876fa64beb3ffa391d81e20f77be8d01ee7bfbee2bb6a828128  release/v0.9.8/evidence/build-avr-classic.log
+b2c0553b0ddf6c0a31af7d9dff798e12479b5914f907ce1a6252550e8c3d1273  release/v0.9.8/evidence/build-avr-xt.log
+89b1446ba63a7ba07ea4afee8889f0c0e0343ef55a798be0f183dc3252ecd2f5  release/v0.9.8/evidence/build-pic10f320.log
+325dd6d0254698cb4b50a86d676b660770a131c0cafc81988779b1636572fd4b  release/v0.9.8/evidence/build-pic10f322.log
+70a2feef1c6bd876fa64beb3ffa391d81e20f77be8d01ee7bfbee2bb6a828128  release/v0.9.8/evidence/final-image-build.log
+2de244ed39d697f8f2cbe331a8fefbd7b572cf6df51cd85e401fa2bb78005918  release/v0.9.8/evidence/pic10f320-test-target-variants.log
+3a9f1b86e2380ca8b496f2f96e0359ec769a70febbda2648c38eacc27059bf3a  release/v0.9.8/evidence/pic10f320-test.log
+114741a2194a8e8f45143a940cdecad940d96da81de121ac5ae9e1b713ebe310  release/v0.9.8/evidence/pic10f322-test-target-variants.log
+11ecec5e9b76dcf4f0ee88e5099d1086591ecd0cfae929ef7d5775e0581c269e  release/v0.9.8/evidence/pic10f322-test.log
+559af1e2714288f6e7747e9e96e5af6618eeaf92eaec08563a5a2e16c5cab2e4  release/v0.9.8/evidence/soak-attiny202_cd4053_simple.log
+3083cbf465996dcd5e0b3695edf346c4bcc9c45b3aac1d01054cdc909b66e337  release/v0.9.8/evidence/soak-attiny202_cd4053_with_mute.log
+898795d317b1980597457615cee41ce30532a845bdfb10724437b885965c6773  release/v0.9.8/evidence/soak-attiny202_tq2_l2_5v_relay.log
+c7804c9bfaa2f60d81edc0910051ef93b5f0cf31afd896a6b206a58aadccd471  release/v0.9.8/evidence/soak-attiny45_cd4053_simple.log
+e018000074d0f6757d3b0db277a9b08bd0ac653e20dc2ac904c23eadd2c2e62e  release/v0.9.8/evidence/soak-attiny45_cd4053_with_mute.log
+bb57a2ef967bdb0113a89c528a38377b0cbbf52e209931b7a0c420c5c84bda22  release/v0.9.8/evidence/soak-attiny45_tq2_l2_5v_relay.log
+dc91edabe8967603cf6353b184cf072e703f5aa4a3a09c1dd77d49de4a22ba86  release/v0.9.8/evidence/soak-attiny85_cd4053_simple.log
+01ad99d43aba69324d3890d6fe87ae6f0cd5496a0d39e155508a56b39b42cafa  release/v0.9.8/evidence/soak-attiny85_cd4053_with_mute.log
+bfc0c697a11076a8d736162be236160496d54819ed40896b094fed704156ce80  release/v0.9.8/evidence/soak-attiny85_tq2_l2_5v_relay.log
+a903fff66fa3b62d706cff437cffd92ce2a245d11959e4692b0955b935b8efea  release/v0.9.8/evidence/soak-build.log
+b866727c8029f4a736818b82f2659c15a4c9ca6e6a2bb119a12d8934712ce25b  release/v0.9.8/evidence/soak-pic10f320_cd4053_simple.log
+363398bf436cab50138be7612b8e6c1ee66aa4fc95226b70236b22225f0b079c  release/v0.9.8/evidence/soak-pic10f320_cd4053_with_mute.log
+91f26c9b9e55d37d8ad54510479c4c9ea93af6a25dcf7b4b735c2394009a8ba8  release/v0.9.8/evidence/soak-pic10f320_tq2_l2_5v_relay.log
+096f79050c8a80875df08ab0b7fcc1ec84c9947bd289a70d57cd83166629de82  release/v0.9.8/evidence/soak-pic10f322_cd4053_simple.log
+fe8601ae52faf2f7405834e3fc0f827f93b4a126ce3dc2a10f0e934bc67dd86a  release/v0.9.8/evidence/soak-pic10f322_cd4053_with_mute.log
+d011bfa4f9702627db5a6abdc2fd277a639bea2f5287a1956084fcb0ec16c2af  release/v0.9.8/evidence/soak-pic10f322_tq2_l2_5v_relay.log
+802af550d21de5512aa4f34f1f0a5ad0752ec3062e3fcc0bc5e1c9321ad50e46  release/v0.9.8/evidence/test-long.summary.txt
+
+# v0.9.9 -- 21 files signed by its own SHA256SUMS, 39 recorded here
+94cb7f947082e91e9896b29b6c24d0e019bc9cbcb08eca995a916e26e8b2d7c7  release/v0.9.9/MANIFEST.md
+fef2fa0b049b9c37ab134da5a794e55ae55e59c94c1e6db3bb8536440310fac6  release/v0.9.9/QUALIFICATION
+f77160e4276529dea28ad2a440502c3c9facb82d7299b963804b3a9147046a3d  release/v0.9.9/README.md
+fa4ae999d7cf2b60dc10fb3cf638fa8d39d232e56bd466cbe9216980f0fcf3da  release/v0.9.9/SHA256SUMS
+63a4846a0fd0a91d0677578e901f8a106087f12c204eddfad79499cbdc47924a  release/v0.9.9/SHA256SUMS.asc
+d1299a309f3ac809ba7227ffde565fb4185470d4db441369bb64f9f5610b12ec  release/v0.9.9/evidence/attiny202-test-target.log
+8ca1d754b1797ec05978a4901967af3307105d6cd5edd14a26a435dbda3a3f6c  release/v0.9.9/evidence/attiny202-test.log
+70a2feef1c6bd876fa64beb3ffa391d81e20f77be8d01ee7bfbee2bb6a828128  release/v0.9.9/evidence/build-avr-classic.log
+b2c0553b0ddf6c0a31af7d9dff798e12479b5914f907ce1a6252550e8c3d1273  release/v0.9.9/evidence/build-avr-xt.log
+89b1446ba63a7ba07ea4afee8889f0c0e0343ef55a798be0f183dc3252ecd2f5  release/v0.9.9/evidence/build-pic10f320.log
+325dd6d0254698cb4b50a86d676b660770a131c0cafc81988779b1636572fd4b  release/v0.9.9/evidence/build-pic10f322.log
+a2e0e9d7ed0cb10ff9a4b09eaaf81fadfdc4e00adde9895504f409d4ecc5d6af  release/v0.9.9/evidence/build-pic12f675.log
+70a2feef1c6bd876fa64beb3ffa391d81e20f77be8d01ee7bfbee2bb6a828128  release/v0.9.9/evidence/final-image-build.log
+2de244ed39d697f8f2cbe331a8fefbd7b572cf6df51cd85e401fa2bb78005918  release/v0.9.9/evidence/pic10f320-test-target-variants.log
+efb36bd44bc27a9b106f4c4498647583ab83b85281b3f113005ca23247b93a2f  release/v0.9.9/evidence/pic10f320-test.log
+114741a2194a8e8f45143a940cdecad940d96da81de121ac5ae9e1b713ebe310  release/v0.9.9/evidence/pic10f322-test-target-variants.log
+700dc87700682411696c8472ccd8447ffce6913044c4999525ad87285f9feb57  release/v0.9.9/evidence/pic10f322-test.log
+fa4fdfb2b79e8f732677b6622e4bf76346e9b9eec6356424bb9e7f0f8dc5b59c  release/v0.9.9/evidence/pic12f675-test-target-variants.log
+c02924d1763e89d527e21e70bc35c26faaf5b3ccc3d611fef4054e98f481bcab  release/v0.9.9/evidence/pic12f675-test.log
+6649b20174ab1821f891d7c17e9d2f9405bc6a47f232c998f2882ebcd51580ea  release/v0.9.9/evidence/soak-attiny202_cd4053_simple.log
+f0464278c6e82b804fabfe9d74085ba17849e4ee6ca80b209a26c4e1f8df3641  release/v0.9.9/evidence/soak-attiny202_cd4053_with_mute.log
+58a72eb7013fdc642f593e851b1f1d39fe18c228e6eff286bcc1369b51c543c6  release/v0.9.9/evidence/soak-attiny202_tq2_l2_5v_relay.log
+c7804c9bfaa2f60d81edc0910051ef93b5f0cf31afd896a6b206a58aadccd471  release/v0.9.9/evidence/soak-attiny45_cd4053_simple.log
+e018000074d0f6757d3b0db277a9b08bd0ac653e20dc2ac904c23eadd2c2e62e  release/v0.9.9/evidence/soak-attiny45_cd4053_with_mute.log
+bb57a2ef967bdb0113a89c528a38377b0cbbf52e209931b7a0c420c5c84bda22  release/v0.9.9/evidence/soak-attiny45_tq2_l2_5v_relay.log
+dc91edabe8967603cf6353b184cf072e703f5aa4a3a09c1dd77d49de4a22ba86  release/v0.9.9/evidence/soak-attiny85_cd4053_simple.log
+01ad99d43aba69324d3890d6fe87ae6f0cd5496a0d39e155508a56b39b42cafa  release/v0.9.9/evidence/soak-attiny85_cd4053_with_mute.log
+bfc0c697a11076a8d736162be236160496d54819ed40896b094fed704156ce80  release/v0.9.9/evidence/soak-attiny85_tq2_l2_5v_relay.log
+d8e578bf895b66dc8bdac2cd2374ea447e0d16727cd074fed57e12977bdce820  release/v0.9.9/evidence/soak-build.log
+74efcf3e403ca5574a0209e355e3a30a73bcba0fa7dc4dfdebb6697836ca313a  release/v0.9.9/evidence/soak-pic10f320_cd4053_simple.log
+89c4892bd30878223278d56475175dab757ee0b48725cf6fcd94cc16d9541925  release/v0.9.9/evidence/soak-pic10f320_cd4053_with_mute.log
+c5d29bf4d09505b26ebf73181b14c6e41efd4a7b386275e3d42ec1cb88b460c3  release/v0.9.9/evidence/soak-pic10f320_tq2_l2_5v_relay.log
+0c61b25b2884e77bf5068c3babd3153527349bb4d60dd3bc60bee27b26a884cb  release/v0.9.9/evidence/soak-pic10f322_cd4053_simple.log
+84ba8a9fc2320cbd7440ebe9e9647dfe8ab182e875993c8c2018c82ef3859673  release/v0.9.9/evidence/soak-pic10f322_cd4053_with_mute.log
+72face2efc58cc966a1df588b58b9fe31366202d9df3b040626c5252c4f97007  release/v0.9.9/evidence/soak-pic10f322_tq2_l2_5v_relay.log
+6d91654b4dc880aa4337833c70eaf5ad0645aac3ff6a23a931d75fd84c171acb  release/v0.9.9/evidence/soak-pic12f675_cd4053_simple.log
+17478babae35a7b3d608ea332989b9066cc3f911132c4787cd186133850473b0  release/v0.9.9/evidence/soak-pic12f675_cd4053_with_mute.log
+a7946461b7a0a7556332a1f5f287da83e0ff900b8774f356148ab358c9b50d10  release/v0.9.9/evidence/soak-pic12f675_tq2_l2_5v_relay.log
+369f5c44a0d1d5a3f0614d892fb0b31ffc6c458482775c5670007c753e2e031d  release/v0.9.9/evidence/test-long.summary.txt
+
+# v0.9.10 -- 22 files signed by its own SHA256SUMS, 40 recorded here
+58aea50c1ea24b33325754e630f055e9fa9319386c924a93b9b223cc1a31df86  release/v0.9.10/MANIFEST.md
+f91252920a0a885620fc16e4b19847788ac73f8f14d73f7a0b837d2be6b6e95e  release/v0.9.10/QUALIFICATION
+a21df2e7cc4befc1393789c9306d8e42fdaa3e39ced97b02ed4837a91c072705  release/v0.9.10/README.md
+3fe5e1a9c5f11077141f04dd1bdfe072e28ab61b5d8a0df93a63f73b4d4c4a42  release/v0.9.10/SHA256SUMS
+0f5309536ef5c7d9fa50ad1655a03e091fc6b12c286d6a0b519a856caa3c0427  release/v0.9.10/SHA256SUMS.asc
+ba887d5d6a0940b9d8427eb296e6724ab9c3fd6082206b18ac140d994579b261  release/v0.9.10/evidence/attiny202-test-target.log
+1a579f9534615dc9f96e71aa87968cba3ced8f1adf9030e62b2ed9b41352ae33  release/v0.9.10/evidence/attiny202-test.log
+bcabcdf9532d4092bd9b85def3c89d2b7a4c421c5b65104dba3698732edbbf6c  release/v0.9.10/evidence/build-avr-classic.log
+cada31f84169d776535b92af0f0f362cfcc7150da51f6f128f0eee90fc65ffcc  release/v0.9.10/evidence/build-avr-xt.log
+a8320546be2d3fb3460533f23869c5af15485cdef52d5054112dcdddd2256226  release/v0.9.10/evidence/build-pic10f320.log
+12914a5f0f5aca2c7f0e096619576f94922941ca333c5e8adc368a1a4ec52923  release/v0.9.10/evidence/build-pic10f322.log
+0eb7653b944d969bd917958fdff6841a8fc31f61d71f253632391e9d07266ac2  release/v0.9.10/evidence/build-pic12f675.log
+bcabcdf9532d4092bd9b85def3c89d2b7a4c421c5b65104dba3698732edbbf6c  release/v0.9.10/evidence/final-image-build.log
+7cd8944f568add2de8bc0c037c5b6ea097bf178096e1278b3587c1f82f550d88  release/v0.9.10/evidence/pic10f320-test-target-variants.log
+561f709606d7e0467318b7116b2037226e58b62ae50b461bcbad8536a3d04858  release/v0.9.10/evidence/pic10f320-test.log
+d22f6b4b1350a022a9344f84616852aa0360d78a61ee7914f6824ead3f78ebce  release/v0.9.10/evidence/pic10f322-test-target-variants.log
+c6fd6745893329731e056e9442258e0d4ceba95c5353342cafa91e159a93d8d5  release/v0.9.10/evidence/pic10f322-test.log
+07d4479e87edeb6eeab62dfc41bf1bd02ac776b47c63095ed3f5c4fbe6ba0b3f  release/v0.9.10/evidence/pic12f675-qualification.log
+e67a69252f36d4eefd4039c3f47de04756f9ab4b2b95f467239594ec33555e15  release/v0.9.10/evidence/pic12f675-qualified-matrix.json
+fb93e815c6833908085360a5e4c27ae699ab7efd4af771f007c0bb20a190327c  release/v0.9.10/evidence/resource-tables.log
+d8cdbc0bf396c8e0ba0c2aad2f7397c64a2b13d2c096c171fbae2228c6c4f318  release/v0.9.10/evidence/soak-attiny202_cd4053_simple.log
+3d4f9f125805d55bfb2f4088f026ec98db6a6cd5d5a0f26ccf827e9cdc0fe58e  release/v0.9.10/evidence/soak-attiny202_cd4053_with_mute.log
+971afd437a21dce5c13bb31f047652fcc267a145d1749febb87159dc1890f294  release/v0.9.10/evidence/soak-attiny202_tq2_l2_5v_relay.log
+c4e6f6daf3c97b45418382ffc801e71d28a26190edb113dfbca39377ed3f8451  release/v0.9.10/evidence/soak-attiny45_cd4053_simple.log
+2c6039280ac19f25dcb1f3c4113700c7ce4cfdd3b39a796cca5ddc17426187f9  release/v0.9.10/evidence/soak-attiny45_cd4053_with_mute.log
+05f71bb802d5575c9176e3405785895c171019d47a65021329a220959438b7ed  release/v0.9.10/evidence/soak-attiny45_tq2_l2_5v_relay.log
+47b27ff1e7869a0550ab249880d606a73a9a8633441b78cdf8a2dea16a0dacfb  release/v0.9.10/evidence/soak-attiny85_cd4053_simple.log
+616e82745c3b7e8bb5d25d9f4da0ca67844109780b1e7044821b8eed191925ae  release/v0.9.10/evidence/soak-attiny85_cd4053_with_mute.log
+a89efbe85212e2a62088c9334c9622bb096b49bf9f713b7eb6df5541eb47ab85  release/v0.9.10/evidence/soak-attiny85_tq2_l2_5v_relay.log
+413fe3c4aa0f8f2e6d266c9ee960ca0e8657c6ef1819cd269207ea04d30b8921  release/v0.9.10/evidence/soak-build.log
+34b2f5a3028ee3489273d12508ced0302a2e566c8f8705de11117a22da426b1a  release/v0.9.10/evidence/soak-pic10f320_cd4053_simple.log
+30cab6485f180dba82472b486001f17e927985ed7bee8217f98fea3ad154621b  release/v0.9.10/evidence/soak-pic10f320_cd4053_with_mute.log
+93d0a9f007d2a0c276811571a3dd48de42cf90bd7fe7c161bb014a56ad17b6db  release/v0.9.10/evidence/soak-pic10f320_tq2_l2_5v_relay.log
+a6908c88a802e86a3870d990de38fab148745e007ce3f64f4035267d29a0dbb5  release/v0.9.10/evidence/soak-pic10f322_cd4053_simple.log
+927f5d7b61ee78726991b1c8678d75e0e2c176e7b018791229b1c0e6bf9c2fd5  release/v0.9.10/evidence/soak-pic10f322_cd4053_with_mute.log
+12c657d6f975036504c9a17ad5933714db43d14462ef8508eb05c6acfcc24f27  release/v0.9.10/evidence/soak-pic10f322_tq2_l2_5v_relay.log
+a47781b2f72f5bd99eadf16353aea1afda627ab4031cced425ae262db125580a  release/v0.9.10/evidence/soak-pic12f675_cd4053_simple.log
+bfc6702ab3c216861155c00109374a119eb36ab35b8c9169d3322d8fe693d723  release/v0.9.10/evidence/soak-pic12f675_cd4053_with_mute.log
+5f320a29d482756b48ba88615adb41fe956413a8d8698381c6fc7ae7d5c5846d  release/v0.9.10/evidence/soak-pic12f675_tq2_l2_5v_relay.log
+b61c106cefc0e9684934e528380d8e29d4d4c4a3b9ce10afe1ad7ed86118e3fb  release/v0.9.10/evidence/test-long.summary.txt
+
+# v0.9.11 -- 22 files signed by its own SHA256SUMS, 40 recorded here
+a3326e887afd2e6400f58ef386c2344be8b040808d09a8eaee24be34b48bde8a  release/v0.9.11/MANIFEST.md
+f31527e808256019cdf03a9ce77938f644fa7583ca3b8ef2eb6285a08802e56b  release/v0.9.11/QUALIFICATION
+07e0cf426e16f9ef776e5cb5f004084d369296ac2704d1ad05fbf9c939ae2e9a  release/v0.9.11/README.md
+3fe5e1a9c5f11077141f04dd1bdfe072e28ab61b5d8a0df93a63f73b4d4c4a42  release/v0.9.11/SHA256SUMS
+adec868898cab2a859c728aab9522d9b53836388b2562d30ae05f3ad5627886f  release/v0.9.11/SHA256SUMS.asc
+33387c66a58cbe7eeabe92955d34745a15d2476938c61909e731e24e632fe710  release/v0.9.11/evidence/attiny202-test-target.log
+31373f3a02649a9bd59ab0a4ef5169bc6974a5394829270f1a8977458bc30417  release/v0.9.11/evidence/attiny202-test.log
+516d9273b872bbc9292e27982e238206299e97da9c423c2d0b6623d17a4f9ecd  release/v0.9.11/evidence/build-avr-classic.log
+8fbd1665454ad83e1d543ab46ebd05fe5348616ad94da09d60f55290b15ceb2f  release/v0.9.11/evidence/build-avr-xt.log
+a787b455b69188ff62fa6ef20f46cde3d84828e5379b03db04f28282734412f5  release/v0.9.11/evidence/build-pic10f320.log
+9a686a910f17a77647493f78cbb1f9f01b94dbe19a26b726ac1f2e19837e7c21  release/v0.9.11/evidence/build-pic10f322.log
+723e61ccf1ab63c88eb76aaf4f65014cd369b086bf43eb71de579e690cb180dd  release/v0.9.11/evidence/build-pic12f675.log
+516d9273b872bbc9292e27982e238206299e97da9c423c2d0b6623d17a4f9ecd  release/v0.9.11/evidence/final-image-build.log
+4cc0f8ff77cbc5537c1d05ad93bf4d6493763221369cd66e45622b55badfa094  release/v0.9.11/evidence/pic10f320-test-target-variants.log
+9ed3d90808865e61d8addace60437f984d68a5e5f353ec6bdb1b40ab0d5a29c3  release/v0.9.11/evidence/pic10f320-test.log
+9cd97cff50c4cbde5c1b023f16e4eb85a24184f84aa68c70e5ef1d267a1fffbd  release/v0.9.11/evidence/pic10f322-test-target-variants.log
+fe26170418165ce0ed07ef3e662afe2f13cebb3f429389b66bde382d19165df5  release/v0.9.11/evidence/pic10f322-test.log
+4b8214b934c0f1f85ae835cade51c4f854387d5d30c4202c35d2fbf6ca60ed81  release/v0.9.11/evidence/pic12f675-qualification.log
+f6620ab289d5dae466990119160f4084e3389cbe318cd7e031401139709ea40f  release/v0.9.11/evidence/pic12f675-qualified-matrix.json
+4e26dc85a6697bc2c6486c3849b61d3288beb0aa4e45547d0579ccba400a2359  release/v0.9.11/evidence/resource-tables.log
+0b5dc36dadf31f0056dd06ef75854ac00e673206777b115831b8c365dcd0a45e  release/v0.9.11/evidence/soak-attiny202_cd4053_simple.log
+4b332e7d171ac65e8492c92248c516c563c2fc944257c24497abe9ff7cbcc234  release/v0.9.11/evidence/soak-attiny202_cd4053_with_mute.log
+a1f77b7297dc964dee0a8e2a546d32feee314b3bca350491fd50db6ce33867ef  release/v0.9.11/evidence/soak-attiny202_tq2_l2_5v_relay.log
+c4e6f6daf3c97b45418382ffc801e71d28a26190edb113dfbca39377ed3f8451  release/v0.9.11/evidence/soak-attiny45_cd4053_simple.log
+2c6039280ac19f25dcb1f3c4113700c7ce4cfdd3b39a796cca5ddc17426187f9  release/v0.9.11/evidence/soak-attiny45_cd4053_with_mute.log
+05f71bb802d5575c9176e3405785895c171019d47a65021329a220959438b7ed  release/v0.9.11/evidence/soak-attiny45_tq2_l2_5v_relay.log
+47b27ff1e7869a0550ab249880d606a73a9a8633441b78cdf8a2dea16a0dacfb  release/v0.9.11/evidence/soak-attiny85_cd4053_simple.log
+616e82745c3b7e8bb5d25d9f4da0ca67844109780b1e7044821b8eed191925ae  release/v0.9.11/evidence/soak-attiny85_cd4053_with_mute.log
+a89efbe85212e2a62088c9334c9622bb096b49bf9f713b7eb6df5541eb47ab85  release/v0.9.11/evidence/soak-attiny85_tq2_l2_5v_relay.log
+c10fb8699c1bf0eea61f1ef41573b3b2e29d49e5a3cbc554a8a12d94f79d9dfc  release/v0.9.11/evidence/soak-build.log
+733ac51900b40b04e77818e567614f667e43a7107504e383c6a0460270025bc1  release/v0.9.11/evidence/soak-pic10f320_cd4053_simple.log
+3b061b5f628dd64ebe39abdf33c4c95afce8f51635bced58390058cf1f48b0fa  release/v0.9.11/evidence/soak-pic10f320_cd4053_with_mute.log
+8584830372722f55c978db3af9793877a86968035d3d93f7ea5f92bcdf921fdd  release/v0.9.11/evidence/soak-pic10f320_tq2_l2_5v_relay.log
+fe90f8e3a6dbf79eeb969819543a32dbbe15261cd5018915afec81a6ddeffb99  release/v0.9.11/evidence/soak-pic10f322_cd4053_simple.log
+bfc184d5bbcd249274949798fd8e6c107dbf3220a662dd35b0ead83e440ebf7c  release/v0.9.11/evidence/soak-pic10f322_cd4053_with_mute.log
+d9a5804d62bfb2a9028098600bf738eee1b1cd024547395191b011b5360b497a  release/v0.9.11/evidence/soak-pic10f322_tq2_l2_5v_relay.log
+f6db401d8d16eb65329186906c550d8ecc20b49fe640620b886bb8a00d0d38ea  release/v0.9.11/evidence/soak-pic12f675_cd4053_simple.log
+7a99389cec005abb2c942c7b25d915b739a61f057a6ea75116e20b4cf08243cd  release/v0.9.11/evidence/soak-pic12f675_cd4053_with_mute.log
+698e935efda10c6ef638ad3a072c9764ce46adabb31709ef4b2f48efdcff8bec  release/v0.9.11/evidence/soak-pic12f675_tq2_l2_5v_relay.log
+ccf376b734f96334c74a38063289baceebb1ed9db1f954640cedc3abbc6d25b6  release/v0.9.11/evidence/test-long.summary.txt
+
+# Not per-release: the trust root every SHA256SUMS.asc is checked
+# against, and the ignore rule that decides what may appear in a
+# published directory without being published.
+b736bde3b448a485d29dae3cd851f938328b19e24d3c16be9107b9445a1787f9  release/signing-key.asc
+d94d58edc33dced99e1e2a5a455b614ced67cbd44afca1b922ac6a0f1d17540a  release/.gitignore

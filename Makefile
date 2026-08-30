@@ -974,6 +974,7 @@ FORCE:
         test-pic10f320-coverage-archive \
         test-attiny202-build test-avr-build-rebuild test-avr-program-order test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
         test-pic-build test-release-images test-release-preflight test-release-provenance test-release-qualification test-release-history test-build-serialization \
+        test-published-release-immutability \
         test-pic12f675-flash-helper \
         test-make-lock-probe test-make-safe-parallel-probe \
         _test-make-safe-parallel-probe-run _test-make-safe-parallel-probe-a \
@@ -3140,6 +3141,7 @@ TEST_GATES_LATE = \
         test-klee-build test-mutation-sandbox test-pic-build \
         test-release-images test-release-preflight test-release-provenance \
         test-release-qualification test-release-history \
+        test-published-release-immutability \
         test-pic12f675-flash-helper \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
@@ -3322,6 +3324,19 @@ test-release-qualification:
 # parent is the exact source commit recorded by the 24-hour qualification.
 test-release-history:
 	./test/test_release_history.sh
+
+# A published release is what its recipients already hold, so the copy under
+# release/ is the same object rather than a draft of it. Each release signs
+# SHA256SUMS over its images and helpers; that leaves the evidence logs,
+# QUALIFICATION, the manifests and the detached signature itself -- the account
+# of what was run, not rebuildable from source -- covered by nothing. This gate
+# re-verifies each signed list, holds everything else to
+# test/published_release_digests.txt, requires the two to partition the
+# directory exactly, and compares against the tag where the clone has one.
+# The one amendment ever made to a published release, the v0.9.0-v0.9.2 TMUX
+# errata, is named in the gate with its reason.
+test-published-release-immutability: python-version-valid
+	./test/test_published_release_immutability.py
 
 # Internal probes used only by test/test_make_serialization.sh.
 SERIAL_PROBE_DIR ?= $(AVR_BUILD_DIR)
@@ -8258,6 +8273,7 @@ help:
 	@echo "  test-release-provenance  release source/compiler provenance checks"
 	@echo "  test-release-qualification  exact release evidence + 18-soak publication checks"
 	@echo "  test-release-history  bind release history + checksum/tag signatures"
+	@echo "  test-published-release-immutability  every published release is still the one that was published (included in test)"
 	@echo "  test-pic12f675-flash-helper  fake-programmer proof of the shipped PIC12F675 flashing helper (included in test)"
 	@echo "  test-build-serialization  worktree Make/release lock regression"
 	@echo "  test-target-matrix  fail-closed PIC target-variant matrix checks"

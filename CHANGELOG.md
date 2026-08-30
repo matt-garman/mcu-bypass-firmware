@@ -76,6 +76,24 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **Published releases are now held to what was published.** Every release
+  directory ships `SHA256SUMS` over its images and programming helpers, so
+  those stay verifiable by a recipient holding only that directory. That list
+  covers 215 of the 576 published files; the other 361 -- the evidence logs,
+  `QUALIFICATION`, the manifests and the detached signatures themselves -- are
+  the account of what was actually run, are not rebuildable from source, and
+  were covered by nothing. `make test-published-release-immutability`
+  re-verifies each release's own list, holds the remainder to
+  `test/published_release_digests.txt`, requires the two to partition each
+  directory exactly so a newly added file cannot fall between them, and
+  compares against the release tag wherever the clone has one. The record is an
+  ordinary `sha256sum -c` file, so `sha256sum -c
+  test/published_release_digests.txt` reproduces its central claim with
+  coreutils alone. The safety errata added to `v0.9.0`-`v0.9.2` after the
+  TMUX4053 polarity defect is registered as the one amendment ever made to a
+  published release, with the check that it touched no file any verifier reads.
+  No release content changed.
+
 - **Folding a deliberate duplication no longer passes silently.** Several facts
   in this tree are decided twice on purpose, by routes able to disagree: the
   PIC10F320 shell is a second implementation compiled by a different compiler

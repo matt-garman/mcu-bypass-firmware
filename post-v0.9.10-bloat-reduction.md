@@ -2728,6 +2728,12 @@ before migration.
 - No evidence is removed from Git before exact authenticated archival backfill.
 - Hosted URLs are never treated as immutable provenance by themselves.
 
+The first has a mechanical floor from BR-REL-07: every published evidence file
+is now recorded by digest, so a payload that moves to a hosted asset has to be
+removed from `test/published_release_digests.txt` in the same commit, by
+someone who has to say so. It does not check that the backfill happened -- only
+that the removal cannot be quiet.
+
 ## BR-REL-05 - Keep future releases self-contained
 
 **Status:** TODO
@@ -2783,25 +2789,109 @@ releases are safer than deltas or links to prior assets.
 - Ordinary development checkouts stop accumulating future loose release trees.
 - Historical tags and commits remain untouched.
 
+The last is enforced by BR-REL-07 for the twelve releases that exist: this
+proposal reorganizes the directory these gates read, so any prototype of it
+fails `test-published-release-immutability` the moment it touches a published
+tree rather than only the machinery that writes new ones.
+
 ## BR-REL-07 - Preserve historical releases during prospective migration
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Work:**
 
-- [ ] Do not edit existing `release/v*/` contents.
-- [ ] Do not rewrite early historical exceptions to match the modern policy.
-- [ ] Keep current safety errata outside immutable historical files.
+- [x] Do not edit existing `release/v*/` contents.
+- [x] Do not rewrite early historical exceptions to match the modern policy.
+- [x] Correct "keep current safety errata outside immutable historical files":
+  the tree deliberately does the opposite, and is right to. See the finding
+  below.
 - [ ] Use each historical tag's own scripts and naming contract for
-  reproduction.
-- [ ] If old payloads are eventually removed from the tip of `main`, do so only
+  reproduction. Deferred: this is a procedure for a reproduction attempt, not a
+  property of the tree, and nothing in the current work performs one.
+- [x] If old payloads are eventually removed from the tip of `main`, do so only
   in an ordinary new commit after archive verification; do not rewrite history.
-- [ ] Verify old tagged objects remain reachable after any tip cleanup.
+- [x] Verify old tagged objects remain reachable after any tip cleanup.
 
 **Acceptance:**
 
 - Every published historical release remains verifiable exactly as released.
 - Prospective simplification does not retroactively change historical claims.
+
+**Result:** these were six instructions addressed to whoever performs the
+migration, in a document BR-FINAL-07 deletes, and nothing enforced any of them.
+`make test-published-release-immutability` now does, over
+`test/test_published_release_immutability.py` (the gate) and
+`test/published_release_digests.txt` (the record). 2116 checks, in
+`TEST_GATES_LATE` beside the other release gates, so it reaches `test`,
+`stress` and `test-long`.
+
+**What was actually unprotected.** Each release ships `SHA256SUMS` over its
+images and programming helpers, and `test-release-images` /
+`test-release-provenance` / `test-release-qualification` / `test-release-history`
+are thorough -- but every one of them validates the release *machinery* against
+synthetic fixtures in a scratch repository. None reads the twelve published
+directories in this tree. Their signed lists cover 215 of the 576 published
+files. The remaining 361 are the evidence logs, `QUALIFICATION`, `MANIFEST.md`,
+`README.md` and `SHA256SUMS.asc` itself: the account of what was run, not
+reproducible from source, and until now editable in complete silence.
+
+**Finding: the third bullet was wrong, and the tree already knew.** "Keep
+current safety errata outside immutable historical files" is contradicted by
+`release/v0.9.0`-`v0.9.2`, whose `README.md` and `MANIFEST.md` each carry a
+TMUX4053 polarity warning added after publication -- the only reason those three
+directories differ from their tags at all. That was the correct call: someone who
+fetches `release/v0.9.1/` and nothing else has no other channel through which the
+warning can reach them, and a pointer from a file they did not download is not a
+warning. The bullet as written would have required reverting it. So the gate does
+not forbid amendment; it requires that an amendment be on the record. The six
+amended files are registered with the reason, the markers that must survive in
+them, the anchor they send the reader to, the check that the errata has not
+spread to a release it does not describe, and the check that none of them is
+covered by any `SHA256SUMS` -- which is *why* the amendment could not weaken a
+verifier, asserted rather than assumed.
+
+**The eight rows.** `payload-still-verifies` (each release's own list still
+verifies, so offline integrity is checked rather than inferred from having held
+once); `record-still-matches` (the 363 recorded digests); `every-published-file-
+is-covered-once` (the two lists partition each directory exactly -- a file
+covered by neither can be rewritten silently, one covered by both invites the two
+to disagree -- plus the per-release header counts, which make a payload file
+moved into the record detectable where no tag is reachable);
+`no-image-escapes-the-signed-list`; `amendments-are-on-the-record`;
+`the-tag-still-agrees`; `every-release-is-registered`.
+
+**The record is a `sha256sum -c` file on purpose.** From the repository root,
+`sha256sum -c test/published_release_digests.txt` reproduces the central claim
+with coreutils and no Python, so the gate is not the only way to check its own
+central assertion.
+
+**The tag is the independent witness, and it degrades honestly.** Both lists are
+lists this tree keeps, and a rewrite thorough enough to update one could update
+the other; the signed tag is the one witness a rewrite here cannot reach. The
+decisive negative control is exactly that: a published file edited *and* its
+recorded digest updated to match passes every other row and is still caught. CI
+checks out shallow and untagged (no `fetch-depth: 0` in either workflow), so the
+row cannot always run -- it reports `tag cross-check ran for N of 12` rather than
+passing quietly, and the other seven rows are complete without it.
+
+**Verification:** 18 negative controls against a doctored full clone, each
+required to fail with the specific row that should catch it -- an evidence log
+gaining a byte, an evidence log deleted, an image edited, an image deleted, an
+unlisted file appearing, a file claimed by both lists, an image moved out of the
+signed list into the record, a misstated per-release count, the errata stripped,
+the anchor renamed, the errata spread to a fourth release, an amended file pulled
+into the signed list, a release deleted, an unregistered release appearing, a
+missing detached signature, the record deleted, the signing key altered, and the
+edit-plus-matching-digest case. All 18 rejected with the intended row; the
+pristine copy passes. Also verified with no Git repository present at all: 2092
+checks, `tag cross-check ran for 0 of 12 (no release tags in this clone)`, and an
+edited evidence log still caught.
+
+**Not done here.** Signature verification: `SHA256SUMS.asc` is pinned as bytes,
+but checking it against the signing key needs GnuPG and a trust decision
+`scripts/verify-release-signature.sh` already owns. The record covers
+`release/signing-key.asc` so the trust root cannot be swapped silently;
+`release/README.md` is deliberately not pinned, being current documentation.
 
 ---
 
@@ -2809,7 +2899,7 @@ releases are safer than deltas or links to prior assets.
 
 ## BR-SRC-01 - Preserve deliberate firmware duplication
 
-**Status:** DONE `<commit>`
+**Status:** DONE `28f8ffe`
 
 This is a review gate, not an instruction to edit source.
 
@@ -3355,8 +3445,8 @@ dependencies and acceptance criteria.
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
-| BR-REL-07 | Preserve historical releases | TODO |
-| BR-SRC-01 | Preserve deliberate source duplication | DONE `<commit>` |
+| BR-REL-07 | Preserve historical releases | DONE `<commit>` |
+| BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
