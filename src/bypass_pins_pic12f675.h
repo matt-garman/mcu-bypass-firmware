@@ -61,8 +61,10 @@
 //     straddles. Both board options clear it by a wide margin (a MOSFET
 //     gate or a CMOS control input, plus the 100k fail-safe pulldown,
 //     ~50uA at 5V), but the margin is a BOARD property and no lane here
-//     can measure it: gpsim models pins ideally. See
-//     docs/pic12f675_feasibility.md section 4.2 and section 8 item 9.
+//     can measure it: gpsim models pins ideally. See the PIC12F675 pinout
+//     section and the PIC12F675 rows of Datasheet References in
+//     DESIGN_DOCUMENTATION.adoc, and TODO.md T3-pic12f675-bench item 9 for
+//     the bench run.
 #define SPARE_INPUT_PIN  (3U) // GP3: externally pulled up, remains an input
 #define SPARE_OUTPUT_PIN (4U) // GP4: guarded output, always driven low
 

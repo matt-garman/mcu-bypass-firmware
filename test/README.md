@@ -312,6 +312,21 @@ profile retains an exact final-check contract — 48 PIC10F322, 102 PIC10F320, a
 168 PIC12F675 checks — so an incomplete profile or a missing rebuild arm fails
 instead of reporting a smaller subset as green.
 
+**A `.stc` checkpoint placed before a stimulus' first transition must keep
+asserting the pin.** A PIC12F675 port spike once saw a stimulus declared
+`initial_state 1` read *low* at such a checkpoint, while the same firmware with
+no stimulus attached read the pin high through the internal pull-up. The spike
+tree was not retained, so no root cause is claimed. What replaced the
+explanation is a standing check:
+`test/pic/pic12f675_footswitch_toggle.stc` declares `initial_state 1`, attaches
+to `gpio5`, and breaks at cycle 23040 — 2,560 cycles *before* its first listed
+transition at 25600 — where `test/pic/run_gpsim_test.sh` asserts `GP5 == 1`
+outright on all three variants. The checkpoint sits inside the disputed window
+rather than dodging it, so if the behaviour ever returns the failure is that
+assertion going red rather than a silently relocated checkpoint. The libgpsim
+harnesses drive through `set_Vth` with a low `Zth` and would not reach this at
+all; it is a CLI-lane rule.
+
 ## PIC10F320 target validation layers
 
 The PIC10F320 is the one target whose verified core is *hand-inlined* into the
@@ -622,6 +637,6 @@ pk2cmd and ipecmd hardware routes remain unvalidated on silicon. Simulator lanes
 qualify its 1.024 ms TMR0 cadence, qualitative WDT reset and liveness, and
 nominal output pulse widths; real WDT timing, analog BOD behaviour, and the
 loaded-board GP2 Schmitt-trigger readback margin require measurement. These are
-§8 items 1, 2, 8, and 9 in `docs/pic12f675_feasibility.md`, tracked for the
+items 1, 2, 8 and 9 of `TODO.md` `T3-pic12f675-bench`, tracked for the
 `1.x.y` hardware pass. As on PIC10F32x, target-I/O cycle measurements do not
 replace real-silicon pulse or peripheral-load measurements.

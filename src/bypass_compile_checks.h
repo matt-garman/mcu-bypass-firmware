@@ -14,7 +14,8 @@
 // bypass_mcu_pic10f320.c is deliberately NOT among them: at 256 words of
 // flash it is a single self-contained file that shares no headers with
 // src/, and it carries its own copy of these five invariants.  That is by
-// design (see docs/pic10f320_special_case.md).  Its copy is held to these
+// design (see "PIC10F320: the constrained target" in
+// DESIGN_DOCUMENTATION.adoc).  Its copy is held to these
 // values by the firmware<->core equivalence lane, which compares the real
 // firmware against bypass_pure.c driven from the shared config, so a
 // drift in either threshold fails that lane rather than passing silently.

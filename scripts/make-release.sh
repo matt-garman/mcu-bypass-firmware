@@ -63,8 +63,9 @@
 #   A release is a four-step sequence spanning two commits and a signed tag.
 #   This script owns exactly one of those steps:
 #     1. SOURCE FINALIZATION -- an ordinary commit on main that finalizes
-#        CHANGELOG.md and the four bounded current-release declarations for
-#        vX.Y.Z. This commit is the source contract and is what gets qualified.
+#        CHANGELOG.md and the bounded current-release declarations for vX.Y.Z
+#        (release-documentation.sh's current_documents). This commit is the
+#        source contract and is what gets qualified.
 #     2. PRODUCTION STAGING -- this script. It refuses to start unless step 1 is
 #        already committed (step 0 validates the declarations), and it stages
 #        release/<VERSION>/ without committing anything.

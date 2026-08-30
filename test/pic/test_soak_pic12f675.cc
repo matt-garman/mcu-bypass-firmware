@@ -14,9 +14,10 @@
 //      millisecond, says so by name below.
 //   2. THE TICK IS 1.024 ms. Sampling still happens per millisecond, but the
 //      firmware's thresholds are counts of a tick that is no longer one, so the
-//      core converts. See docs/pic12f675_feasibility.md section 4.4.1, which
-//      asked for exactly this: stated and re-derived, not absorbed by a margin
-//      that is already doing another job.
+//      core converts. The 1.024 ms tick is a design consequence, not an
+//      accident -- see "PIC12F675: the classic mid-range shell" in
+//      DESIGN_DOCUMENTATION.adoc -- and the conversion is stated and
+//      re-derived rather than absorbed by a margin already doing another job.
 //   3. THE SIMULATED WATCHDOG IS FAITHFUL HERE, which is the opposite of the
 //      10F32x situation and still not a licence to assert timing -- see the
 //      banner note below.
@@ -43,7 +44,7 @@
 
 // Unlike the 10F32x lanes, gpsim's watchdog model matches this part's datasheet
 // exactly: with PSA=1 and PS=1:16 a starved reset fires at cycle 288,039, i.e.
-// 288.0 ms at 1 MIPS = 18 ms x 16 (docs/pic12f675_feasibility.md section 6.1).
+// 288.0 ms at 1 MIPS = 18 ms x 16, measured against this part in gpsim.
 // That agreement is still not permission to assert WDT timing here. The
 // datasheet's characterized MINIMUM at this ratio is 160 ms, not 288 ms, and no
 // simulator models the RC spread that produces it; what this soak uses the

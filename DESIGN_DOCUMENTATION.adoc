@@ -32,9 +32,9 @@ of evidence apart. It is a *classic* mid-range core rather than the 32x's
 enhanced mid-range, which is why it needs its own shell — no `LATx` output
 latch, no `OSCCON`, no `TMR2`/`PR2` period register, and one shared prescaler
 that must be given to either the timer or the watchdog but not both. The design
-consequences of each are recorded in `docs/pic12f675_feasibility.md`; the two
-that reach this document are the SRAM output shadow (below) and the 1.024 ms
-tick that follows from the prescaler decision.
+consequences of each are in <<pic12f675-architecture>>; the two that reach this
+section are the SRAM output shadow (below) and the 1.024 ms tick that follows
+from the prescaler decision.
 
 
 == Why ATtiny202 (AVR-XT):
@@ -716,8 +716,20 @@ by the silicon:
   check straddles. Both board options clear the requirement by a wide margin —
   the pin drives a MOSFET gate or a CMOS control input, and the only resistive
   load is the 100k fail-safe pulldown — but a substituted low-value pulldown, or
-  anything else hung off GP2, has to respect it. Numbers and the bench check are
-  in `docs/pic12f675_feasibility.md` section 4.2 and section 8 item 9.
+  anything else hung off GP2, has to respect it.
++
+The numbers are one-sided, which is why the requirement is written down rather
+than assumed. DS41190G Table 1-1 makes GP2 the only Schmitt-Trigger input among
+this design's outputs: D041 gives it VIH min 0.8 x VDD, 4.0 V at a 5 V supply,
+where D040 gives the TTL buffers on GP0, GP1, GP4 and GP5 VIH min 2.0 V. The
+drive side is characterized at a single point -- D090, VOH min VDD - 0.7 V at
+IOH = -3.0 mA and VDD = 4.5 V, which is 3.8 V against a 3.6 V threshold, 0.2 V
+of margin -- and nothing at all is specified above 3 mA. The 100k fail-safe
+pulldown draws 50 microamps at 5 V, roughly 60x inside that characterized
+point, so the reference boards are not close to the limit; a substituted
+low-value pulldown could be. No lane here can see it either way, because gpsim
+models pins ideally, so the loaded-board measurement is a bench item --
+`HARDWARE_VALIDATION_LOG.md`, "Outstanding controlled runs".
 
 LED on GP0, control/coil pins on GP1 and GP2 — the same roles the 322 gives RA0,
 RA1 and RA2.
@@ -1154,12 +1166,74 @@ does not make them independently enforceable by this repository.
 | **Documented implementation rationale.** The sleep-entry comment in
   `src/bypass_mcu_avr_classic.c` ties the sequence to §7.3. No dedicated test can
   enforce the cited silicon interrupt-ordering guarantee.
+
+| PIC12F675 WDT period
+| `PSA=1`, `PS<2:0>` = `0b100` (1:16), de-rated floor 160 ms
+| DS41190G **§9.6.1** ("WDT PERIOD", nominal 18 ms unprescaled) and
+  **Table 12-4 param 31** `TWDT` (10 ms min / 17 ms typ / 25 ms max at 5 V,
+  -40 to +85 degC; 30 ms max extended)
+| **Runtime-checked configuration; documented timing derivation.** Two of these
+  are DS41190G's own numbers and they are different *kinds* of number, not a
+  discrepancy: 18 ms is the prose nominal the 288 ms row and gpsim both use,
+  17 ms is the characterized typical. The margin argument rests on neither. It
+  rests on the **minimum**, 10 ms x 16 = 160 ms, which is the de-rated floor in
+  Watchdog Pet-to-Pet Budget and what `src/bypass_pins_pic12f675.h` compiles
+  against. Do not "correct" the shell's 18 ms and 288 ms comments to the
+  typical: they cite the section that states 18 ms, they match what the
+  simulator models, and the safety argument holds either way.
+
+| PIC12F675 brown-out trip
+| `BOREN=ON`, no `BORV` field exists
+| DS41190G **Table 12-4**, `BVDD` (2.025 V min / 2.175 V max; hysteresis listed
+  TBD) and param 35 `TBOD` (100 microsecond minimum excursion, characterized
+  but not tested)
+| **Build-derived machine gate; documented physical thresholds.** The CONFIG
+  word is read back out of the built HEX by `make pic12f675-test-config`, which
+  proves the `BOREN` encoding and not the silicon trip voltage. Between roughly
+  2.2 V and 4 V the firmware runs correctly and 5 V peripherals may not, and no
+  configuration choice on this part changes that -- see Failsafe Mechanisms.
+
+| PIC12F675 oscillator tolerance
+| fixed 4 MHz INTOSC, factory `OSCCAL` trim, designed against +/-5%
+| DS41190G **Table 12-2 param F10** `FOSC` (+/-1% at 3.5 V/25 degC, +/-2% over
+  2.5-5.5 V and 0-85 degC, +/-5% over 2.0-5.5 V and -40 to +85/+125 degC)
+| **Documented vendor input.** +/-5% is the figure a pedal is designed against.
+  It moves the 12 ms relay coil pulse to 11.4-12.6 ms, so the 3x safety factor
+  over the TQ2-L2-5V's 4 ms minimum set/reset pulse degrades to 2.85x and holds;
+  the watchdog runs on its own RC and does not track the error, so the two do
+  not cancel. Debounce is unaffected in the way that matters, because the pure
+  core counts samples rather than milliseconds. It also bounds what a simulator
+  lane may claim: gpsim runs a nominal clock, so the lanes assert relative
+  cadences and bounded windows rather than absolute oscillator-derived figures.
+
+| PIC12F675 factory calibration word
+| word `0x3FF` holds a factory `RETLW`; the shipping image never programs it
+| Device pack `edc/PIC12F675.PIC`, `CalDataZone` `.oscval` at `0x3ff`
+| **Machine-gated.** XC8's startup calls `0x3ff` and expects the factory
+  `RETLW`, so an unmodified image cannot run in a simulator at all -- the PC
+  runs off the end of flash and the part watchdog-resets in a loop. The
+  simulation lanes therefore drive a **derived** image with the word injected,
+  and `make pic12f675-test-calibration` proves the derivation leaves the
+  shipping images byte-identical while the programming targets refuse any image
+  that programs `0x3FF`. Preservation across a real erase is a bench item, not
+  a gate -- see `HARDWARE_VALIDATION_LOG.md`.
+
+| PIC12F675 GP2 readback thresholds
+| the port-follows-shadow guard re-reads `GPIO` every tick
+| DS41190G **Table 1-1** with **D040** (TTL VIH min 2.0 V), **D041** (Schmitt
+  VIH min 0.8 x VDD) and **D090** (VOH min VDD - 0.7 V at IOH = -3.0 mA,
+  VDD = 4.5 V)
+| **Documented vendor input.** The consequence and the board precondition are
+  in the PIC12F675 pinout section; the loaded-board margin is a bench item.
+  gpsim models pins ideally, so no lane in this repository can measure it.
 |===
 
 NOTE: Scope, stated so this table is not over-trusted. The PIC10(L)F320/322
 references above were confirmed against DS40001585 and the device pack's
-`pic10f322.h` header, which is authoritative for register and CONFIG names, and
-the ATtiny13A reference against that part's datasheet. Machine gates can
+`pic10f322.h` header, which is authoritative for register and CONFIG names, the
+PIC12F675 references against DS41190G and the pack's `pic12f675.h` and
+`edc/PIC12F675.PIC`, and the ATtiny13A reference against that part's
+datasheet. Machine gates can
 enforce configured encodings and software arithmetic, but not vendor physical
 specifications. The AVR Classic and AVR-XT *electrical* parameters used
 elsewhere in this document — the 4.3 V / 4.2 V BOD levels, the ~16 ms
@@ -1543,6 +1617,19 @@ the deliberate two-level reserve. Those are dated 2026-08-05 figures for a
 spike build that was never shipped, not a measurement of any current image;
 what carries forward is the conclusion, which is that Model B is now held in
 place by the budget as well as chosen on merit.
+
+The PIC12F675 is the one part where that budget argument does not apply, and
+the answer there is weaker on purpose. Its flash headroom is large enough that
+an AVR-shaped ISR spike compiled, linked and ran the tested gpsim trajectory --
+the thing the PIC10F322 relay conversion could not do -- so the model was never
+ruled out by size on this part. What was never obtained is the number that
+would decide it: the bound is main's deepest chain plus the ISR's plus one,
+against the same 8 levels and the same two-level reserve, and no PIC12F675 ISR
+source, assembly or gate result was retained. Model B therefore stands here by
+consistency with the other two shells and by the absence of a reason to change,
+not by a measurement, and any future attempt should produce the retained stack
+result first, because the answer constrains the shell's call graph rather than
+a test.
 
 Two consequences are accepted rather than mitigated, and both are stated
 elsewhere in this document because they are user-visible:
@@ -1931,7 +2018,15 @@ was declined.
 The PIC12F675 is a modular target -- `src/bypass_mcu_pic12f675.c` and
 `src/bypass_pins_pic12f675.h` on top of the shared output drivers, compiling
 and linking the same `src/bypass_pure.c` -- and its shell shares no register
-code with the PIC10F322's. Six differences drive the design.
+code with the PIC10F322's. That it could be modular was established before the
+shell was written rather than discovered afterwards: measured 2026-08-05 on
+`main` at `0cfc72e`, with the pinned free-tier XC8 and device pack, a spike
+shell carrying the complete defensive layer built the three variants at 494,
+520 and 523 of the part's 1024 words. Roughly half the flash was spare, against
+39 words spare on the PIC10F322, so this part never faced the question
+<<pic10f320-architecture>> had to answer. Those are historical spike figures,
+not a measurement of any current image; what each shipped image occupies is
+release evidence. Six differences drive the design.
 
 **There is no output latch.** `GPIO` reads the **physical pin levels**, not the
 last value written, so the read-modify-write idiom that is safe against `LATA`
@@ -2021,6 +2116,15 @@ bidirectional pin with no analog function. GP4 is a parked output driven low
 and inside the guarded mask rather than an unconnected spare. The complete map
 and the board requirements it imposes are in the PIC12F675 pinout section
 above.
+
+One near-neighbour was considered and not taken. The PIC12F629 is the same die
+minus the ADC: same 1024 words, same eight-level stack, CONFIG at the same
+address, and `GPIO`, `TRISIO`, `WPU`, `OPTION_REG`, `CMCON` and `OSCCAL` at the
+same addresses, with `ANSEL` and `ADCON0` the only registers it does not have.
+gpsim supports it, and a family shell guarding those two writes and their two
+sanity checks behind one conditional would cover both parts. The repository
+builds exactly one of them, so the shell is named for that part rather than for
+a family; generalizing it is a decision available later, not a debt.
 
 
 == AVR Classic Program Flow

@@ -142,8 +142,8 @@ jobs:
   # (an oscillator calibration word injected into a copy), and the contract is
   # what proves deriving them leaves the shipping images untouched.
   #
-  # The 12F675 is release-supported from v0.9.9 (docs/pic12f675_feasibility.md
-  # §7); like every part here its release rests on simulation, formal proof and
+  # The 12F675 is release-supported from v0.9.9; like every part here its
+  # release rests on simulation, formal proof and
   # static analysis, with real-silicon validation deferred to the 1.x.y pass
   # (TODO T3-pic12f675-bench). Its release images are built and its lanes re-run
   # by the tag workflow (.github/workflows/release.yml), the same as the other

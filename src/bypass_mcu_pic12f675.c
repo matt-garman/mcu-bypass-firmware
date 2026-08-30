@@ -12,9 +12,10 @@
 //     - note the peripheral set between 12f6xx and 10f32x differs, so a separate
 //       shell is required
 //
-// Tick/WDT model "B" (see docs/phase2_pic_shell.md): a hardware timer (TMR0)
-// drives a ~1ms tick that is POLLED in the main loop (no sleep); the watchdog
-// is a pure FAULT watchdog at ~288ms, CLRWDT'd once per tick. There is no timer
+// Tick/WDT model "B" (see "The shared model: polled tick, pure fault
+// watchdog" in DESIGN_DOCUMENTATION.adoc): a hardware timer (TMR0) drives a
+// ~1ms tick that is POLLED in the main loop (no sleep); the watchdog is a
+// pure FAULT watchdog at ~288ms, CLRWDT'd once per tick. There is no timer
 // ISR and no ISR/main handshake: the single polled loop reaching CLRWDT is
 // itself the liveness proof.
 //
@@ -29,7 +30,8 @@
 // unprescaled at Fosc/4 = 1MHz, rolling over every 256us; four rollovers counted
 // in software make the 1.024ms tick. The 2.4% stretch changes nothing in the
 // pure core (which counts samples, not milliseconds), but it changes every
-// physical timing figure. See docs/pic12f675_feasibility.md section 4.4.1.
+// physical timing figure. See "PIC12F675: the classic mid-range shell" in
+// DESIGN_DOCUMENTATION.adoc.
 //
 // CONFIG / fuse rationale (PIC analogue of the AVR fuse table in the AVR shell):
 //   FOSC=INTRCIO internal 4MHz INTOSC with I/O on BOTH GP4 and GP5 -- required,
@@ -51,7 +53,9 @@
 // calibration and have no #pragma config setting in the device pack, so they
 // take the CWORD default (0b11). They set the BOD/POR trip voltages and are
 // programmed per device at the factory. Whether a programmer PRESERVES them is
-// a silicon-only concern -- see docs/pic12f675_feasibility.md section 8 item 1.
+// a silicon-only concern -- see TODO.md T3-pic12f675-bench item 1, and
+// "Outstanding controlled runs" in HARDWARE_VALIDATION_LOG.md for what a
+// bench run has to retain.
 //
 // BOR note: the AVR uses a 4.3V BOD because the relay/MOSFET peripherals need
 // >4V. The PIC12F675 BOR trip point is ~2.1V and, unlike the PIC10F322, this
@@ -68,8 +72,8 @@
 // 0x3FF, requires a matching baseline and immediate pre-write read, and
 // records mandatory post-write trim/readback evidence. It detects
 // programmer-induced loss only after the write; real preservation remains
-// hardware-unvalidated. See release/README.md and
-// docs/pic12f675_feasibility.md section 8 item 2.
+// hardware-unvalidated. See release/README.md and TODO.md
+// T3-pic12f675-bench item 2.
 
 
 

@@ -10,9 +10,10 @@
 // pure debounce core (bypass_pure.c) and the three output drivers are shared
 // UNCHANGED.
 //
-// Tick/WDT model "B" (see docs/phase2_pic_shell.md): a hardware timer (TMR2)
-// drives a ~1ms tick that is POLLED in the main loop (no sleep); the watchdog
-// is a pure FAULT watchdog at ~256ms, CLRWDT'd once per tick. There is no timer
+// Tick/WDT model "B" (see "The shared model: polled tick, pure fault
+// watchdog" in DESIGN_DOCUMENTATION.adoc): a hardware timer (TMR2) drives a
+// ~1ms tick that is POLLED in the main loop (no sleep); the watchdog is a
+// pure FAULT watchdog at ~256ms, CLRWDT'd once per tick. There is no timer
 // ISR and no ISR/main handshake -- the single polled loop reaching CLRWDT is
 // itself the liveness proof.
 //

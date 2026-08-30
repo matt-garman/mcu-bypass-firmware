@@ -150,6 +150,39 @@ The programmer-powered arrangement stays out of scope for the same reason. The
 helper refuses `--power` values other than `external` because no voltage and
 interface setup for a programmer-supplied supply has been retained here.
 
+One further thing this repository cannot establish about the tool itself: the
+pinned device pack registers the PIC12F675 with the same MPLAB hardware-tool
+set as the PIC10F322 this project already programs — an identical `hwtools`
+file list in the pack's `.pdsc`, and both parts named in every `sdm*.xml` that
+names either. That is evidence the part is still listed, not that `ipecmd` runs
+correctly against it: neither `pk2cmd` nor `ipecmd` is installed on any machine
+this repository is tested on, so the command shape is inherited from the
+working PIC10F322 target and has never been executed for this part.
+
+### PIC12F675 GP2 readback margin
+
+This one needs a meter rather than a programmer, and it is the only outstanding
+item whose subject is the board rather than the tool.
+
+Having no output latch, the PIC12F675 shell keeps an SRAM output shadow and
+re-reads `GPIO` against it every 1.024 ms tick. That makes the guard depend on
+the output pins' *input* thresholds, and GP2 is the only output in this design
+whose input buffer is a Schmitt Trigger (VIH min 0.8·VDD) rather than TTL (VIH
+min 2.0 V). A pin driving its load correctly but landing between the two reads
+back low, the integrity check fires, and the part resets — permanently, because
+the condition is static. The thresholds and the reference-board margin are in
+[DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc); gpsim models pins
+ideally, so no lane in this repository can see the condition at all.
+
+**The run:** on a built `cd4053_with_mute` board with the real load attached,
+engage the effect and measure GP2 against VDD. Record the measured level, the
+supply, and which of the two board options is fitted, since the CD4053 and
+TMUX4053 boards load the pin differently. Confirm the level exceeds 0.8·VDD and
+record the margin: that margin is what bounds the minimum fail-safe pulldown a
+builder may substitute, which is the only part of the load a builder chooses.
+The requirement itself is stated in `src/bypass_pins_pic12f675.h` alongside the
+GP3 and GP4 pin policies.
+
 
 ## Additional notes
 

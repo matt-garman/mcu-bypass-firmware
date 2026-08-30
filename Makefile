@@ -5845,8 +5845,8 @@ pic12f675-test-gpsim: pic12f675-simcal $(PIC12F675_GPSIM_REGS) \
 #      there. This part has no output latch: the shell keeps gpio_shadow_ in
 #      SRAM and writes shadow -> GPIO, so the comparison is between what the
 #      firmware meant to drive and what the pins actually are. That is the check
-#      docs/pic12f675_feasibility.md section 6.5 means by this lane getting MORE
-#      meaningful on the part with less hardware.
+#      test/README.md means by this lane getting MORE meaningful on the part
+#      with less hardware.
 #   2. IT LOCATES THE SHADOW PER BUILD. gpio_shadow_ is a file-static placed by
 #      XC8, not a device address, so it is lifted from the .sym exactly as the
 #      fault and lock-step lanes lift _ctx_. Empty when the .sym is absent; the
@@ -6058,10 +6058,10 @@ pic12f675-test-fault: variant-selectors-valid pic12f675-simcal
 #      the watchdog's -- so a threshold counted in TICKS and a hold counted in
 #      simulated MILLISECONDS stop being the same number. The timing helper
 #      derives the tick from the shell's clock/subtick constants and the core
-#      converts. docs/pic12f675_feasibility.md section
-#      4.4.1 asked for exactly that, and specifically for NOT letting the
-#      existing 10 ms slack absorb it: that slack is already paying for the
-#      blocking actuation in note 4.
+#      converts. The 1.024 ms tick is what forced that (see
+#      DESIGN_DOCUMENTATION.adoc, "PIC12F675: the classic mid-range shell"),
+#      and specifically forced NOT letting the existing 10 ms slack absorb it:
+#      that slack is already paying for the blocking actuation in note 4.
 #   2. IT READS THE LED OUT OF SRAM. With no output-latch SFR the shell's
 #      gpio_shadow_ is the latch, so the once-per-millisecond LED sample needs
 #      the .sym address the io and fault lanes already lift. The adapter will not
@@ -6733,9 +6733,9 @@ pic12f675-test-target-variants: pic12f675-target-selector-valid variant-selector
 # bytes the programmer consumes.
 #
 # THIS TARGET IS THE PIC12F675 BENCH-PROGRAMMING WORKFLOW, AND HOW ITS 1.x.y
-# HARDWARE VALIDATION GETS DONE. docs/pic12f675_feasibility.md section 8 items 1
-# and 2 -- whether a programmer preserves the factory bandgap trim in CONFIG and
-# the oscillator calibration word in flash -- are silicon-only risks. No
+# HARDWARE VALIDATION GETS DONE. TODO.md T3-pic12f675-bench items 1 and 2 --
+# whether a programmer preserves the factory bandgap trim in CONFIG and the
+# oscillator calibration word in flash -- are silicon-only risks. No
 # simulator lane can reach them; they close at a bench, with this command, or not
 # at all. The part is release-supported in software at 0.9.x like every other
 # target -- none of which carries a controlled hardware-qualification record
@@ -6747,12 +6747,12 @@ pic12f675-test-target-variants: pic12f675-target-selector-valid variant-selector
 # exist, the live device must still match it immediately before the write, and a
 # post-write readback/result is mandatory.
 #
-# ON TOOL SUPPORT (section 8 item 8). PICkit 2 has long covered this family, and
+# ON TOOL SUPPORT (T3-pic12f675-bench item 8). PICkit 2 has long covered this family, and
 # the pinned device pack registers PIC12F675 with the same MPLAB hardware-tool
 # set as the PIC10F322 this project already programs -- a byte-identical hwtool
 # file list in the pack's .pdsc, and both parts named in every sdm*.xml that
 # names either. That is evidence current MPLAB/IPE device support still lists
-# the part (docs/pic12f675_feasibility.md section 10 reproduces the two lists). It is not a substitute for running the programmer once; neither
+# the part. It is not a substitute for running the programmer once; neither
 # pk2cmd nor ipecmd is installed on any machine this repository is tested on.
 override PIC12F675_PART := PIC12F675
 PIC12F675_PROG      ?= pk2cmd
@@ -7716,7 +7716,7 @@ RELEASE_IMAGE_DIRS := $(AVR_BUILD_DIR) $(XT_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(
 # no image can supply, so safe field programming needs a transaction, and a
 # transaction needs a program. Shipping it beside the images is what makes
 # "program a downloaded release without a source checkout" true for this part
-# too -- see FLASHING.md and docs/pic12f675_feasibility.md section 8.
+# too -- see FLASHING.md and TODO.md T3-pic12f675-bench.
 #
 # <staged basename>=<tracked source> so the reproduction leg can prove the
 # staged bytes are the tracked bytes, in one place, for both.
@@ -7743,7 +7743,7 @@ override RELEASE_HELPER_MAP := flash-pic12f675.py=scripts/flash-pic12f675.py
 # because they retain no image identity, procedure or measurement. Controlled
 # qualification is what the 1.x.y line will add, for EVERY part, and until then
 # each target carries residual silicon-only risks that no lane here can see. The
-# PIC12F675's happen to be enumerated (docs/pic12f675_feasibility.md section 8,
+# PIC12F675's happen to be enumerated (TODO.md T3-pic12f675-bench,
 # items 1, 2, 8 and 9: whether a programmer preserves the factory oscillator trim in flash
 # word 0x3FF and the BG<1:0> bandgap bits in the CONFIG word, whether ipecmd runs
 # against the part, and GP2's Schmitt-Trigger readback margin). They are the same

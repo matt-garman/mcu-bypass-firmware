@@ -175,7 +175,8 @@ static_assert(_XTAL_FREQ ==  2000000UL, "_XTAL_FREQ must be 2 MHz (matches OSCCO
 //   WDT_ISR_STRETCH_PCT: wall-time ISR duty, zero here. This shell is a single
 //                       POLLED loop with GIE clear and no ISR, so duty converts
 //                       to exactly zero additive delay stretch.
-// This file is the 256-word self-contained shell (docs/pic10f320_special_case.md):
+// This file is the 256-word self-contained shell (see "PIC10F320: the
+// constrained target" in DESIGN_DOCUMENTATION.adoc):
 // it shares no headers with src/, so it carries its own copy of the budget that
 // the four modular shells reach through WDT_PET_TO_PET_MAX_MS() in
 // bypass_output_common.h.  The copy is deliberate and must be kept in step.

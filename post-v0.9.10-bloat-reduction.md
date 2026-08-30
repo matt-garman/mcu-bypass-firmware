@@ -977,7 +977,7 @@ user-owned and belong to BR-PIC-05; the replacement target is
 
 ## BR-PIC-04 - Consolidate PIC12F675 feasibility into current authorities
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-PIC-01, BR-RES-01, BR-FLASH-01
 
@@ -1022,10 +1022,10 @@ release/flashing, and MISRA documents.
 
 **Work:**
 
-- [ ] Extract all still-current target design into named design anchors.
-- [ ] Reconcile open risks with existing TODO and hardware-log entries.
-- [ ] Ensure no hardware-qualification claim is strengthened during the move.
-- [ ] Delete `docs/pic12f675_feasibility.md` after all references are resolved.
+- [x] Extract all still-current target design into named design anchors.
+- [x] Reconcile open risks with existing TODO and hardware-log entries.
+- [x] Ensure no hardware-qualification claim is strengthened during the move.
+- [x] Delete `docs/pic12f675_feasibility.md` after all references are resolved.
 
 **Acceptance:**
 
@@ -1036,9 +1036,104 @@ release/flashing, and MISRA documents.
 - Current test results and resource figures are release-bound rather than copied
   into design prose.
 
+**Result:**
+
+Deleted, 1,662 lines. Section C is finished: no `docs/pic10f32*` or
+`docs/pic12f675*` document remains, and every PIC part's normative account is a
+named anchor in `DESIGN_DOCUMENTATION.adoc`.
+
+Most of the design content was already moved by BR-PIC-01, which built
+`pic12f675-architecture` and `pic-core-generations` out of this document. What
+had not moved was the *evidence under* those statements, and that is what this
+task placed:
+
+- **A `Datasheet References` block for the part, which had none.** Six rows
+  against DS41190G: the watchdog period, the brown-out trip, the oscillator
+  tolerance, the factory calibration word, the GP2 readback thresholds, and
+  what each is worth. The watchdog row is the one that mattered most, because
+  "de-rated floor 160" sat in the pet-to-pet budget table with its derivation
+  in a document nobody would think to open. Two DS41190G figures are in play
+  and they are different *kinds* of number rather than a discrepancy: 18 ms is
+  the prose nominal that the 288 ms row and gpsim both use, 17 ms is the
+  characterized typical, and the argument rests on neither -- it rests on the
+  10 ms minimum, times 16, which is the 160 ms floor the pin map compiles
+  against. The row says so, and says not to "correct" the shell's comments to
+  the typical.
+- **The GP2 numbers, inline where the requirement is stated.** The pinout
+  section asserted the Schmitt-vs-TTL asymmetry and then pointed at the
+  feasibility document for the numbers. D040, D041 and D090 now sit beside it,
+  including the part a reader needs to judge it: the drive side is
+  characterized at exactly one point, 3.8 V against a 3.6 V threshold at 3 mA,
+  and nothing at all above 3 mA.
+- **The measurement that made the part modular.** 494/520/523 of 1024 words,
+  dated 2026-08-05 at `0cfc72e` on the pinned toolchain, against 39 words spare
+  on the PIC10F322 -- bound to its commit and marked as spike figures, not a
+  current image, per BR-RES-01's rule. It is the reason this part never faced
+  the question `pic10f320-architecture` had to answer.
+- **The ISR answer for this part, stated as the weaker thing it is.**
+  `pic-model-b` already carried the PIC10F322 conversion that would not link.
+  On the PIC12F675 the spike *did* link and ran the tested gpsim trajectory, so
+  the model was never ruled out by size; what was never obtained is the
+  return-stack number that would decide it. Model B stands here by consistency
+  and by the absence of a reason to change, not by a measurement, and the
+  section now says that rather than implying a symmetric result.
+- **The PIC12F629, considered and not taken.** Same die minus the ADC, same
+  addresses for every register this shell touches, `ANSEL` and `ADCON0` the
+  only difference. Recorded so the next reader does not re-derive it.
+- **The `.stc` checkpoint rule** into `test/README.md`. A port spike once saw a
+  stimulus declared `initial_state 1` read low before its first transition; the
+  spike tree was not retained, so no root cause is claimed and the standing
+  check replaced the explanation -- the shipping checkpoint sits 2,560 cycles
+  *inside* the disputed window and asserts the pin there.
+- **The GP2 bench run and the tool-support residual** into
+  `HARDWARE_VALIDATION_LOG.md`, which owns what a controlled run must retain.
+
+**The open risks needed almost no migration**, which was the useful discovery.
+`TODO.md`'s `T3-pic12f675-bench` already restated items 1, 2, 8 and 9 in full.
+What changed is that it stopped being a restatement: it is now the definition,
+and its wording says so. The original numbers are kept as stable identifiers
+because the Makefile, the CI notes and the release documentation all cite them.
+
+**The release-qualification gate was repointed rather than dropped.** It used to
+require a bounded `current-status` block inside the feasibility document,
+opening at line 3, carrying six exact strings, and it ran a contradiction regex
+over that block. That block was a summary of facts owned elsewhere, which is
+precisely the thing that drifts. The gate now reads the two owners: `TODO.md`'s
+`T3-pic12f675-bench` must still enumerate all four items and state that no
+controlled record exists, and `DESIGN_DOCUMENTATION.adoc` must still state the
+disposition. The same contradiction regex runs over both, so neither can
+quietly promote the guarded workflow into a preservation guarantee or demote
+the part. All three arms were probe-tested by spoiling each in turn.
+
+**References retargeted:** `Makefile` (7), `test/README.md`, `README.md`,
+`release/README.md`, `.github/workflows/ci.yml`, `test/pic/pic10f32x_regs.h`
+(to `test/pic/pic12f675_regs.h`, which is where that map actually lives),
+`docs/flashing_simplicity.md` (2), `test/test_resource_tables.py`,
+`test/pic/test_soak_pic12f675.cc` (2), and `DESIGN_DOCUMENTATION.adoc` (2).
+`CHANGELOG.md` keeps its historical mentions. The four firmware comments that
+name the document (`src/bypass_mcu_pic12f675.c:32,54,72` and
+`src/bypass_pins_pic12f675.h:65`) are BR-PIC-05's, which is now unblocked.
+
+**Two leftovers found by widening the sweep**, both fixed here rather than
+left for BR-FINAL-01:
+
+- The first reference sweep filtered on `*.c` and `*.h` and missed `*.cc`, so
+  `test/pic/test_soak_pic12f675.cc` still cited two sections of the deleted
+  document. Found by re-running the sweep across every extension.
+- `release/README.md`'s release sequence still described "the four bounded
+  current-release declarations" and linked two of BR-PIC-03's deleted
+  PIC10F320 documents as two of them. BR-PIC-03 reduced
+  `release-documentation.sh`'s `current_documents` to two and did not reach
+  the prose describing the same set, so the live process description named
+  files the tree no longer had. It now names the two that remain and points at
+  `current_documents` as the designated set, which is what step 0 actually
+  validates; `scripts/make-release.sh`'s matching comment was corrected with
+  it. No gate caught this, because the validator reads its own array rather
+  than the prose about it.
+
 ## BR-PIC-05 - Update firmware-source documentation references
 
-**Status:** NEEDS USER
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-PIC-02, BR-PIC-03, BR-PIC-04
 
@@ -1051,10 +1146,10 @@ release/flashing, and MISRA documents.
 
 **Work:**
 
-- [ ] Replace references to deleted documents with stable design anchors.
-- [ ] Correct any stale target naming or current-state claims found during the
+- [x] Replace references to deleted documents with stable design anchors.
+- [x] Correct any stale target naming or current-state claims found during the
   sweep.
-- [ ] Confirm comment-only changes preserve exact generated images where the
+- [x] Confirm comment-only changes preserve exact generated images where the
   compiler/toolchain is available.
 
 **Acceptance:**
@@ -1063,13 +1158,63 @@ release/flashing, and MISRA documents.
 - User performs the source edits.
 - Relevant image identity/resource/qualification gates are rerun.
 
+**Result:**
+
+Eight comment sites across five files, +23/-14 lines, all comment-only. The
+sweep found two more files than the task listed: `src/bypass_mcu_pic10f320.c`
+and `src/bypass_compile_checks.h` both named
+`docs/pic10f320_special_case.md`, which BR-PIC-03 deleted.
+
+- `bypass_mcu_pic10f322.c:13` and `bypass_mcu_pic12f675.c:15` named
+  `docs/phase2_pic_shell.md`; both now cite "The shared model: polled tick,
+  pure fault watchdog".
+- `bypass_mcu_pic12f675.c:32` named the feasibility document's §4.4.1 for the
+  1.024 ms tick; it now cites "PIC12F675: the classic mid-range shell".
+- `bypass_mcu_pic12f675.c:54` and `:72` named §8 items 1 and 2; they now cite
+  `TODO.md` `T3-pic12f675-bench` items 1 and 2, the BG one adding the hardware
+  log for what a bench run must retain.
+- `bypass_pins_pic12f675.h:65` named §4.2 and §8 item 9; it now cites the
+  PIC12F675 pinout section, the part's Datasheet References rows, and
+  `T3-pic12f675-bench` item 9.
+- `bypass_mcu_pic10f320.c:178` and `bypass_compile_checks.h:17` named
+  `docs/pic10f320_special_case.md`; both now cite "PIC10F320: the constrained
+  target".
+
+Two conventions were followed rather than invented. Citations use the quoted
+section title, not the AsciiDoc anchor, because that is what the seven existing
+`DESIGN_DOCUMENTATION.adoc` references in `src/` already do. And the two
+`pic12f675-program` comments keep pointing at `release/README.md`, which after
+BR-FLASH-01 is the home of the source-checkout transaction they are about; the
+downloaded-release route is `FLASHING.md`'s and is a different procedure.
+
+Delivered as a patch for the user to apply with `git apply`, built and verified
+without writing to `src/` at all: the hunks were assembled in memory, checked
+with `git apply --check`, and applied to a throwaway copy of the tree to
+confirm the result before the user saw it.
+
+**Inertness is proven, not asserted.** Two independent checks, one of which
+needs no toolchain:
+
+- Stripping every `//` line from each of the five files gives a hash identical
+  to `HEAD`, so nothing outside comments moved.
+- XC8 and the device pack were available, so the images were rebuilt.
+  `pic10f320-test-build` matched the reviewed SHA-256 baseline on all three
+  variants (`e48ed8e5`, `1cc2cbf6`, `8193aa0d`) -- the strongest available
+  witness, since that lane pins exact bytes rather than a size. Return-stack
+  depth stayed 3/8 on all three with the oracle's 149 selftest checks green;
+  PIC10F322 rebuilt at 476/502/493 of 512 words, PIC12F675 at 548/574/585 of
+  1024 with Data-space 40 of 48.
+
+With this, no file in the repository outside `CHANGELOG.md` and the immutable
+`release/vX.Y.Z/` artifacts names a document that Section C deleted.
+
 ---
 
 # D. Programming and user guidance
 
 ## BR-FLASH-01 - Make FLASHING.md the sole live operator procedure
 
-**Status:** DONE `<commit>`
+**Status:** DONE `a1633e0`
 
 **Current duplication:**
 
@@ -2507,9 +2652,9 @@ dependencies and acceptance criteria.
 | BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
 | BR-PIC-02 | Merge PIC10F322 phase notes | DONE `3a3b661` |
 | BR-PIC-03 | Consolidate PIC10F320 documents | DONE `b8b4af1` |
-| BR-PIC-04 | Consolidate PIC12F675 feasibility | TODO |
-| BR-PIC-05 | Update firmware document references | NEEDS USER |
-| BR-FLASH-01 | Make FLASHING.md authoritative | DONE `<commit>` |
+| BR-PIC-04 | Consolidate PIC12F675 feasibility | DONE `<commit>` |
+| BR-PIC-05 | Update firmware document references | DONE `<commit>` |
+| BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
 | BR-FLASH-02 | Generate release programming guide | TODO |
 | BR-FLASH-03 | Delete flashing proposal journal | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |

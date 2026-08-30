@@ -6,8 +6,9 @@
 WHY THIS EXISTS.  The measured flash/RAM figures for the seven release parts
 used to be restated in four current documents -- DESIGN_DOCUMENTATION.adoc's
 utilization tables and the prose derived from them, docs/context_seu_detection.md's
-"Resource qualification" table, docs/pic12f675_feasibility.md's bounded
-current-status block, and CHANGELOG.md's PIC10F322 sentence -- and this gate
+"Resource qualification" table, a bounded current-status block in the
+since-deleted PIC12F675 port assessment, and CHANGELOG.md's PIC10F322 sentence
+-- and this gate
 kept those five copies synchronized with each other and with a build.  They had
 drifted before it existed, exactly as a hand-maintained table always does: at
 the v0.9.10 candidate three of the four tables were several changes behind, the

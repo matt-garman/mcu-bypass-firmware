@@ -193,12 +193,13 @@ A release is not one commit. Four steps produce it, in this order, and the
 separation between the first and the third is enforced rather than conventional.
 
 1. **Source finalization.** One ordinary commit on `main` finalizes
-   [`CHANGELOG.md`](../CHANGELOG.md) and the four bounded current-release
-   declarations — this file, [`TODO.md`](../TODO.md),
-   [`docs/pic10f320_special_case.md`](../docs/pic10f320_special_case.md) and
-   [`docs/pic10f320_validation.md`](../docs/pic10f320_validation.md) — for
-   `vX.Y.Z`. This commit is the **source contract**, and it is the commit the
-   qualification run measures.
+   [`CHANGELOG.md`](../CHANGELOG.md) and the bounded current-release
+   declarations — this file and [`TODO.md`](../TODO.md) — for `vX.Y.Z`. This
+   commit is the **source contract**, and it is the commit the qualification
+   run measures. The designated set is
+   `scripts/release-documentation.sh`'s `current_documents`, which is what step
+   0 actually validates; two PIC10F320 documents that used to carry a
+   declaration were folded into `DESIGN_DOCUMENTATION.adoc` and left it.
 2. **Production staging.** `scripts/make-release.sh vX.Y.Z` builds every image,
    runs every gate, soaks every combination for 24 hours (1 hour under
    `--express`, recorded as such), and stages
@@ -287,7 +288,7 @@ OSCCAL, BG, identity, CONFIG, and programmed-byte results. A failure is detected
 only after the write and may already have damaged the device. Do not substitute
 a raw `pk2cmd` or `ipecmd` writer command. Real preservation and actual ipecmd
 operation remain hardware-unvalidated until the `1.x.y` bench pass; see
-`docs/pic12f675_feasibility.md` section 8, items 1 and 2.
+`TODO.md` `T3-pic12f675-bench`, items 1 and 2.
 
 There are **two** guarded paths, and which one applies depends on what you have.
 Programming a downloaded release needs neither a source checkout nor the

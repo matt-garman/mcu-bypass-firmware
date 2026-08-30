@@ -28,8 +28,7 @@
 // of which are adapter facts, not family facts.
 //
 // A second family supplies its own map with the same macro names; see
-// docs/pic12f675_feasibility.md section 2.1 for a classic mid-range map beside
-// this one.
+// test/pic/pic12f675_regs.h for the classic mid-range map beside this one.
 
 #ifndef TEST_PIC_PIC10F32X_REGS_H
 #define TEST_PIC_PIC10F32X_REGS_H

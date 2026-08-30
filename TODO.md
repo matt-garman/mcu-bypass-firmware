@@ -525,9 +525,10 @@ configuration bytes and measurements are on file. (Some parts do have
 self-reported field-use reports; this one does not. `HARDWARE_VALIDATION_LOG.md`
 keeps the two apart and states what a controlled record must retain.) This item
 is the PIC12F675's slice of the `1.x.y` hardware-validation pass, which closes
-four open risks that are invisible to every lane this repository has. They are
-stated in full as items 1, 2, 8 and 9 of `docs/pic12f675_feasibility.md`
-section 8:
+four open risks that are invisible to every lane this repository has. The
+numbers are the original ones from the port assessment, kept because the
+Makefile, the CI notes and the release documentation cite them; the four
+statements below are now the definition rather than a summary of one:
 
 - **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
   factory-set per device and fix the BOR/POR trip voltages.
