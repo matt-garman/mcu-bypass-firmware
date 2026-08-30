@@ -2591,7 +2591,7 @@ branches may not be covered under `--max-configs=1` without explicit selectors.
 
 ## BR-REL-01 - Define one canonical signed release index
 
-**Status:** IN PROGRESS -- first half done `<commit>`
+**Status:** DONE `bb5ba13` + `<commit>`
 
 **Risk:** High. This changes provenance representation and must be independently
 reviewed before old mechanisms are retired.
@@ -2636,12 +2636,14 @@ reviewed before old mechanisms are retired.
 - [x] Sign the canonical root or bind its digest in the signed tag. Done by
   bringing `QUALIFICATION`, `MANIFEST.md` and `README.md` inside `SHA256SUMS`,
   which the detached signature already covers.
-- [ ] Generate human manifest, release notes, programming guide, and checksums
-  from canonical data where practical. **Deferred to the second half.** The
-  toolchain table, the `Built:` / `Validation:` / `Release set:` lines and the
-  per-asset records are still authored prose with no machine authority behind
-  them; binding them needs new `QUALIFICATION` keys and an evidence artifact,
-  which is a larger change than closing the signing gap.
+- [x] Generate human manifest, release notes, programming guide, and checksums
+  from canonical data where practical. Done for the one surface that had no
+  authority at all: the toolchain table is now rendered from
+  `evidence/toolchain.txt`, bound by `toolchain_sha256` in `QUALIFICATION`
+  (`format=5`), and checked back against it in both directions. The other three
+  surfaces this bullet names were measured and already satisfied it -- see the
+  second-half result below -- so "where practical" is now exhausted rather than
+  outstanding.
 - [x] Ensure every published payload is transitively authenticated. Every file
   in a release directory is now either inside `SHA256SUMS` or inside
   `evidence/`; the evidence set is separately bound by exact digest from
@@ -2650,11 +2652,18 @@ reviewed before old mechanisms are retired.
   not maintain a conflicting independent hash table. `SHA256SUMS` remains the
   single list and simply got wider. No second table was introduced.
 - [x] Reject unknown fields/versions according to an explicit compatibility
-  policy; do not add speculative backward compatibility. `format=4` only.
-  `format=3` is rejected, not accepted as a legacy mode: this verifier runs on a
-  directory being staged or a tag being published and never on a historical
-  release, so a compatibility branch would be unreachable code claiming a
-  capability nothing exercises.
+  policy; do not add speculative backward compatibility. The policy differs
+  between the two verifiers because their inputs differ, and that distinction is
+  the whole of it. `verify-release-qualification.sh` accepts `format=4` only: it
+  runs on a directory being staged or a tag being published and never on a
+  historical release, so a branch for an older format would be unreachable code
+  claiming a capability nothing exercises. `verify-release-images.sh` accepts all
+  three published eras -- no `QUALIFICATION` (v0.9.0-v0.9.5), `format=1`
+  (v0.9.6-v0.9.9), `format=3` (v0.9.10-v0.9.11) -- because
+  `verify-release-program-image.sh` runs it against a published directory on
+  every PIC12F675 field programming. That is a live path over directories that
+  exist, not speculative tolerance. Pre-`format=4` releases are held to the old
+  contract rather than waved through: they must not list provenance either.
 
 **Acceptance:**
 
@@ -2733,10 +2742,86 @@ a provenance name shaped like an image, and a name declared as both helper and
 provenance. `test-release-preflight`'s Makefile-query tripwire moves 91 -> 92 for
 the one new query.
 
-**Not done here.** The second half: binding the toolchain table and the
-per-asset records, which needs new `QUALIFICATION` keys plus a bound evidence
-artifact, and generating the human views from that data rather than checking
-them against it.
+**A defect the full suite caught, and what it corrects.** The first attempt
+applied the "no speculative backward compatibility" bullet to
+`verify-release-images.sh` as well. That was wrong, and `test-pic-build` failed
+on it: unlike the qualification verifier, this one is run against PUBLISHED
+release directories by `verify-release-program-image.sh` every time a PIC12F675
+is field-programmed. Requiring the new partition there broke programming from
+every release published to date. The caller set is the thing that decides the
+policy, and it has to be checked per verifier rather than inherited from the
+neighbouring one. `release/` also turns out to hold three contracts, not two:
+v0.9.0-v0.9.5 ship no `QUALIFICATION` at all, v0.9.6-v0.9.9 declare `format=1`,
+v0.9.10-v0.9.11 declare `format=3`. All are accepted by the image verifier and
+held to the old contract from both sides; only `format>=4` requires provenance
+inside the signature.
+
+**Result of the second half.** The measurement narrowed this to one thing
+rather than the four the item lists. The `Images` table's `sha256` column is
+already derived from `SHA256SUMS` rather than authored, and sealing
+`MANIFEST.md` now protects it from post-hoc edits. The `Validation:` line is
+already bound behaviourally: tag CI re-runs the exact targets it claims on a
+clean runner. `Built:` is a timestamp/user/host line and is inherently
+unverifiable. What is genuinely unbound is the **toolchain table** -- 13
+captured `TC_*` values rendered into 15 authored rows, with no machine authority
+and nothing checking them, so a wrong compiler version passes every gate. The
+captures are now written once to `evidence/toolchain.txt` (tab-separated, since
+a version string can contain anything but a tab), bound by `toolchain_sha256` in
+`QUALIFICATION` at `format=5`, and the table is *rendered from* that record
+rather than printed beside it. The verifier holds the rendered table back to the
+record in both directions, because either alone is satisfiable by a wrong table:
+every record must appear as a row, and the row count must leave no row the
+record does not justify.
+
+**A second defect in `bb5ba13`, found while doing this.** `make-release.sh`
+still wrote `format=3` while the verifier it invokes over its own staged output
+required `format=4`. A real release would have failed at the very end of a
+24-hour run. No gate caught it because nothing runs the producer end to end --
+`test-release-qualification` builds synthetic QUALIFICATION files, so the
+producer and the verifier never met. `test-release-provenance` now greps both
+numbers out of the two scripts and requires them equal, which is the only place
+they meet before a real release.
+
+**A renderer deleted rather than left standing.**
+`release_render_pic_toolchain_rows` produced four of the fifteen rows and is now
+redundant with the record. Its unit test called it but asserted nothing about
+its output -- the assertions around it were about other renderers -- so it was
+dead in production and untested in fact. It is gone, and the attribution claims
+it did protect (one XC8 and one DFP serve BOTH the PIC10F322 and the PIC12F675;
+no ambiguous generic `| XC8 |` row) are re-exercised through
+`release_render_toolchain_table` against a synthetic record file.
+
+**Verification.** `test-release-qualification` 101 -> 110 with nine controls:
+toolchain evidence missing, symlinked, edited after recording, a recorded tool
+missing from the table, a version edited in place, an unrecorded tool smuggled
+into the table, a result record miscounting its own rows, evidence bound to
+another commit, and a record with no version. `test-release-provenance` 63 -> 64
+for the producer/verifier format agreement. The canonical evidence set moves 35
+-> 36 files.
+
+**One guard removed for being unreachable.** The first draft opened
+`toolchain.txt` behind a `-f/-L/-s` check. The canonical evidence-set comparison
+already establishes all three and reports them better, which is why
+`resource-tables.log` beside it has no such guard -- so keeping mine would have
+been exactly the unreachable defence this item's compatibility bullet warns
+against.
+
+**What the other three bullets turned out to be.** Measured rather than assumed,
+and none of them needed work. The `Images` table's `sha256` column is *derived*
+from `SHA256SUMS` (`make-release.sh`, `img_row`) rather than authored, so it has
+one source already -- and sealing `MANIFEST.md` in the first half is what now
+stops it being edited afterwards. The `Validation:` line is bound behaviourally,
+which is stronger than any string check: tag CI re-runs the exact Make targets
+the line claims, on a clean runner, and the aggregates fail closed on a silent
+skip. `Built:` is a timestamp, user and uname string; there is nothing to bind
+it to, and pretending otherwise would add ceremony rather than assurance.
+
+**Not done, and deliberately.** Per-asset records as structured data -- role,
+media type, size beside each digest -- remain unbuilt. `SHA256SUMS` already
+carries the digest, the `Images` table already carries MCU, clock, flash use and
+fuse identity, and both are now inside the signature. A third representation
+would be the parallel authority this item opens by warning against, so the
+remaining candidate fields are left to whoever has a consumer that needs them.
 
 ## BR-REL-02 - Package future release evidence as one deterministic archive
 
@@ -3541,7 +3626,7 @@ dependencies and acceptance criteria.
 | BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
 | BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
-| BR-REL-01 | Define canonical signed release index | IN PROGRESS `<commit>` |
+| BR-REL-01 | Define canonical signed release index | DONE `bb5ba13` + `<commit>` |
 | BR-REL-02 | Package deterministic evidence archive | TODO |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |

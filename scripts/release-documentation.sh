@@ -1304,17 +1304,28 @@ release_render_validation() {
 	printf -- '- **`test-long` retention:** `evidence/test-long.summary.txt` retains one source-bound `TEST_LONG_RESULT` PASS record; the complete transcript is transient diagnostic output, is not a release asset, and is not required after verification. Tag CI reruns the gate independently, but its hosted job log is subject to platform retention and is not release evidence.\n'
 }
 
-release_render_pic_toolchain_rows() {
-	[ "$#" -eq 6 ] || return 2
-	local pic_cc=$1 shared_xc8_version=$2
-	local pic10f320_cc=$3 pic10f320_xc8_version=$4
-	local pic_dfp=$5 pic10f320_dfp=$6
-	printf -- '| PIC10F322/PIC12F675 XC8 (`PIC_CC=%s`) | %s |\n' \
-		"$pic_cc" "$shared_xc8_version"
-	printf -- '| PIC10F320 XC8 (`PIC10F320_CC=%s`) | %s |\n' \
-		"$pic10f320_cc" "$pic10f320_xc8_version"
-	printf -- '| PIC10F322/PIC12F675 DFP (`PIC_DFP`) | %s |\n' "$pic_dfp"
-	printf -- '| PIC10F320 DFP (`PIC10F320_DFP`) | %s |\n' "$pic10f320_dfp"
+# Render the MANIFEST toolchain table FROM the recorded evidence, so the human
+# view and the machine record cannot be different lists. Reads the tab-separated
+# records written by make-release.sh and emits one Markdown row each; the header
+# rows are emitted here too so the whole table has one producer.
+release_render_toolchain_table() {
+	[ "$#" -eq 1 ] || return 2
+	local artifact=$1 label version
+	[ -f "$artifact" ] && [ ! -L "$artifact" ] && [ -s "$artifact" ] \
+		|| _release_documentation_error \
+			"toolchain evidence is missing, empty, or not a regular file: $artifact" \
+		|| return 1
+	printf -- '| tool | version |\n|---|---|\n'
+	while IFS=$'\t' read -r label version; do
+		case "$label" in
+			TOOLCHAIN\ *|TOOLCHAIN_RESULT\ *) continue ;;
+		esac
+		[ -n "$label" ] && [ -n "$version" ] \
+			|| _release_documentation_error \
+				"malformed toolchain evidence record: $label" \
+			|| return 1
+		printf -- '| %s | %s |\n' "$label" "$version"
+	done < "$artifact"
 }
 
 release_render_pic12f675_flashing() {

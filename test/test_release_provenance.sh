@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
+QUALIFY="$ROOT/scripts/verify-release-qualification.sh"
 RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
 RELEASE_IMAGE_VERIFY="$ROOT/scripts/verify-release-images.sh"
 PUBLICATION_VERIFY="$ROOT/scripts/verify_release_publication.py"
@@ -730,8 +731,14 @@ read -r -a repro_provenance_names <<<"$repro_provenance_raw"
 [ "${#repro_provenance_names[@]}" -gt 0 ] \
 	|| fail "Makefile declares no provenance files"
 for provenance_name in "${repro_provenance_names[@]}"; do
-	printf 'fixture provenance: %s\n' "$provenance_name" \
-		> "$repro_release/$provenance_name"
+	if [ "$provenance_name" = QUALIFICATION ]; then
+		# The era field decides whether provenance belongs inside SHA256SUMS,
+		# so this fixture has to declare the contract it is actually built to.
+		printf 'format=4\n' > "$repro_release/$provenance_name"
+	else
+		printf 'fixture provenance: %s\n' "$provenance_name" \
+			> "$repro_release/$provenance_name"
+	fi
 done
 (
 	cd "$repro_release"
@@ -771,7 +778,21 @@ mapfile -t pic12_python_lines < <(grep -nF \
 	'TC_PIC12F675_PY=$(release_tool_version_line' "$RELEASE")
 mapfile -t clean_lines < <(grep -nF 'make clean >/dev/null' "$RELEASE")
 mapfile -t manifest_renderer_lines < <(grep -nF \
-	'release_render_pic_toolchain_rows "$PIC_CC" "$TC_XC8_322"' "$RELEASE")
+	'release_render_toolchain_table "$EVID/toolchain.txt"' "$RELEASE")
+# The producer and the verifier have to agree on the QUALIFICATION format, and
+# nothing else checks that they do. make-release.sh runs the verifier over its
+# own staged output, so a mismatch fails a real release at the very end of a
+# 24-hour run -- and no test reaches that far, because no test performs one.
+# This pair of greps is the only place the two numbers meet before then.
+produced_format=$(grep -oP "^\tprintf 'format=\K[0-9]+" "$RELEASE")
+required_format=$(grep -oP '^\[ "\$\{q\[format\]\}" = \K[0-9]+' "$QUALIFY")
+[ -n "$produced_format" ] \
+	|| fail "could not read the QUALIFICATION format make-release.sh writes"
+[ -n "$required_format" ] \
+	|| fail "could not read the QUALIFICATION format verify-release-qualification.sh requires"
+[ "$produced_format" = "$required_format" ] \
+	|| fail "make-release.sh writes QUALIFICATION format=$produced_format but verify-release-qualification.sh requires format=$required_format"
+checks=$((checks + 1))
 [ "${#xc8_322_lines[@]}" -eq 1 ] \
 	&& [ "${#xc8_320_lines[@]}" -eq 1 ] \
 	&& [ "${#pic12_python_lines[@]}" -eq 1 ] \
@@ -785,12 +806,17 @@ clean_line=${clean_lines[0]%%:*}
 [ "$xc8_322_line" -lt "$clean_line" ] && [ "$xc8_320_line" -lt "$clean_line" ] \
 	&& [ "$pic12_python_line" -lt "$clean_line" ] \
 	|| fail "release compiler/interpreter identity is not captured before the clean build"
-grep -Fq '"$PIC_CC" "$TC_XC8_322"' "$RELEASE" \
-	|| fail "manifest renderer does not receive the shared selected compiler and version"
-grep -Fq '"$PIC10F320_CC" "$TC_XC8_320"' "$RELEASE" \
-	|| fail "manifest renderer does not receive the PIC10F320 selected compiler and version"
-grep -Fq "printf -- '| PIC12F675 Python | %s |" "$RELEASE" \
-	|| fail "manifest does not record the selected PIC12F675 Python"
+# The toolchain table renders from evidence as of format=5, so these pin the
+# RECORD rather than the printf that used to produce the row. The claim is
+# unchanged: each row must carry the compiler actually selected, named by the
+# variable that selected it, so an overridden toolchain cannot be attested to as
+# the default one.
+grep -Fq '"PIC10F322/PIC12F675 XC8 (\`PIC_CC=$PIC_CC\`)" "$TC_XC8_322"' "$RELEASE" \
+	|| fail "toolchain evidence does not record the shared selected compiler and version"
+grep -Fq '"PIC10F320 XC8 (\`PIC10F320_CC=$PIC10F320_CC\`)" "$TC_XC8_320"' "$RELEASE" \
+	|| fail "toolchain evidence does not record the PIC10F320 selected compiler and version"
+grep -Fq "'PIC12F675 Python' \"\$TC_PIC12F675_PY\"" "$RELEASE" \
+	|| fail "toolchain evidence does not record the selected PIC12F675 Python"
 if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 	fail "release manifest still contains an ambiguous generic XC8 row"
 fi
