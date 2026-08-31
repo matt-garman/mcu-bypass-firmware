@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
 QUALIFY="$ROOT/scripts/verify-release-qualification.sh"
+DOCUMENTATION="$ROOT/scripts/release-documentation.sh"
 RELEASE_WORKFLOW="$ROOT/.github/workflows/release.yml"
 RELEASE_IMAGE_VERIFY="$ROOT/scripts/verify-release-images.sh"
 PUBLICATION_VERIFY="$ROOT/scripts/verify_release_publication.py"
@@ -868,6 +869,31 @@ grep -qF -- "printf '## Resources" "$RELEASE" \
 	|| fail "make-release.sh does not write the measured resources section"
 grep -qF -- "grep -Fxq -- '## Resources'" "$QUALIFY" \
 	|| fail "verify-release-qualification.sh does not require the measured resources section"
+checks=$((checks + 1))
+
+# The flashing section is extracted by heading and then handed to bash, so the
+# heading the renderer writes and the heading the verifier looks for have to be
+# one string -- and the renderer lives in a third file, which is exactly how the
+# toolchain table drifted before it was rendered from evidence.
+flash_headings=(
+	'## Flashing'
+	'### Programmer profiles'
+	'### Per-image commands'
+	'### Source-checkout equivalents'
+)
+for flash_heading in "${flash_headings[@]}"; do
+	grep -qF -- "'$flash_heading'" "$DOCUMENTATION" \
+		|| fail "release-documentation.sh does not render the flashing heading '$flash_heading'"
+	grep -qF -- "'$flash_heading'" "$QUALIFY" \
+		|| fail "verify-release-qualification.sh does not look for the flashing heading '$flash_heading'"
+done
+checks=$((checks + 1))
+
+# Both sides run the published block through the shell rather than reading it.
+grep -qF -- 'bash -n "$flash_block"' "$QUALIFY" \
+	|| fail "verify-release-qualification.sh does not parse the published commands as shell"
+grep -qF -- 'bash -n "$block"' "$RELEASE" \
+	|| fail "make-release.sh does not parse the published commands as shell before staging them"
 checks=$((checks + 1))
 checks=$((checks + 1))
 [ "${#xc8_322_lines[@]}" -eq 1 ] \

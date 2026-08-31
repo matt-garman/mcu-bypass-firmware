@@ -1460,31 +1460,105 @@ release_render_pic12f675_flashing() {
 }
 
 release_render_flashing() {
-	[ "$#" -eq 2 ] || return 2
-	local flash_commands=$1 release_tag=$2 image command
+	[ "$#" -eq 5 ] || return 2
+	local flash_commands=$1 release_tag=$2
+	local isp_programmer=$3 updi_programmer=$4 updi_port=$5
+	local image profile command stem variant have_download=0
 	[ -s "$flash_commands" ] && [ -f "$flash_commands" ] \
 		&& [ ! -L "$flash_commands" ] || return 2
-	while IFS=$'\t' read -r image command; do
-		[ -n "$image" ] && [ -n "$command" ] || return 2
+	[ -n "$isp_programmer" ] && [ -n "$updi_programmer" ] \
+		&& [ -n "$updi_port" ] || return 2
+	# The producer checks these rows in far more detail before calling. What is
+	# refused here is what would make the RENDERED page wrong whoever produced
+	# it: a part that must not carry a per-image command, a placeholder or a
+	# fragment of prose that would land inside an executable block, and a
+	# source-checkout invocation rendered as though a download could run it.
+	while IFS=$'\t' read -r image profile command; do
+		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] || return 2
 		case "$image" in
 			*-pic12f675-*.hex) return 2 ;;
 		esac
+		case "$command" in
+			*'<'*|*'>'*|*'(or:'*) return 2 ;;
+		esac
+		stem=${image%.hex}; variant=${stem##*-}
+		case "$profile" in
+			make-source)
+				case "$command" in
+					'make '*"VARIANT=$variant"*) ;;
+					*) return 2 ;;
+				esac ;;
+			avrdude-isp|avrdude-updi|pk2cmd)
+				case "$command" in
+					*'make '*) return 2 ;;
+					*"$image"*) have_download=1 ;;
+					*) return 2 ;;
+				esac ;;
+			*) return 2 ;;
+		esac
 	done < "$flash_commands"
+	[ "$have_download" -eq 1 ] || return 2
 
 	printf '%s\n' \
 		'## Flashing' \
 		'' \
-		'AVR images require the design fuse bytes in addition to the flash write' \
-		'(the table above lists them per image). PIC images embed their CONFIG word.' \
-		'PIC12F675 has no per-image shortcut because every write requires the guarded' \
-		'device-specific transaction below -- pass its HEX to the' \
-		'`flash-pic12f675.py` shipped in this release, never directly to a programmer.' \
+		'Every command in this section is complete. It names one released image,' \
+		'carries the fuse or configuration bytes that image was qualified with, and' \
+		'runs as written from the directory holding the download.' \
 		'' \
-		'```'
-	sort "$flash_commands" | while IFS=$'\t' read -r image command; do
+		'AVR images need their fuse bytes in addition to the flash write (the Images' \
+		'table above lists them per image, and the commands below carry the same' \
+		'bytes). PIC images embed their configuration word in the HEX. PIC12F675 has' \
+		'no per-image command at all: every write to that part goes through the' \
+		'guarded transaction below -- pass its HEX to the `flash-pic12f675.py`' \
+		'shipped in this release, never directly to a programmer.' \
+		'' \
+		'### Programmer profiles' \
+		''
+	printf '%s\n' \
+		'The programmer and port in the commands below are this project'"'"'s defaults.' \
+		'They are the only values here a reader may have to change, and changing one' \
+		'is a substitution into an otherwise complete command.' \
+		''
+	printf '| images | interface | tool | this release publishes | if yours differs |\n'
+	printf '|---|---|---|---|---|\n'
+	printf '| ATtiny13a, ATtiny45, ATtiny85 | ISP | `avrdude` | `-c %s` | `avrdude -c ?` lists every programmer name your avrdude supports |\n' \
+		"$isp_programmer"
+	printf '| ATtiny202 | UPDI | `avrdude` | `-c %s -P %s` | your UPDI adapter'"'"'s device node; ISP programmers cannot drive UPDI |\n' \
+		"$updi_programmer" "$updi_port"
+	printf '| PIC10F320, PIC10F322 | ICSP | `pk2cmd` (PICkit 2) | an externally powered target | add `-T` to have the PICkit supply power |\n'
+	printf '| PIC12F675 | ICSP | `flash-pic12f675.py` | the guarded transaction below | never a raw writer |\n'
+	printf '\n'
+	printf '%s\n' \
+		'PICkit 3/4/5 program the PIC10F32x parts through MPLAB IPE'"'"'s `ipecmd` rather' \
+		'than `pk2cmd`. This release publishes no `ipecmd` command line, because the' \
+		'invocation this repository defines for that tool performs no verify pass,' \
+		'and every command published here is verified after it is written.' \
+		'' \
+		'### Per-image commands' \
+		'' \
+		'```sh'
+	sort "$flash_commands" | while IFS=$'\t' read -r image profile command; do
+		[ "$profile" = make-source ] && continue
 		printf '# %s\n%s\n\n' "$image" "$command"
 	done
 	printf '```\n\n'
+	if grep -q $'\tmake-source\t' "$flash_commands"; then
+		printf '%s\n' \
+			'### Source-checkout equivalents' \
+			'' \
+			'These need a checkout of this tag, not this download: the release bundle' \
+			'ships no Makefile. They select the same image by its variant, and are' \
+			'listed for provenance, not as an alternative for a reader who downloaded' \
+			'the images.' \
+			'' \
+			'```sh'
+		sort "$flash_commands" | while IFS=$'\t' read -r image profile command; do
+			[ "$profile" = make-source ] || continue
+			printf '# %s\n%s\n\n' "$image" "$command"
+		done
+		printf '```\n\n'
+	fi
 	release_render_pic12f675_flashing "$release_tag"
 }
 

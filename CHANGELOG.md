@@ -97,6 +97,28 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **Every programming command a release publishes now runs as written.** Of the
+  eighteen per-image commands in the v0.9.11 manifest, three were pasteable. Six
+  carried the source-checkout alternative as parenthesised prose inside the
+  fenced block and are not valid shell; nine carried a bare `-c <prog>`, which a
+  shell reads as a redirection rather than a placeholder, so the option left the
+  command line silently. The two `make ...` forms named a Makefile no downloaded
+  release contains and asked for a `VARIANT=<v>` the image basename beside them
+  already fixed. Commands are now complete -- the project's default programmer
+  and port are published inside them, a programmer-profile table names the only
+  substitutions and the power assumption, and the source-checkout equivalents
+  moved to their own section with their variants resolved. Nothing had ever
+  checked this section: a release now fails if a published command is not valid
+  shell, does not name the image it is filed under, omits a fuse byte its own
+  images row publishes, writes a PIC without reading it back, or leaves a
+  released image with no command at all, and the qualification verifier
+  re-derives all of it from the staged manifest. Release metadata queries also
+  no longer inherit the host's `AVR_PROGRAMMER`, `XT_PROGRAMMER` or
+  `XT_UPDI_PORT`, so a release host's local programmer preference can no longer
+  change the instructions a source tag publishes. PIC12F675 is unchanged: it
+  still has no per-image command, and both the producer and the verifier now
+  reject a manifest that gives it one.
+
 - **The retained logs nothing was reading are now bound to the run that
   produced them.** Thirteen of the thirty-six retained evidence files -- seven
   build logs and six PIC/ATtiny202 target-test logs, 62% of the evidence tree by

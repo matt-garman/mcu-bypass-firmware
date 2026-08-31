@@ -741,6 +741,171 @@ done
 [ "${#resource_rows[@]}" -gt 0 ] \
 	|| die "the resource evidence published no resource rows at all"
 
+# --- the published programming commands --------------------------------------
+# Re-derived here from the staged MANIFEST alone, with a second implementation,
+# because until now nothing checked this section at all. The one part with a
+# guarded transaction had its published procedure pinned in about thirty places;
+# the other eighteen images had none, and v0.9.11 published six lines that are
+# not valid shell, nine that lose their `-c` option to a shell redirection, and
+# two forms that invoke a Makefile no downloaded release contains.
+for flash_heading in '## Flashing' '### Programmer profiles' '### Per-image commands'; do
+	grep -Fxq -- "$flash_heading" "$manifest" \
+		|| die "MANIFEST.md does not carry the $flash_heading section"
+done
+
+flash_block="$work/flash-commands.sh"
+awk '
+	$0 == "### Per-image commands" { want = 1; next }
+	want && $0 == "```sh"          { inblock = 1; want = 0; next }
+	inblock && $0 == "```"         { exit }
+	inblock                        { print }
+' "$manifest" > "$flash_block" \
+	|| die "could not read the per-image command block from MANIFEST.md"
+[ -s "$flash_block" ] \
+	|| die "MANIFEST.md publishes an empty per-image command block"
+
+# The reader's interpreter is the authority on whether a line is pasteable.
+bash -n "$flash_block" \
+	|| die "MANIFEST.md publishes programming commands that are not valid shell"
+
+declare -A flash_command=()
+flash_current=""
+while IFS= read -r flash_line; do
+	case "$flash_line" in
+		'') continue ;;
+		'# '*)
+			[ -z "$flash_current" ] \
+				|| die "MANIFEST.md names $flash_current in the command block and publishes no command for it"
+			flash_current=${flash_line#\# }
+			[ -z "${flash_command[$flash_current]+set}" ] \
+				|| die "MANIFEST.md publishes more than one command for $flash_current"
+			continue ;;
+	esac
+	[ -n "$flash_current" ] \
+		|| die "MANIFEST.md publishes a programming command that names no image: $flash_line"
+	flash_command[$flash_current]=$flash_line
+	flash_current=""
+done < "$flash_block"
+[ -z "$flash_current" ] \
+	|| die "MANIFEST.md names $flash_current in the command block and publishes no command for it"
+
+# Coverage, both directions, against the Makefile's canonical set. PIC12F675 is
+# the one part that must NOT appear: it is written only through the guarded
+# transaction, and a per-image shortcut for it is a defect, not an omission.
+for flash_image in $canonical_images; do
+	case "$flash_image" in
+		*-pic12f675-*.hex)
+			[ -z "${flash_command[$flash_image]+set}" ] \
+				|| die "MANIFEST.md publishes a raw per-image write for $flash_image" ;;
+		*)
+			[ -n "${flash_command[$flash_image]+set}" ] \
+				|| die "MANIFEST.md publishes no programming command for $flash_image" ;;
+	esac
+done
+for flash_image in "${!flash_command[@]}"; do
+	case " $canonical_images " in
+		*" $flash_image "*) ;;
+		*) die "MANIFEST.md publishes a programming command for $flash_image, which this release does not ship" ;;
+	esac
+done
+
+for flash_image in "${!flash_command[@]}"; do
+	flash_line=${flash_command[$flash_image]}
+	case "$flash_line" in
+		*"$flash_image"*) ;;
+		*) die "the published command for $flash_image does not name that image: $flash_line" ;;
+	esac
+	case "$flash_line" in
+		*'<'*|*'>'*)
+			die "the published command for $flash_image carries an unresolved placeholder: $flash_line" ;;
+		*'(or:'*)
+			die "the published command for $flash_image appends prose to an executable line: $flash_line" ;;
+		*'make '*)
+			die "the published command for $flash_image invokes make; a downloaded release ships no Makefile" ;;
+	esac
+	# Whatever wrote the device has to have read it back.
+	case "$flash_line" in
+		avrdude\ *)
+			case " $flash_line " in
+				*' -V '*) die "the published avrdude command for $flash_image disables verification" ;;
+			esac
+			case "$flash_line" in
+				*" -U flash:w:$flash_image:i"*) ;;
+				*) die "the published avrdude command for $flash_image does not write that image to flash" ;;
+			esac ;;
+		pk2cmd\ *)
+			case " $flash_line " in
+				*' -M '*) ;;
+				*) die "the published pk2cmd command for $flash_image does not program the whole device" ;;
+			esac
+			case " $flash_line " in
+				*' -Y '*) ;;
+				*) die "the published pk2cmd command for $flash_image performs no verify pass" ;;
+			esac ;;
+		*) die "the published command for $flash_image names no programming tool this verifier knows: $flash_line" ;;
+	esac
+
+	# The fuse bytes, against the cell the same page shows the reader. Two
+	# renderings of one design value, and nothing compared them before.
+	mapfile -t flash_matches < <(grep -F -- "| \`$flash_image\` |" "$manifest" || true)
+	[ "${#flash_matches[@]}" -eq 1 ] \
+		|| die "MANIFEST.md carries ${#flash_matches[@]} image rows for $flash_image, expected 1"
+	IFS='|' read -r -a flash_cells <<<"${flash_matches[0]}"
+	[ "${#flash_cells[@]}" -ge 7 ] \
+		|| die "MANIFEST.md image row for $flash_image has too few columns"
+	flash_fuses=${flash_cells[5]}
+	for flash_fuse in $flash_fuses; do
+		case "$flash_fuse" in
+			*=*) ;;
+			*) continue ;;
+		esac
+		case "$flash_line" in
+			*" -U ${flash_fuse%%=*}:w:${flash_fuse#*=}:m"*) ;;
+			*) die "the published command for $flash_image omits $flash_fuse, which its own Images row publishes" ;;
+		esac
+	done
+done
+
+# The source-checkout block, if the release publishes one, must be exactly what
+# it says: make invocations, each selecting the variant its own image names.
+if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
+	flash_source="$work/flash-source.sh"
+	awk '
+		$0 == "### Source-checkout equivalents" { want = 1; next }
+		want && $0 == "```sh"                   { inblock = 1; want = 0; next }
+		inblock && $0 == "```"                  { exit }
+		inblock                                 { print }
+	' "$manifest" > "$flash_source" \
+		|| die "could not read the source-checkout block from MANIFEST.md"
+	[ -s "$flash_source" ] \
+		|| die "MANIFEST.md publishes an empty source-checkout block"
+	bash -n "$flash_source" \
+		|| die "MANIFEST.md publishes source-checkout commands that are not valid shell"
+	flash_current=""
+	while IFS= read -r flash_line; do
+		case "$flash_line" in
+			'') continue ;;
+			'# '*) flash_current=${flash_line#\# }; continue ;;
+		esac
+		[ -n "$flash_current" ] \
+			|| die "MANIFEST.md publishes a source-checkout command that names no image: $flash_line"
+		case " $canonical_images " in
+			*" $flash_current "*) ;;
+			*) die "MANIFEST.md publishes a source-checkout command for $flash_current, which this release does not ship" ;;
+		esac
+		case "$flash_line" in
+			'make '*) ;;
+			*) die "the source-checkout command for $flash_current is not a make invocation: $flash_line" ;;
+		esac
+		flash_stem=${flash_current%.hex}
+		case "$flash_line" in
+			*"VARIANT=${flash_stem##*-}"*) ;;
+			*) die "the source-checkout command for $flash_current does not select its own variant: $flash_line" ;;
+		esac
+		flash_current=""
+	done < "$flash_source"
+fi
+
 # --- the provenance files are inside the signature ---------------------------
 # verify-release-images.sh proves SHA256SUMS LISTS exactly the declared
 # provenance set. That is a different claim from the listed digests being the

@@ -587,7 +587,7 @@ needed updating.
 
 ## BR-RES-03 - Publish release resource data as a generated release view
 
-**Status:** DONE `<commit>`
+**Status:** DONE `1ad315e`
 
 **Depends on:** BR-RES-01, BR-REL-01
 
@@ -1405,7 +1405,7 @@ procedure. BR-FINAL-01 should decide it.
 
 ## BR-FLASH-02 - Generate exact per-release programming guidance
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-FLASH-01, BR-REL-01
 
@@ -1413,24 +1413,86 @@ procedure. BR-FINAL-01 should decide it.
 `PROGRAMMING.md` concept. Preserve the useful proposal without retaining the
 entire branch-era discussion.
 
+**What the measurement found.** The release was not missing generated
+programming guidance. It had generated guidance -- eighteen per-image commands
+in `MANIFEST.md` -- and nothing had ever checked it. Extracting the block from
+`release/v0.9.11/MANIFEST.md` and running each line through `bash -n`:
+
+| images | published command | state |
+|---|---|---|
+| attiny202 x3 | `avrdude ... -U flash:w:<img>:i   (or: make attiny202-program VARIANT=<v> XT_UPDI_PORT=<port>)` | not valid shell |
+| pic10f322 x3 | `pk2cmd ... -M -Y -R   (or: make pic10f322-program VARIANT=<v>)` | not valid shell |
+| attiny13a/45/85 x9 | `avrdude -c <prog> -p t13 ...` | parses; `<prog>` is a REDIRECTION, so `-c` leaves the argv |
+| pic10f320 x3 | `pk2cmd -PPIC10F320 -F<img> -M -Y -R` | pasteable |
+| pic12f675 x3 | none, deliberately | guarded transaction, ~30 pinned checks |
+
+Three of twenty-one were runnable. Behind that:
+
+- The `(or: make ...)` forms name a Makefile no downloaded release contains --
+  the published assets are the images, `flash-pic12f675.py`, `QUALIFICATION`,
+  `MANIFEST.md` and `README.md`. `VARIANT=<v>` asked the reader for a value the
+  basename beside it already fixed.
+- `XT_PROGRAMMER` is a `?=` default read straight into the published command, so
+  a release host that exported a programmer preference published different
+  instructions from the same source tag.
+- Nothing bound the commands to `RELEASE_IMAGES`, to the fuse bytes their own
+  Images row publishes three lines above them, or to being valid shell.
+  `release_render_flashing` checked two things: that rows were non-empty, and
+  that no PIC12F675 row existed.
+
 **Work:**
 
-- [ ] Define one machine programming specification or derive commands from
-  existing authoritative release/build data.
-- [ ] Generate exact image names, fuse/CONFIG values, tool requirements, and
-  command templates for the release.
-- [ ] Include the generated guide in the signed release asset/index contract.
-- [ ] Test behavior and safety invariants, not only rendered sentence spelling.
-- [ ] Keep user-selected facts such as port, programmer, and power arrangement
-  explicit rather than pretending they can be generated.
-- [ ] Ensure PIC12F675 guidance invokes the release helper and never a raw
-  writer.
+- [x] Define one machine programming specification or derive commands from
+  existing authoritative release/build data. Rows are `image<TAB>profile<TAB>command`
+  over four profiles; every token comes from Makefile truth (`AVR_PROGRAMMER`,
+  `XT_PROGRAMMER`, `XT_UPDI_PORT`, `part_<n>`, the fuse variables, the tags).
+- [x] Generate exact image names, fuse/CONFIG values, tool requirements, and
+  command templates for the release. No placeholders remain: all 18 commands are
+  complete and pasteable, and a programmer-profile table carries the substitutions
+  and the power assumption.
+- [x] Include the generated guide in the signed release asset/index contract.
+  It is in `MANIFEST.md`, which `RELEASE_PROVENANCE_FILES` puts inside
+  `SHA256SUMS`, which `SHA256SUMS.asc` signs. (v0.9.11 and earlier did not carry
+  the provenance files in `SHA256SUMS`; that was already repaired by BR-REL-01.)
+- [x] Test behavior and safety invariants, not only rendered sentence spelling.
+  The verifier runs `bash -n` over the published block, requires each command to
+  name its own image, both-direction coverage against `RELEASE_IMAGES`, every
+  fuse in the Images row present as `-U name:w:value:m`, no `-V` on avrdude, and
+  `-M -Y` on pk2cmd.
+- [x] Keep user-selected facts such as port, programmer, and power arrangement
+  explicit rather than pretending they can be generated. They are published as
+  defaults inside complete commands and named as the only substitutions in the
+  profile table; the PIC rows state that the target is externally powered.
+- [x] Ensure PIC12F675 guidance invokes the release helper and never a raw
+  writer. Unchanged, and now enforced from two more directions: the producer
+  refuses to emit a row for that part, and the verifier fails a manifest that
+  publishes one.
 
 **Acceptance:**
 
-- A downloaded release is self-contained for programming guidance.
-- Exact commands are tied to the exact released assets.
-- Generated guidance and release index cannot disagree silently.
+- A downloaded release is self-contained for programming guidance -- every
+  command runs from the directory holding the download, with no checkout.
+- Exact commands are tied to the exact released assets: a command that does not
+  name the image it is filed under fails the release.
+- Generated guidance and release index cannot disagree silently: coverage is
+  checked in both directions against `RELEASE_IMAGES`, and the fuse bytes in the
+  command are checked against the cell the same page shows the reader.
+
+**Three properties this added:**
+
+1. The published block is checked through the interpreter a reader pastes it
+   into, not by grepping for words.
+2. The fuse bytes are rendered twice -- once as a table cell, once inside a
+   command -- and the two are now required to agree.
+3. The release query environment no longer leaks the host's programmer
+   preferences into published instructions.
+
+**What this does not do:**
+
+- No separate `PROGRAMMING.md` landing page, ZIP bundle, or GitHub release body
+  (`flashing_simplicity.md` sections 4.3 and 4.4). The guidance stays in `MANIFEST.md`,
+  which is already signed and already published.
+- No `ipecmd` command line. See BR-FLASH-04.
 
 ## BR-FLASH-03 - Retire the flashing-simplicity work journal
 
@@ -1453,6 +1515,52 @@ entire branch-era discussion.
 
 - No current safety procedure depends on reading a partly implemented proposal.
 - Remaining work is visible in TODO without preserving the entire discussion.
+
+## BR-FLASH-04 - Close the two PIC10F32x programming-authority gaps
+
+**Status:** TODO
+
+**Depends on:** BR-FLASH-02
+
+Both were found while binding the published programming commands to the
+Makefile, and both are left to the user: they change what a programmer is told
+to do to hardware.
+
+- **The PIC10F320 has no programming authority.** There is no
+  `pic10f320-program` target and no `PIC10F320_PROG*` variables, so its three
+  published commands are the only ones of the eighteen with nothing to be
+  checked against. The PIC10F322 command is now pinned to `PIC10F322_PROG_CMD`
+  byte for byte, with the one path substitution a download requires; its
+  PIC10F320 twin is pinned to nothing. Deriving one from the other is exactly
+  what `scripts/make-release.sh` refuses to do for these two parts, and for a
+  stated reason: the separate variable pairs exist so one part can be re-pinned
+  without silently moving the other.
+- **The `ipecmd` invocation performs no verify pass.** `PIC10F322_PROG_CMD`
+  under `PIC10F322_PROG=ipecmd` is `ipecmd -TPPK4 -PPIC10F322 -M -F<hex>`: no
+  `-Y`, where the `pk2cmd` form has `-M -Y -R`. That is why BR-FLASH-02
+  publishes no `ipecmd` command line -- doing so would hand PICkit 3/4/5 users a
+  write with no readback. `FLASHING.md` carries a third spelling
+  (`-TPPK3 ... -M -Y -OL`) and says its flags are unconfirmed on hardware.
+
+**Work:**
+
+- [ ] Decide whether the PIC10F320 gains its own `PIC10F320_PROG*` variables and
+  a `pic10f320-program` target, or whether the release says plainly that its
+  PIC10F320 command is unpinned.
+- [ ] Decide whether the Makefile's `ipecmd` form gains `-Y`, and whether
+  `PIC10F322_PROG_TOOL` should default to `PK3` or `PK4` given that `FLASHING.md`
+  leads with the PICkit 3 and MPLAB X 6.25 dropped support for it.
+- [ ] If the `ipecmd` form gains a verify pass, publish it beside the `pk2cmd`
+  command. The gate is in place first: `check_flash_commands` and the
+  qualification verifier already require every published PIC command to verify,
+  and both fail closed on a programming tool they do not recognise -- so
+  publishing `ipecmd` means teaching both about it in the same change.
+
+**Acceptance:**
+
+- Every published programming command is checkable against one declared
+  authority, or is published as explicitly unpinned.
+- No published command writes a device without reading it back.
 
 ---
 
@@ -3769,15 +3877,16 @@ dependencies and acceptance criteria.
 | BR-AUTH-02 | Inventory references/contracts | DONE `bc267a8` |
 | BR-RES-01 | Remove mutable resource tables | DONE `e7c4f68` |
 | BR-RES-02 | Retire prose synchronization tests | DONE `e7c4f68` |
-| BR-RES-03 | Publish generated release resource view | DONE `<commit>` |
+| BR-RES-03 | Publish generated release resource view | DONE `1ad315e` |
 | BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
 | BR-PIC-02 | Merge PIC10F322 phase notes | DONE `3a3b661` |
 | BR-PIC-03 | Consolidate PIC10F320 documents | DONE `b8b4af1` |
 | BR-PIC-04 | Consolidate PIC12F675 feasibility | DONE `f968de7` |
 | BR-PIC-05 | Update firmware document references | DONE `f968de7` |
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
-| BR-FLASH-02 | Generate release programming guide | TODO |
+| BR-FLASH-02 | Generate release programming guide | DONE `<commit>` |
 | BR-FLASH-03 | Delete flashing proposal journal | TODO |
+| BR-FLASH-04 | Close PIC10F32x programming authority gaps | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |

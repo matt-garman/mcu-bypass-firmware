@@ -179,7 +179,9 @@ for wiring in \
 	$'\trelease_render_scope' \
 	$'\trelease_render_validation "$hours"' \
 	$'\trelease_render_toolchain_table "$EVID/toolchain.txt" \\' \
-	$'\trelease_render_flashing "$WORK/flashcmds.txt" "$VERSION"' \
+	$'\tcheck_flash_commands "$WORK/flashcmds.txt"' \
+	$'\trelease_render_flashing "$WORK/flashcmds.txt" "$VERSION" \\' \
+	$'\t\t"$AVR_PROGRAMMER" "$XT_PROGRAMMER" "$XT_UPDI_PORT"' \
 	$'\trelease_render_reproduction_commands "$VERSION" "$RELEASE_IMAGE_DIRS"' \
 	$'\t\t"$AVR_BUILD_DIR" "$XT_BUILD_DIR" "$PIC10F322_BUILD_DIR"' \
 	$'\t\t"$PIC10F320_BUILD_DIR" "$PIC12F675_BUILD_DIR"' \
@@ -470,12 +472,14 @@ EOF
 		printf -- '| image | MCU | clock | flash used / reviewed ceiling | fuses / config | sha256 |\n'
 		printf -- '|---|---|---|---|---|---|\n'
 		for image in "${canonical_images[@]}"; do
-			printf -- '| `%s` | fixture-mcu | fixture-clock | %s | fixture-config | `%s` |\n' \
+			printf -- '| `%s` | fixture-mcu | fixture-clock | %s | %s | `%s` |\n' \
 				"$image" "${resource_fixture_cell[$image]}" \
+				"$(fixture_fuse_cell "$image")" \
 				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		done
 		printf '\n## Resources\n\n'
 		printf '%s\n' "${resource_fixture_rows[@]}"
+		write_flashing_section
 	} > "$release/MANIFEST.md"
 	{
 		printf '# %s\n\n' "$version"
@@ -486,6 +490,60 @@ EOF
 		printf 'Prebuilt firmware for %s. See **MANIFEST.md** for provenance.\n' "$version"
 	} > "$release/README.md"
 	reseal_provenance
+}
+
+# The fuse cell and the flashing command for one fixture image are written by
+# two different functions here on purpose: the verifier's new obligation is that
+# the bytes a reader is shown in the Images table are the bytes the command they
+# paste actually writes, and a fixture that rendered both from one expression
+# could not tell whether that obligation is checked.
+fixture_fuse_cell() {
+	case "$1" in
+		*-pic*) printf 'fixture-config\n' ;;
+		*)      printf 'lfuse=0x5a hfuse=0xf9\n' ;;
+	esac
+}
+
+fixture_flash_command() {
+	case "$1" in
+		*-pic*) printf 'pk2cmd -Pfixture -F%s -M -Y -R\n' "$1" ;;
+		*)      printf 'avrdude -c usbtiny -p fixture -U lfuse:w:0x5a:m -U hfuse:w:0xf9:m -U flash:w:%s:i\n' "$1" ;;
+	esac
+}
+
+# Mirrors release_render_flashing's published shape without calling it, for the
+# same reason write_evidence_index mirrors the index writer.
+write_flashing_section() {
+	local image stem source_image
+	printf '\n## Flashing\n\n'
+	printf 'Fixture flashing prose.\n\n'
+	printf '### Programmer profiles\n\n'
+	printf '| images | interface | tool | this release publishes | if yours differs |\n'
+	printf '|---|---|---|---|---|\n'
+	printf '| fixture | ISP | `avrdude` | `-c usbtiny` | fixture |\n\n'
+	printf '### Per-image commands\n\n'
+	printf '```sh\n'
+	for image in "${canonical_images[@]}"; do
+		case "$image" in
+			*-pic12f675-*) continue ;;
+		esac
+		printf '# %s\n%s\n\n' "$image" "$(fixture_flash_command "$image")"
+	done
+	printf '```\n\n'
+	source_image=""
+	for image in "${canonical_images[@]}"; do
+		case "$image" in
+			*-pic12f675-*) continue ;;
+			*) source_image=$image; break ;;
+		esac
+	done
+	[ -n "$source_image" ] || return 1
+	stem=${source_image%.hex}
+	printf '### Source-checkout equivalents\n\n'
+	printf '```sh\n'
+	printf '# %s\n' "$source_image"
+	printf 'make fixture-program VARIANT=%s\n\n' "${stem##*-}"
+	printf '```\n\n'
 }
 
 # The fixture's own index producer, deliberately written to mirror the shape
@@ -829,6 +887,115 @@ reset_fixture
 grep -vFx '## Resources' "$release/MANIFEST.md" > "$work/manifest.tmp"
 mv "$work/manifest.tmp" "$release/MANIFEST.md"
 expect_fail "manifest without the resources section" "measured resources section"
+
+# --- the published programming commands --------------------------------------
+# Nothing checked this section before. Each control below is one of the four
+# ways v0.9.11's published block was wrong, plus the ways a future producer
+# could make it wrong quietly.
+reset_fixture
+grep -vFx '### Per-image commands' "$release/MANIFEST.md" > "$work/manifest.tmp"
+mv "$work/manifest.tmp" "$release/MANIFEST.md"
+expect_fail "manifest without the per-image command block" \
+	"does not carry the ### Per-image commands section"
+
+reset_fixture
+flash_victim=""
+for image in "${canonical_images[@]}"; do
+	case "$image" in
+		*-pic12f675-*) continue ;;
+		*) flash_victim=$image; break ;;
+	esac
+done
+[ -n "$flash_victim" ] || fail "the canonical image set contains no non-PIC12F675 image"
+flash_victim_command=$(fixture_flash_command "$flash_victim")
+grep -vFx "$flash_victim_command" "$release/MANIFEST.md" > "$work/manifest.tmp"
+mv "$work/manifest.tmp" "$release/MANIFEST.md"
+expect_fail "manifest missing one image's command" \
+	"names $flash_victim in the command block and publishes no command for it"
+
+# The v0.9.11 defect itself: the source-checkout alternative appended to a
+# download command as parenthesised prose, inside the fenced block.
+reset_fixture
+sed -i "s|^${flash_victim_command}\$|${flash_victim_command}   (or: make fixture-program VARIANT=x)|" \
+	"$release/MANIFEST.md"
+expect_fail "appended prose inside the command block" \
+	"programming commands that are not valid shell"
+
+# The other v0.9.11 defect: a placeholder that bash reads as a redirection, so
+# the option silently disappears from the argv instead of failing.
+reset_fixture
+sed -i "s|^${flash_victim_command}\$|avrdude -c <prog> -p fixture -U lfuse:w:0x5a:m -U hfuse:w:0xf9:m -U flash:w:${flash_victim}:i|" \
+	"$release/MANIFEST.md"
+expect_fail "unresolved placeholder in a published command" \
+	"carries an unresolved placeholder"
+
+reset_fixture
+sed -i "s|^${flash_victim_command}\$|make fixture-program VARIANT=fixture ${flash_victim}|" \
+	"$release/MANIFEST.md"
+expect_fail "published command that needs a checkout" \
+	"invokes make; a downloaded release ships no Makefile"
+
+# The fuse bytes and the command are two renderings of one design value.
+reset_fixture
+sed -i "s|^${flash_victim_command}\$|${flash_victim_command/lfuse:w:0x5a:m/lfuse:w:0xff:m}|" \
+	"$release/MANIFEST.md"
+expect_fail "command that writes a fuse the manifest does not publish" \
+	"omits lfuse=0x5a, which its own Images row publishes"
+
+# Still names the image, still valid shell -- and writes it in a format that is
+# not the intel-hex the release ships.
+reset_fixture
+sed -i "s|^${flash_victim_command}\$|${flash_victim_command/:i/:a}|" \
+	"$release/MANIFEST.md"
+expect_fail "command that writes no image" \
+	"does not write that image to flash"
+
+# A PIC write with no readback looks exactly like one with a readback.
+reset_fixture
+flash_pic_victim=""
+for image in "${canonical_images[@]}"; do
+	case "$image" in
+		*-pic12f675-*) continue ;;
+		*-pic*) flash_pic_victim=$image; break ;;
+	esac
+done
+[ -n "$flash_pic_victim" ] || fail "the canonical image set contains no PIC10F32x image"
+flash_pic_command=$(fixture_flash_command "$flash_pic_victim")
+sed -i "s|^${flash_pic_command}\$|${flash_pic_command/ -Y/}|" "$release/MANIFEST.md"
+expect_fail "PIC command with no verify pass" "performs no verify pass"
+
+# The part that must not appear. A per-image shortcut for it is the defect the
+# guarded transaction exists to prevent.
+reset_fixture
+flash_guarded=""
+for image in "${canonical_images[@]}"; do
+	case "$image" in
+		*-pic12f675-*) flash_guarded=$image; break ;;
+	esac
+done
+[ -n "$flash_guarded" ] || fail "the canonical image set contains no PIC12F675 image"
+sed -i "s|^# ${flash_victim}\$|# ${flash_guarded}\\npk2cmd -Pfixture -F${flash_guarded} -M -Y -R\\n\\n# ${flash_victim}|" \
+	"$release/MANIFEST.md"
+expect_fail "raw per-image PIC12F675 write" \
+	"publishes a raw per-image write for $flash_guarded"
+
+reset_fixture
+sed -i "s|^# ${flash_victim}\$|# bypass-notmine-cd4053_simple.hex\\navrdude -c usbtiny -p fixture -U flash:w:bypass-notmine-cd4053_simple.hex:i\\n\\n# ${flash_victim}|" \
+	"$release/MANIFEST.md"
+expect_fail "command for an image this release does not ship" \
+	"which this release does not ship"
+
+# The variant is not a question to ask the reader; the image answers it.
+reset_fixture
+sed -i 's|^make fixture-program VARIANT=.*$|make fixture-program VARIANT=not_the_variant|' \
+	"$release/MANIFEST.md"
+expect_fail "source-checkout command selecting another variant" \
+	"does not select its own variant"
+
+reset_fixture
+sed -i 's|^make fixture-program VARIANT=|fixture-program VARIANT=|' "$release/MANIFEST.md"
+expect_fail "source-checkout command that is not a make invocation" \
+	"is not a make invocation"
 
 reset_fixture
 sed -i 's/^version=.*/version=v99.0.1/' "$release/QUALIFICATION"
@@ -1601,13 +1768,18 @@ flashing_fixture="$work/rendered-flashcmds.txt"
 git_safety_log="$work/rendered-pic12f675-git.log"
 flash_fixture="$work/flash fixture with spaces"
 mkdir -p "$flash_fixture"
-printf '%s\t%s\n' \
-	'bypass-attiny13a-cd4053_simple.hex' 'avrdude -c test-programmer' \
-	'bypass-pic10f322-cd4053_simple.hex' 'pk2cmd -PPIC10F322 -Fimage.hex -M -Y -R' \
+printf '%s\t%s\t%s\n' \
+	'bypass-attiny13a-cd4053_simple.hex' avrdude-isp \
+	'avrdude -c test-programmer -p t13 -U flash:w:bypass-attiny13a-cd4053_simple.hex:i' \
+	'bypass-pic10f322-cd4053_simple.hex' pk2cmd \
+	'pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R' \
+	'bypass-pic10f322-cd4053_simple.hex' make-source \
+	'make pic10f322-program VARIANT=cd4053_simple' \
 	> "$flashing_fixture"
 helper_commands="$work/rendered-pic12f675-helper.sh"
 helper_recovery="$work/rendered-pic12f675-helper-recovery.sh"
-release_render_flashing "$flashing_fixture" v0.9.9 > "$flashing"
+release_render_flashing "$flashing_fixture" v0.9.9 \
+	test-programmer serialupdi /dev/ttyUSB0 > "$flashing"
 # Select each block by what it CONTAINS, not by its ordinal. The section now
 # publishes four: the downloaded-image helper and its recovery, then the
 # source-checkout transaction and its recovery. Positional extraction silently
@@ -1681,7 +1853,7 @@ if grep -Fiq 'preserves factory OSCCAL/BG' "$flashing" \
 		|| grep -Eq '(^|[[:space:]])ipecmd[[:space:]]+-' "$flashing"; then
 	fail "rendered PIC12F675 flashing guidance claims preservation or publishes a raw writer command"
 fi
-grep -Fq 'flashcmd="" ;;' "$RELEASE" \
+grep -Fq ': # no flash_row for PIC12F675' "$RELEASE" \
 	|| fail "release producer still emits a per-image PIC12F675 flashing shortcut"
 if grep -Fiq 'preserves factory OSCCAL/BG' "$RELEASE" \
 		|| grep -Fq 'pk2cmd -PPIC12F675' "$RELEASE"; then
@@ -1793,12 +1965,47 @@ fi
 	|| fail "release-tag mismatch reached a PIC12F675 Make target"
 checks=$((checks + 1))
 
-printf '%s\t%s\n' 'bypass-pic12f675-cd4053_simple.hex' \
-	'pk2cmd -PPIC12F675 -Fimage.hex -M -Y -R' > "$flashing_fixture"
-if release_render_flashing "$flashing_fixture" v0.9.9 >/dev/null; then
+printf '%s\t%s\t%s\n' 'bypass-pic12f675-cd4053_simple.hex' pk2cmd \
+	'pk2cmd -PPIC12F675 -Fbypass-pic12f675-cd4053_simple.hex -M -Y -R' > "$flashing_fixture"
+if release_render_flashing "$flashing_fixture" v0.9.9 \
+		test-programmer serialupdi /dev/ttyUSB0 >/dev/null; then
 	fail "assembled flashing renderer accepted a per-image PIC12F675 writer command"
 fi
 checks=$((checks + 1))
+
+# The renderer's own refusals. The producer checks these rows in far more
+# detail, but a page rendered from rows nobody checked would still be wrong,
+# and each shape below reached a published release or nearly did.
+render_flash_reject() {
+	local label=$1 image=$2 profile=$3 command=$4
+	printf '%s\t%s\t%s\n' "$image" "$profile" "$command" > "$flashing_fixture"
+	if release_render_flashing "$flashing_fixture" v0.9.9 \
+			test-programmer serialupdi /dev/ttyUSB0 >/dev/null 2>&1; then
+		fail "assembled flashing renderer accepted $label"
+	fi
+	checks=$((checks + 1))
+}
+render_flash_reject "an unresolved placeholder" \
+	bypass-attiny13a-cd4053_simple.hex avrdude-isp \
+	'avrdude -c <prog> -p t13 -U flash:w:bypass-attiny13a-cd4053_simple.hex:i'
+render_flash_reject "prose appended to an executable line" \
+	bypass-attiny13a-cd4053_simple.hex avrdude-isp \
+	'avrdude -c usbtiny -p t13 -U flash:w:bypass-attiny13a-cd4053_simple.hex:i   (or: make attiny13a-program)'
+render_flash_reject "a download command that needs a checkout" \
+	bypass-attiny13a-cd4053_simple.hex avrdude-isp \
+	'make attiny13a-program VARIANT=cd4053_simple'
+render_flash_reject "a command filed under an image it does not name" \
+	bypass-attiny13a-cd4053_simple.hex avrdude-isp \
+	'avrdude -c usbtiny -p t13 -U flash:w:bypass-attiny45-cd4053_simple.hex:i'
+render_flash_reject "a source-checkout command for another variant" \
+	bypass-pic10f322-cd4053_simple.hex make-source \
+	'make pic10f322-program VARIANT=tq2_l2_5v_relay'
+render_flash_reject "an unknown programming profile" \
+	bypass-pic10f322-cd4053_simple.hex ipecmd-pk3 \
+	'ipecmd -TPPK3 -PPIC10F322 -M -Fbypass-pic10f322-cd4053_simple.hex'
+render_flash_reject "a page with no runnable command at all" \
+	bypass-pic10f322-cd4053_simple.hex make-source \
+	'make pic10f322-program VARIANT=cd4053_simple'
 
 : > "$render_log"
 if (
