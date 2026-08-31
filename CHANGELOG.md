@@ -289,11 +289,13 @@ historical records and are not retroactively compacted by this policy.
   record with nothing to disagree. `make test` now runs the same validator
   against the working tree, taking the version from the declaration and the
   counts from the Makefile that builds the images, and additionally requires a
-  tree that declares `vX.Y.Z` while `release/vX.Y.Z/QUALIFICATION` is absent to
-  carry the exact pre-tag transition line. That disclosure was previously owed
-  only by a block that happened to name the directory, so the pre-tag window --
-  and an abandoned finalization commit left standing in it -- could pass
-  unmentioned. `test-release-preflight`: 221 -> 230 checks.
+  tree that declares `vX.Y.Z` without a nonempty, regular, non-symlinked
+  `release/vX.Y.Z/QUALIFICATION` to carry the exact pre-tag transition line.
+  Empty and symlinked placeholders therefore cannot suppress the disclosure.
+  That disclosure was previously owed only by a block that happened to name the
+  directory, so the pre-tag window -- and an abandoned finalization commit left
+  standing in it -- could pass unmentioned. `test-release-preflight`: 221 -> 230
+  checks before the retained-record boundary controls added later.
 
 - **A branch-only working document is now recognized by the declaration it
   carries rather than by its name.** The release documentation gate had been

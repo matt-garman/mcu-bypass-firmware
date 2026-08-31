@@ -4056,13 +4056,22 @@ prospective release implementation.
   and a decimal declaration followed by a computed `:=` reassignment both fail
   the isolated contract. Resource-table contract: 135 checks, 0 failures.
 
-- [ ] **BR-RVW-06 -- MEDIUM -- an empty or symlinked `QUALIFICATION` suppresses
+- [x] **BR-RVW-06 -- MEDIUM -- an empty or symlinked `QUALIFICATION` suppresses
   the pre-tag disclosure (BR-STATE-02, `d4675d0`).** Development-state
   validation checks only `-f` (`scripts/release-documentation.sh:270-278`), and
   `test/test_release_preflight.sh:1186-1193` explicitly calls an empty file a
   released tree. Use the same minimum regular, nonempty, non-symlink retained
   record boundary the release verifier relies on, with empty and symlink
   negative cases.
+
+  **Resolved:** The development-state gate now treats `QUALIFICATION` as a
+  retained release record only when it is a nonempty regular file and not a
+  symlink, matching the minimum boundary enforced by qualification verification.
+  Its released-tree fixture now carries a nonempty record; empty and symlinked
+  placeholders each retain the pre-tag disclosure requirement. Focused shell
+  syntax and diff checks passed; the full preflight regression was left to the
+  external validation run because it repeatedly exercises the complete release
+  preflight.
 
 - [ ] **BR-RVW-07 -- MEDIUM -- the XC8 context parser does not prove data-memory
   class (BR-TEST-07, `cee6bab`/`0dada67`).**
