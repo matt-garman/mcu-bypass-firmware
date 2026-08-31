@@ -129,6 +129,12 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **Reader guides no longer duplicate executable release inventories.** The
+  project overview points to the release authority for exact image sets, while
+  the test guide points to executable owners for profile checks, evidence and
+  soak membership. Qualification no longer makes those mutable figures
+  mandatory prose.
+
 - **PIC context sidecars now prove the guarded context is in reviewed SRAM.**
   The shared XC8 symbol resolver accepts `_ctx_` only in the `BANK0` class
   emitted for all supported PIC families under the pinned toolchain. Program,

@@ -4108,7 +4108,7 @@ prospective release implementation.
   representative mutation roster detects arbitrary weakening of an unmutated
   predicate. No fixture behavior or firmware changed.
 
-- [ ] **BR-RVW-09 -- MEDIUM -- mutable release and test inventories remain
+- [x] **BR-RVW-09 -- MEDIUM -- mutable release and test inventories remain
   mandatory prose duplication (BR-AUTH-01, BR-README-01, BR-TESTDOC-01 and
   BR-STATE-01).** The authority map forbids repeated counts and inventories
   (`README.md:99-120`), while `README.md:6-11` and
@@ -4116,6 +4116,18 @@ prospective release implementation.
   `test/test_release_qualification.sh:141-175` requires the copies. Remove or
   generate mutable reader-facing counts while retaining independent executable
   set and coverage oracles.
+
+  **Resolved:** The top-level overview now leaves exact release inventories to
+  the bounded contract in `release/README.md`, and its simulator summary leaves
+  target/substrate membership to the test guide. The test guide no longer
+  restates per-profile check totals, current evidence/soak cardinalities or a
+  historical evidence/soak boundary. `test-release-qualification` no longer
+  requires those prose copies, while its release-authority checks, test-layer
+  coverage assertions, canonical set/cardinality fixtures and override controls
+  remain unchanged. Shell syntax and `git diff --check` passed. The focused
+  qualification regression exceeded 120 seconds on this host while repeatedly
+  encountering the absent AVR toolchain, so it produced no verdict and was left
+  to the external full-suite run.
 
 - [ ] **BR-RVW-10 -- MEDIUM -- mutable resource figures remain in development
   prose (BR-RES-01, `e7c4f68`).** Examples are current flash percentages in

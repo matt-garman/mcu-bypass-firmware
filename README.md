@@ -3,12 +3,9 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The source tree covers seven release parts across four microcontroller core
-generations: the "AVR Classic" parts (ATtiny13a, ATtiny45, ATtiny85), AVR-XT
-ATtiny202, enhanced mid-range PIC10F322/PIC10F320, and classic mid-range
-PIC12F675. Release `v0.9.6` was the first unified release, covering the first six
-parts with 18 prebuilt images. PIC12F675 is release-supported from `v0.9.9`,
-raising the canonical set to 21 images; see the table below.
+The source tree supports AVR and PIC targets; see the table below for target
+selection. The current and historical release contracts, including exact image
+inventories, are maintained in [release/README.md](release/README.md).
 
 ## Targets
 
@@ -74,11 +71,10 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
   - Provable correctness via formal state analysis
   - Core debounce algorithm written as pure functionality, thus
     host-compilable for exhaustive fuzz testing
-  - Built-image simulator validation: simavr for AVR Classic and gpsim/libgpsim
-    for PIC10F322, PIC10F320, and PIC12F675 provide functional, fault-injection,
-    lock-step, target-I/O, and soak tests; yasimavr does the same for the AVR-XT
-    ATtiny202, plus its PA2/PA3 transition ordering. Which layer establishes
-    which property, over which substrate, is [test/README.md](test/README.md)
+  - Built-image simulator validation provides functional, fault-injection,
+    lock-step, target-I/O, and soak coverage. Which layer establishes each
+    property, for which target and over which substrate, is maintained in
+    [test/README.md](test/README.md)
   - Mutation tests (deliberately break code to prove tests catch
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
