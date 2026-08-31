@@ -357,13 +357,14 @@ def _run_case(elf, name, kind, addr, corrupt, mech, ck):
         # pins and every register that determines that state; OUT alone cannot
         # detect an inverted, pulled-up or input-direction coil pin.
         #
-        # What this substrate CANNOT show is the other half of the contract --
-        # the recovery's full-width RESET-coil actuation, which is what actually
-        # resynchronizes the physical relay. yasimavr treats the interrupts-off
-        # spin as a terminal halt (see sim_attiny202.in_force_reset), so the
+        # What this substrate CANNOT show is the other half of the electrical
+        # contract -- the recovery RESET-coil pulse. yasimavr treats the
+        # interrupts-off spin as a terminal halt (see
+        # sim_attiny202.in_force_reset), so the
         # ~250 ms WDT never completes the reset in the model. The gpsim PIC
         # lanes measure that pulse on real images; the simavr tinyx5 lane
-        # measures it on a classic AVR. No simulator speaks to relay mechanics.
+        # measures it on a classic AVR. No simulator speaks to relay mechanics;
+        # physical convergence remains conditional on the documented hardware.
         at = sim.run_until_force_reset(GATE_MS)
         if at is None:
             ck.result(False, "%s corrupted -> gate did NOT force reset within %d ms"

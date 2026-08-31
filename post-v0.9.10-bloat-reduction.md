@@ -4144,13 +4144,23 @@ prospective release implementation.
   prose-synchronization check was added. `test-reference-contract`: 10 checks,
   0 failures; `test-todo-index`: 102 checks, 0 failures.
 
-- [ ] **BR-RVW-11 -- MEDIUM -- the relay safety case overstates physical
+- [x] **BR-RVW-11 -- MEDIUM -- the relay safety case overstates physical
   convergence (BR-DOC-04, `8180569`).**
   `docs/relay_coil_fault_correction.md:50-55` says recovery guarantees
   logical/physical convergence, while lines 231-235 acknowledge that even an
   above-minimum pulse may fail to move real hardware. State the electrical
   firmware guarantee separately from the physical result and name the hardware
   assumptions required for the latter.
+
+  **Resolved:** The safety case and normative design now define the guaranteed
+  firmware/electrical sequence separately from conditional armature/contact
+  movement. They name the fault-model, reset, wiring, pull-down, driver, flyback,
+  PCB, supply, terminal voltage/current/pulse, environmental and functional-relay
+  assumptions required for physical BYPASS. Test documentation and comments now
+  describe only the electrical phase each substrate observes, distinguish the
+  fault lane's datasheet-minimum pulse from separate nominal-width evidence, and
+  state that no simulator observes relay mechanics. `test-reference-contract`:
+  10 checks, 0 failures; `test-makefile-name-contract`: 48 checks, 0 failures.
 
 - [ ] **BR-RVW-12 -- LOW -- repair three live-document contradictions.**
   `docs/context_seu_detection.md:14-20` says no published release binds F2 even

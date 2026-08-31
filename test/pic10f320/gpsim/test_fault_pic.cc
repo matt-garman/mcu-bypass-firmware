@@ -20,9 +20,9 @@
 // F1 fail-safe contract (docs/relay_coil_fault_correction.md): an energized
 // coil resets here exactly as it does on the modular shells. Both halves are
 // required -- both coils de-energized before the spin, and a complete
-// RESET-coil actuation after the recovery -- and both settled states are
-// covered, so a coil fault arriving while the relay believes it is ENGAGED is
-// tested as well as one arriving in BYPASS.
+// RESET-coil electrical command after the recovery -- and both settled states
+// are covered, so a coil fault arriving while the relay believes it is ENGAGED
+// is tested as well as one arriving in BYPASS.
 //
 // The LED latch case below is the deliberate NEGATIVE control for that gap:
 // RA0 is not guarded on this part, so injecting it must NOT reset. Asserting

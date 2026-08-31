@@ -251,7 +251,7 @@ static void expect_no_reset(fw_inject_t inj, const char *what) {
 // on the shipping source. It is deliberately NOT called recovery -- final-low
 // coils are not resynchronization. The gpsim lanes
 // (test/pic/test_fault_pic.cc, test/pic/test_fault_pic12f675.cc) measure the
-// recovery's full-width RESET-coil actuation on the real image, and nothing in
+// recovery RESET-coil pulse on the real image, and nothing in
 // any simulator speaks to relay mechanics.
 //
 // A dead injection cannot hide here: apply_injection()'s arms are not

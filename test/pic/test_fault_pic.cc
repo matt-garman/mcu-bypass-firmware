@@ -30,8 +30,9 @@
 // is a fault the firmware cannot silently clear -- it cannot know whether a
 // below-minimum pulse moved the latching relay. So the relay cases require the
 // escalation path to de-energize both coils before the spin AND the watchdog
-// recovery to drive a complete RESET-coil actuation back to BYPASS. Six output
-// checks instead of three: the LED latch, then coil faults arriving in both
+// recovery to command a minimum-qualified RESET-coil pulse while firmware
+// settles to BYPASS. Six output checks instead of three: the LED latch, then
+// coil faults arriving in both
 // settled states (BYPASS with an unintended SET, ENGAGED with an unintended
 // RESET, and their mirrors).
 #if defined(TQ2_L2_5V_RELAY)

@@ -1012,8 +1012,8 @@ historical records and are not retroactively compacted by this policy.
   green. Cost: two program words on the PIC12F675 relay image; the CD4053
   images are byte-identical.
 
-- **An unexpectedly energized relay coil is now a fault, and recovery
-  resynchronizes the relay.** Earlier `0.9.x` builds re-asserted both coils low
+- **An unexpectedly energized relay coil is now a fault, and recovery issues a
+  corrective RESET command.** Earlier `0.9.x` builds re-asserted both coils low
   at every serviced loop top and let the loop continue. That cleared the coil,
   but the stray pulse it permitted -- roughly one tick -- is only *below* the
   Panasonic TQ2-L2-5V 4 ms minimum for guaranteed actuation, which is not the
@@ -1023,13 +1023,12 @@ historical records and are not retroactively compacted by this policy.
 
   The loop-top re-assert is gone. An energized coil is now caught by each
   shell's existing output-state integrity check and escalated:
-  `hw_force_wdt_reset()` drives both coils to their de-energized idle *before*
-  it spins, so no fault holds a coil energized for a watchdog period, and the
-  recovery re-runs `init()`, whose complete 12 ms RESET-coil actuation restores
-  agreement between logical state, LED and physical relay in the known BYPASS
-  state. The price, accepted deliberately, is that a stray coil upset now costs
-  an audible interruption and a return to BYPASS even when the pulse would not
-  have moved the relay.
+  `hw_force_wdt_reset()` commands both coil-control outputs idle *before* it
+  spins, so no fault holds an output active for a watchdog period, and the
+  recovery re-runs `init()`, which sets logical state and LED to BYPASS and
+  commands a nominal 12 ms RESET-coil pulse with SET inactive. Physical return
+  to BYPASS additionally depends on the validated board, driver, supply and
+  relay satisfying the documented actuation assumptions.
 
   PIC10F322, PIC12F675, AVR classic and AVR-XT needed no new detection code.
   PIC10F320 cannot afford a general output-latch comparison in 256 words and
