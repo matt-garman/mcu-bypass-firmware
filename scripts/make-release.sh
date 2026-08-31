@@ -675,7 +675,6 @@ PIC10F320_BUILD_DIR=$(mkv PIC10F320_BUILD_DIR)     # build_pic10f320
 PIC10F320_TAG=$(mkv PIC10F320_TAG)                 # pic10f320
 PIC10F320_VARIANTS=$(mkv PIC10F320_VARIANTS_ALL)   # same three names as VARIANTS
 PIC10F320_XTAL=$(mkv PIC10F320_XTAL)
-PIC10F320_FLASH_WORDS=$(mkv PIC10F320_FLASH_WORDS) # 256
 PIC10F320_CC=$(mkv PIC10F320_CC)
 PIC10F320_DFP=$(mkv PIC10F320_DFP)
 PIC10F320_CC=$(tool_from_repo "$PIC10F320_CC")
@@ -694,7 +693,6 @@ PIC10F320_DFP=$(path_from_repo "$PIC10F320_DFP")
 PIC12F675_BUILD_DIR=$(mkv PIC12F675_BUILD_DIR)     # build_pic12f675
 PIC12F675_TAG=$(mkv PIC12F675_TAG)                 # pic12f675
 PIC12F675_XTAL=$(mkv PIC12F675_XTAL)               # 4000000UL
-PIC12F675_FLASH_WORDS=$(mkv PIC12F675_FLASH_WORDS) # 1024
 PIC12F675_GPSIM_PROC=$(mkv PIC12F675_GPSIM_PROC)   # p12f675
 PIC12F675_SIMCAL_DIR=$(mkv PIC12F675_SIMCAL_DIR)   # build_pic12f675/simcal
 PIC12F675_MATRIX_EVIDENCE=$(mkv PIC12F675_MATRIX_EVIDENCE)
@@ -1672,6 +1670,210 @@ matrix_line_count=$(grep -c 'PIC12F675_MATRIX_SHA256' \
 ok "both PIC12F675 aggregates passed against one retained matrix."
 validated_pic12f675_image_hashes=$(hash_pic_image_set "${PIC12F675_IMAGES[@]}")
 
+# --- the measured resource figures the release publishes ---------------------
+# The manifest used to derive its own flash column: five arms, each re-reading a
+# build log or re-running avr-size, and a sixth -- PIC10F322 -- deriving nothing
+# at all and publishing "n/a" for the three tightest images in the release (502
+# of 512 words, ten spare). Meanwhile test_resource_tables.py measured the same
+# artifacts against the reviewed ceilings and discarded every value it computed,
+# keeping six counts. Two producers of one fact, never compared, and the one that
+# was checked was not the one that was published.
+#
+# There is now one producer. Every figure below comes from the RESOURCE_* records
+# in the retained, hashed resource evidence, so a number on the release page is
+# the number the gate passed on -- and the ceiling and the free margin travel
+# with it, which is what makes 878 B readable as 95% of a reviewed 921 B budget
+# instead of as a comfortable fraction of the 1024 B the silicon holds.
+#
+# The rows are rendered HERE, beside the validation, because
+# scripts/verify-release-qualification.sh re-derives them from the same records
+# and compares: a renderer that drifted from the record it renders is the defect
+# this arrangement exists to prevent.
+declare -A RESOURCE_IMAGE_CELL=()
+RESOURCE_STATIC_ROWS=()
+RESOURCE_STACK_ROWS=()
+RESOURCE_BOUND_ROWS=()
+RESOURCE_DATA_ROWS=()
+RESOURCE_RETURN_ROWS=()
+
+# A decimal field, or a hard failure naming the record it came from.
+resource_number() {
+	case "$2" in
+		''|*[!0-9]*) die "$3: $1 is not a decimal number: '${2:-<missing>}'" ;;
+	esac
+}
+
+# Reads one resource-tables.log into the rows above, validating as it goes.
+# $2 names the log in failure messages.
+parse_resource_records() {
+	local log=$1 context=$2 line pair kind label part
+	local summaries=0
+	local -A field
+	local -A seen_image=()
+	local -A seen_part=()
+	RESOURCE_IMAGE_CELL=()
+	RESOURCE_STATIC_ROWS=()
+	RESOURCE_STACK_ROWS=()
+	RESOURCE_BOUND_ROWS=()
+	RESOURCE_DATA_ROWS=()
+	RESOURCE_RETURN_ROWS=()
+	[ -f "$log" ] && [ ! -L "$log" ] && [ -s "$log" ] \
+		|| die "$context: the resource evidence is missing or not a regular file"
+	while IFS= read -r line; do
+		kind=${line%% *}
+		# The terminal summary carries counts rather than a measurement, so it
+		# has no unit to resolve and no row to render. It is still counted: a
+		# log of figures with no terminal record is a truncated log.
+		case "$kind" in
+			RESOURCE_TABLES_RESULT) summaries=$((summaries + 1)); continue ;;
+		esac
+		field=()
+		for pair in $line; do
+			case "$pair" in
+				*=*) field[${pair%%=*}]=${pair#*=} ;;
+			esac
+		done
+		[ "${field[format]:-}" = 1 ] \
+			|| die "$context: a $kind record is not format=1"
+		case "${field[unit]:-}" in
+			bytes)  label=B ;;
+			words)  label=words ;;
+			levels) label=levels ;;
+			*) die "$context: a $kind record names no known unit: '${field[unit]:-}'" ;;
+		esac
+		case "$kind" in
+		RESOURCE_IMAGE)
+			resource_number used "${field[used]:-}" "$context"
+			resource_number ceiling "${field[ceiling]:-}" "$context"
+			resource_number capacity "${field[capacity]:-}" "$context"
+			resource_number free "${field[free]:-}" "$context"
+			[ -n "${field[image]:-}" ] \
+				|| die "$context: a RESOURCE_IMAGE record names no image"
+			[ -z "${seen_image[${field[image]}]:-}" ] \
+				|| die "$context: two RESOURCE_IMAGE records for ${field[image]}"
+			seen_image[${field[image]}]=1
+			# The arithmetic closes on itself, so a truncated or hand-edited
+			# staged log fails here without this script holding a copy of the
+			# figures it is checking.
+			[ "${field[free]}" -eq $(( field[ceiling] - field[used] )) ] \
+				|| die "$context: ${field[image]} reports a free margin that is not its ceiling less its use"
+			[ "${field[used]}" -gt 0 ] \
+				&& [ "${field[used]}" -le "${field[ceiling]}" ] \
+				&& [ "${field[ceiling]}" -le "${field[capacity]}" ] \
+				|| die "$context: ${field[image]} does not order use, ceiling and capacity"
+			RESOURCE_IMAGE_CELL[${field[image]}]=$(printf '%s / %s %s (%s free)' \
+				"${field[used]}" "${field[ceiling]}" "$label" "${field[free]}") ;;
+		RESOURCE_STATIC)
+			resource_number static "${field[static]:-}" "$context"
+			resource_number ceiling "${field[ceiling]:-}" "$context"
+			resource_number free "${field[free]:-}" "$context"
+			resource_number images "${field[images]:-}" "$context"
+			part=${field[part]:-}
+			[ -n "$part" ] || die "$context: a RESOURCE_STATIC record names no part"
+			[ -z "${seen_part[static-$part]:-}" ] \
+				|| die "$context: two RESOURCE_STATIC records for $part"
+			seen_part[static-$part]=1
+			[ "${field[free]}" -eq $(( field[ceiling] - field[static] )) ] \
+				|| die "$context: the $part static record's free margin does not close"
+			[ "${field[static]}" -gt 0 ] && [ "${field[images]}" -gt 0 ] \
+				|| die "$context: the $part static record measures nothing"
+			RESOURCE_STATIC_ROWS+=("$(printf '| `%s` | %s %s | %s %s | %s %s | %s |' \
+				"$part" "${field[static]}" "$label" "${field[ceiling]}" "$label" \
+				"${field[free]}" "$label" "${field[images]}")") ;;
+		RESOURCE_STACK)
+			resource_number used "${field[used]:-}" "$context"
+			resource_number free "${field[free]:-}" "$context"
+			resource_number static "${field[static]:-}" "$context"
+			resource_number sram "${field[sram]:-}" "$context"
+			resource_number floor "${field[floor]:-}" "$context"
+			resource_number observations "${field[observations]:-}" "$context"
+			part=${field[part]:-}
+			[ -n "$part" ] || die "$context: a RESOURCE_STACK record names no part"
+			[ -z "${seen_part[stack-$part]:-}" ] \
+				|| die "$context: two RESOURCE_STACK records for $part"
+			seen_part[stack-$part]=1
+			[ $(( field[static] + field[used] + field[free] )) -eq "${field[sram]}" ] \
+				|| die "$context: the $part stack record does not account for the whole device SRAM"
+			[ "${field[free]}" -ge "${field[floor]}" ] \
+				|| die "$context: the $part stack record is below the canary gate's own floor"
+			[ "${field[observations]}" -gt 0 ] \
+				|| die "$context: the $part stack record summarizes no observation"
+			RESOURCE_STACK_ROWS+=("$(printf '| `%s` | %s | %s %s | %s %s | %s %s | %s %s | %s %s | %s |' \
+				"$part" "${field[deepest_sp]:-}" "${field[used]}" "$label" \
+				"${field[free]}" "$label" "${field[static]}" "$label" \
+				"${field[sram]}" "$label" "${field[floor]}" "$label" \
+				"${field[observations]}")") ;;
+		RESOURCE_STACK_BOUND)
+			resource_number reports "${field[reports]:-}" "$context"
+			resource_number ceiling "${field[ceiling]:-}" "$context"
+			part=${field[part]:-}
+			[ -n "$part" ] || die "$context: a RESOURCE_STACK_BOUND record names no part"
+			[ "${field[reports]}" -gt 0 ] \
+				|| die "$context: the $part frame-bound record cites no report"
+			# The record carries no used= or peak= and this row invents none:
+			# -fstack-usage bounds each frame separately and says nothing about
+			# the deepest path through them.
+			RESOURCE_BOUND_ROWS+=("$(printf '| `%s` | %s | %s | every frame <= %s %s |' \
+				"$part" "${field[method]:-}" "${field[reports]}" \
+				"${field[ceiling]}" "$label")") ;;
+		RESOURCE_DATA)
+			resource_number used "${field[used]:-}" "$context"
+			resource_number ceiling "${field[ceiling]:-}" "$context"
+			resource_number capacity "${field[capacity]:-}" "$context"
+			resource_number free "${field[free]:-}" "$context"
+			part=${field[part]:-}; [ -n "${field[variant]:-}" ] \
+				|| die "$context: a RESOURCE_DATA record names no variant"
+			[ "${field[free]}" -eq $(( field[ceiling] - field[used] )) ] \
+				|| die "$context: the $part ${field[variant]} data record's free margin does not close"
+			[ "${field[used]}" -gt 0 ] \
+				&& [ "${field[used]}" -le "${field[ceiling]}" ] \
+				&& [ "${field[ceiling]}" -le "${field[capacity]}" ] \
+				|| die "$context: the $part ${field[variant]} data record does not order use, ceiling and capacity"
+			RESOURCE_DATA_ROWS+=("$(printf '| `%s` | %s | %s %s | %s %s | %s %s | %s %s |' \
+				"$part" "${field[variant]}" "${field[used]}" "$label" \
+				"${field[ceiling]}" "$label" "${field[capacity]}" "$label" \
+				"${field[free]}" "$label")") ;;
+		RESOURCE_RETURN_STACK)
+			resource_number peak "${field[peak]:-}" "$context"
+			resource_number reserve "${field[reserve]:-}" "$context"
+			resource_number spare "${field[spare]:-}" "$context"
+			resource_number depth "${field[depth]:-}" "$context"
+			part=${field[part]:-}; [ -n "${field[variant]:-}" ] \
+				|| die "$context: a RESOURCE_RETURN_STACK record names no variant"
+			[ $(( field[peak] + field[reserve] + field[spare] )) -eq "${field[depth]}" ] \
+				|| die "$context: the $part ${field[variant]} return-stack record does not account for the whole hardware stack"
+			[ "${field[peak]}" -gt 0 ] \
+				|| die "$context: the $part ${field[variant]} return-stack record measures no call depth"
+			RESOURCE_RETURN_ROWS+=("$(printf '| `%s` | %s | %s | %s | %s | %s |' \
+				"$part" "${field[variant]}" "${field[peak]}" "${field[reserve]}" \
+				"${field[spare]}" "${field[depth]}")") ;;
+		*) die "$context: unknown resource record '$kind'" ;;
+		esac
+	done < <(grep '^RESOURCE_[A-Z_]* ' "$log" || true)
+	[ "$summaries" -eq 1 ] \
+		|| die "$context: the resource evidence carries $summaries terminal result records, expected 1"
+	# Coverage in both directions, like the evidence role map: a record for an
+	# image that is not shipped is as wrong as a shipped image with no record,
+	# and "21" is not the authority for either -- RELEASE_IMAGES is.
+	local image
+	for image in $RELEASE_IMAGES; do
+		[ -n "${RESOURCE_IMAGE_CELL[$image]:-}" ] \
+			|| die "$context: no measured resource record for the release image $image"
+	done
+	for image in "${!RESOURCE_IMAGE_CELL[@]}"; do
+		case " $RELEASE_IMAGES " in
+			*" $image "*) ;;
+			*) die "$context: a resource record measures $image, which this release does not ship" ;;
+		esac
+	done
+	[ "${#RESOURCE_STATIC_ROWS[@]}" -gt 0 ] \
+		&& [ "${#RESOURCE_STACK_ROWS[@]}" -gt 0 ] \
+		&& [ "${#RESOURCE_BOUND_ROWS[@]}" -eq 1 ] \
+		&& [ "${#RESOURCE_DATA_ROWS[@]}" -gt 0 ] \
+		&& [ "${#RESOURCE_RETURN_ROWS[@]}" -gt 0 ] \
+		|| die "$context: the resource evidence is missing a whole class of measurement"
+}
+
 # Strict resource evidence, measured HERE for the same reason the rename/change
 # evidence above is: this gate reads only the images section 1 built and the
 # logs section 2 just wrote -- nothing the soak produces, and nothing the soak
@@ -1691,6 +1893,12 @@ python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT" \
 	|| { cat "$WORK/resource-tables-presoak.log" >&2; \
 		die "resource evidence FAILED before the soak. No soak started."; }
 ok "resource evidence covers all images and this run's measurements (rechecked after the soak)."
+# Parsed here as well as after the soak, for the reason the gate itself runs
+# twice: a record shape the manifest cannot consume is a defect this run should
+# report in seconds, not one that surfaces when a 24-hour soak has finished and
+# the release page is being written.
+parse_resource_records "$WORK/resource-tables-presoak.log" "pre-soak resource evidence"
+ok "resource records parse, close on their own arithmetic, and cover every release image."
 
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
@@ -2179,6 +2387,10 @@ staged_resource_tables_sha256=$(sha256sum -- \
 staged_resource_tables_sha256=${staged_resource_tables_sha256%% *}
 [ "$staged_resource_tables_sha256" = "$resource_tables_sha256" ] \
 	|| die "staged resource evidence differs from final-candidate measurement"
+# Re-read from the STAGED copy, which is the file the release publishes, hashes
+# in SHA256SUMS and indexes in evidence/INDEX -- so the verifier reading the
+# published tree and the manifest written here consume the same bytes.
+parse_resource_records "$OUTPUT_DIR/evidence/resource-tables.log" "staged resource evidence"
 
 # --- the retained logs that nothing was checking -----------------------------
 # Thirteen of the thirty-six retained files -- seven build logs (soak-build.log
@@ -2323,11 +2535,17 @@ ok "evidence index lists $indexed_rows retained files by role and terminal recor
 img_row() {
 	local path="$1" base; base=$(basename "$path")
 	local sha; sha=$("$AWK" -v f="$base" '$2==f{print $1}' "$OUTPUT_DIR/SHA256SUMS")
-	# Flash usage is read from the build ELF (the HEX does not carry section
-	# sizes avr-size can total); the ELF is still present in $AVR_BUILD_DIR when
-	# the manifest is generated. PIC usage stays n/a (XC8 reports words, not bytes).
-	local elf="$AVR_BUILD_DIR/${base%.hex}.elf"
-	local mcu clk fuses flashcmd prog amcu used="n/a"
+	# Flash usage is NOT derived here. It comes from the RESOURCE_IMAGE record
+	# test_resource_tables.py wrote for this exact image, already checked against
+	# the reviewed ceiling and already carrying that ceiling and the free margin.
+	# Each arm below used to re-derive its own figure from a build log or from
+	# avr-size, and the PIC10F322 arm derived none, so the release published
+	# "n/a" for its three tightest images while the gate that measured them at
+	# 476-502 of 512 words threw the numbers away.
+	local mcu clk fuses flashcmd prog amcu used
+	used=${RESOURCE_IMAGE_CELL[$base]:-}
+	[ -n "$used" ] \
+		|| die "no measured resource record for the release image $base"
 	# Every arm below matches the MANDATORY MCU field of the canonical basename
 	# (<prefix>-<mcu>-<stage>), so the arms are mutually exclusive and order
 	# carries no meaning. That is a change worth noticing: this used to be an
@@ -2339,20 +2557,12 @@ img_row() {
 	case "$base" in
 		${FW_BASE}-${PIC10F320_TAG}-*.hex)
 			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
-			# XC8 reports program space in WORDS, not bytes; the figure comes from
-			# this run's own build log, so it can never be a stale hand-copied number.
-			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC10F320_FLASH_WORDS"' words"; exit } }' \
-				"$EVID/build-pic10f320.log" 2>/dev/null)
 			flashcmd="pk2cmd -PPIC10F320 -F$base -M -Y -R" ;;
 		${FW_BASE}-${PIC10F322_TAG}-*.hex)
 			mcu="PIC10F322"; clk="${PIC10F322_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			flashcmd="pk2cmd -PPIC10F322 -F$base -M -Y -R   (or: make pic10f322-program VARIANT=<v>)" ;;
 		${FW_BASE}-${PIC12F675_TAG}-*.hex)
 			mcu="PIC12F675"; clk="${PIC12F675_CLK_MHZ} MHz (INTOSC, factory OSCCAL)"; fuses="CONFIG word embedded in HEX"
-			# XC8 reports program space in WORDS; the figure comes from this run's
-			# own build log, so it can never be a stale hand-copied number.
-			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "words") { print $(i-1) " / '"$PIC12F675_FLASH_WORDS"' words"; exit } }' \
-				"$EVID/build-pic12f675.log" 2>/dev/null)
 			# A writer may erase factory trim even when the image leaves it untouched.
 			# Publish no per-image shortcut: the generated procedure below performs the
 			# mandatory baseline, immediate comparison, write and retained readback.
@@ -2365,11 +2575,6 @@ img_row() {
 			for f in $XT_FUSE_NAMES; do
 				fuses="${fuses}${fuses:+ }$f=${XT_FUSE[$f]}"
 			done
-			# From this run's own build log, like the PIC10F320 arm: the figure is
-			# never a stale hand-copied number, and avr-size cannot total it here
-			# (binutils 2.26 reports "Device: Unknown" for avrxmega3 parts).
-			used=$("$AWK" -v f="$base" '$0 ~ ("/" f " :") { for (i = 1; i <= NF; i++) if ($i == "B") { print $(i-1) " B"; exit } }' \
-				"$EVID/build-avr-xt.log" 2>/dev/null)
 			flashcmd="avrdude -c $XT_PROGRAMMER -P <port> -p $XT_AVRDUDE_PART"
 			for f in $XT_FUSE_NAMES; do
 				flashcmd="$flashcmd -U $f:w:${XT_FUSE[$f]}:m"
@@ -2389,15 +2594,13 @@ img_row() {
 			[ -n "$prog" ] \
 				|| die "no avrdude part name for $amcu: TINYX5 and this manifest arm disagree"
 			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
-			used=$("$AVR_SIZE" --mcu="$amcu" -C "$elf" 2>/dev/null | "$AWK" '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;
 		${FW_BASE}-${ATTINY13A_MCU}-*.hex)
 			mcu="ATtiny13a"; clk="1.2 MHz"; fuses="lfuse=$LFUSE hfuse=$HFUSE"
-			used=$("$AVR_SIZE" --mcu=attiny13a -C "$elf" 2>/dev/null | "$AWK" '/^Program:/{print $2" B"; exit}')
 			flashcmd="avrdude -c <prog> -p $AVRDUDE_PART -U lfuse:w:$LFUSE:m -U hfuse:w:$HFUSE:m -U flash:w:$base:i" ;;
 		*) die "release image '$base' names no MCU this manifest generator knows; refusing to describe it" ;;
 	esac
-	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "${used:-n/a}" "$fuses" "$sha"
+	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "$used" "$fuses" "$sha"
 	[ -z "$flashcmd" ] || printf '%s\t%s\n' "$base" "$flashcmd" >> "$WORK/flashcmds.txt"
 }
 
@@ -2494,12 +2697,75 @@ REL_BANNER=""
 	printf '\n'
 
 	printf '## Images\n\n'
-	printf '| image | MCU | clock | flash used | fuses / config | sha256 |\n'
+	printf '| image | MCU | clock | flash used / reviewed ceiling | fuses / config | sha256 |\n'
 	printf '|---|---|---|---|---|---|\n'
 	for img in "${IMAGES[@]}"; do img_row "$OUTPUT_DIR/$(basename "$img")"; done
 	printf '\n> The ATtiny13a images are not soak-tested directly (simavr cannot model\n'
 	printf '> its watchdog reset); they are covered by the full test-long suite and by\n'
 	printf '> the soak of the core-identical tinyx5 family. See DESIGN_DOCUMENTATION.adoc.\n\n'
+
+	# Everything below was already measured and already checked against a
+	# reviewed ceiling on every release. None of it was published: the run
+	# reduced it to six counts, and the Classic AVR stack figures disappeared
+	# entirely, because they are read from test-long.log and staging retains
+	# only that log's summary. A downloaded release could not state how much
+	# RAM the firmware uses on any part.
+	printf '## Resources\n\n'
+	printf 'Every figure below is measured during the release run by\n'
+	printf '`test/test_resource_tables.py`, checked there against the reviewed ceiling\n'
+	printf 'that bounds it, and retained as one machine record per figure in\n'
+	printf '`evidence/resource-tables.log` -- which `SHA256SUMS` signs and\n'
+	printf '`evidence/INDEX` records. The flash column in the Images table above is\n'
+	printf 'rendered from those same records, so no number on this page is derived\n'
+	printf 'twice.\n\n'
+
+	printf '### Static RAM (AVR)\n\n'
+	printf 'Statically allocated data-space bytes, summed from each ELF and confirmed\n'
+	printf 'against the SRAM map the simulated canary gate derives independently. One\n'
+	printf 'row per part: the variants of a part are required to agree before a single\n'
+	printf 'figure is published for it.\n\n'
+	printf '| part | static data | reviewed ceiling | free | images |\n'
+	printf '|---|---|---|---|---|\n'
+	printf '%s\n' "${RESOURCE_STATIC_ROWS[@]}"
+	printf '\n'
+
+	printf '### Stack (Classic AVR)\n\n'
+	printf 'The deepest stack the canary gate observed on each part, across its three\n'
+	printf 'variant runs. The canary record does not name the variant it came from, so\n'
+	printf 'the deepest of the observations is published rather than an attribution the\n'
+	printf 'evidence does not carry. Static, stack and free account for the whole\n'
+	printf 'device SRAM in every row.\n\n'
+	printf '| part | deepest SP | stack used | free | static | device SRAM | canary floor | observations |\n'
+	printf '|---|---|---|---|---|---|---|---|\n'
+	printf '%s\n' "${RESOURCE_STACK_ROWS[@]}"
+	printf '\n'
+
+	printf '### Stack bound (AVR-XT)\n\n'
+	printf 'This one is a compiler bound, not a measurement of a run: `-fstack-usage`\n'
+	printf 'bounds each frame on its own and says nothing about the deepest path\n'
+	printf 'through them. It is reported as the ceiling every frame was checked\n'
+	printf 'against, and no high-water figure is claimed for this part.\n\n'
+	printf '| part | method | reports | bound |\n'
+	printf '|---|---|---|---|\n'
+	printf '%s\n' "${RESOURCE_BOUND_ROWS[@]}"
+	printf '\n'
+
+	printf '### Data space (PIC12F675)\n\n'
+	printf 'Reported by XC8 for the qualified build and again for the reproducibility\n'
+	printf 'rebuild; the two must agree before one figure is published per variant.\n\n'
+	printf '| part | variant | used | reviewed ceiling | device | free |\n'
+	printf '|---|---|---|---|---|---|\n'
+	printf '%s\n' "${RESOURCE_DATA_ROWS[@]}"
+	printf '\n'
+
+	printf '### Return stack (PIC)\n\n'
+	printf 'Peak call depth on the hardware return stack, with the levels held in\n'
+	printf 'reserve and the levels left spare. Peak, reserve and spare account for the\n'
+	printf 'whole hardware stack in every row.\n\n'
+	printf '| part | variant | peak | reserve | spare | hardware levels |\n'
+	printf '|---|---|---|---|---|---|\n'
+	printf '%s\n' "${RESOURCE_RETURN_ROWS[@]}"
+	printf '\n'
 
 	release_render_flashing "$WORK/flashcmds.txt" "$VERSION"
 

@@ -548,8 +548,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 94 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 94"
+[ "$query_count" -eq 92 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 92"
 assert_no_release_scratch
 checks=$((checks + 1))
 

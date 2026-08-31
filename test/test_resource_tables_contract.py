@@ -56,6 +56,20 @@ FLASH = {
     "pic10f320": (150, 170, 160),
     "pic12f675": (600, 620, 610),
 }
+# What each part is actually judged against under the fixture policy above,
+# derived here independently of the checker: the ATtiny13a's truncated
+# percentage budget, the linker's device size for the tinyx5 parts the
+# percentage gate does not bind, and the stated ceiling for everything else.
+FLASH_CEILINGS = {
+    "attiny13a": (POLICY["ATTINY13A_FLASH_BYTES"]
+                  * POLICY["ATTINY13A_FLASH_BUDGET"] // 100),
+    "attiny45": 4096,
+    "attiny85": 8192,
+    "attiny202": POLICY["XT_FLASH_BYTES"],
+    "pic10f322": POLICY["PIC10F322_FLASH_WORDS"],
+    "pic10f320": POLICY["PIC10F320_FLASH_WORDS"],
+    "pic12f675": POLICY["PIC12F675_FLASH_WORDS"],
+}
 BUILD_DIRS = {
     "attiny13a": ("build_avr_classic", "elf"),
     "attiny45": ("build_avr_classic", "elf"),
@@ -213,6 +227,25 @@ def strict_arguments(evidence):
             "--source-commit", SOURCE_COMMIT)
 
 
+def emitted_records(stdout, kind):
+    """Every emitted record of one kind, parsed into its key=value fields."""
+    found = []
+    for line in stdout.splitlines():
+        if line.startswith(kind + " "):
+            found.append(dict(field.split("=", 1)
+                              for field in line.split()[1:]))
+    return found
+
+
+# The record counts a complete candidate must emit: one per canonical image,
+# one per AVR part's agreed static allocation, one per Classic part's deepest
+# observation, the AVR-XT frame bound, one per PIC12F675 variant's Data space,
+# and one per PIC return-stack witness.
+RECORD_COUNTS = (("RESOURCE_IMAGE", 21), ("RESOURCE_STATIC", 4),
+                 ("RESOURCE_STACK", 3), ("RESOURCE_STACK_BOUND", 1),
+                 ("RESOURCE_DATA", 3), ("RESOURCE_RETURN_STACK", 9))
+
+
 def main():
     temp_parent = Path(os.environ.get("TMPDIR", str(Path.home())))
     with tempfile.TemporaryDirectory(prefix="resource-contract-",
@@ -234,9 +267,56 @@ def main():
         result = run(fixture, *strict_arguments(evidence))
         machine = ("RESOURCE_TABLES_RESULT format=1 status=pass "
                    "source_commit=%s images=21 avr_static=12 classic_stack=9 "
-                   "pic_data=6 pic_stack=9" % SOURCE_COMMIT)
+                   "pic_data=6 pic_stack=9 records=41" % SOURCE_COMMIT)
         check(result.returncode == 0 and machine in result.stdout,
               "strict mode rejected a complete candidate or omitted its machine record")
+
+        # The published figures, not only their count.  Each record has to carry
+        # the measurement this fixture built into the image, so a checker that
+        # emitted plausible-looking numbers from anywhere else fails here.
+        for kind, expected in RECORD_COUNTS:
+            found = emitted_records(result.stdout, kind)
+            check(len(found) == expected,
+                  "a complete candidate emitted %d %s records, expected %d"
+                  % (len(found), kind, expected))
+        ceilings = FLASH_CEILINGS
+        for row in emitted_records(result.stdout, "RESOURCE_IMAGE"):
+            part, variant = row["part"], row["image"].split("-")[2][:-4]
+            used = FLASH[part][VARIANTS.index(variant)]
+            check(int(row["used"]) == used,
+                  "the %s record reports %s %s; the fixture image is %d"
+                  % (row["image"], row["used"], row["unit"], used))
+            check(int(row["ceiling"]) == ceilings[part],
+                  "the %s record reports a ceiling of %s; the fixture policy "
+                  "sets %d" % (row["image"], row["ceiling"], ceilings[part]))
+            check(int(row["free"]) == int(row["ceiling"]) - int(row["used"]),
+                  "the %s record's free figure does not close on its own "
+                  "ceiling and use" % row["image"])
+            check(0 < int(row["used"]) <= int(row["ceiling"]) <= int(row["capacity"]),
+                  "the %s record does not order use, ceiling and capacity"
+                  % row["image"])
+        for row in emitted_records(result.stdout, "RESOURCE_STATIC"):
+            check(int(row["static"]) == STATIC_BYTES and int(row["images"]) == 3,
+                  "the %s static record reports %s B from %s images; the "
+                  "fixture allocates %d B in each of 3"
+                  % (row["part"], row["static"], row["images"], STATIC_BYTES))
+        for row in emitted_records(result.stdout, "RESOURCE_STACK"):
+            check(int(row["static"]) + int(row["used"]) + int(row["free"])
+                  == int(row["sram"]),
+                  "the %s stack record does not account for the whole device "
+                  "SRAM" % row["part"])
+            check(int(row["free"]) == min(CLASSIC_MARGINS[row["part"]]),
+                  "the %s stack record publishes %s B free; the deepest of its "
+                  "observations left %d"
+                  % (row["part"], row["free"], min(CLASSIC_MARGINS[row["part"]])))
+        # The AVR-XT figure is a compiler bound, not a run measurement, so the
+        # record must state the ceiling it checked and claim no high-water use.
+        bound = emitted_records(result.stdout, "RESOURCE_STACK_BOUND")[0]
+        check(bound["method"] == "gcc-stack-usage-per-frame"
+              and int(bound["ceiling"]) == POLICY["XT_STACK_MAX_FRAME"]
+              and "used" not in bound and "peak" not in bound,
+              "the AVR-XT frame-bound record does not name its method, or "
+              "reports a high-water figure the evidence does not contain")
 
         victim = image_path(fixture, "pic10f320", "cd4053_simple")
         victim.unlink()
@@ -320,6 +400,49 @@ def main():
               % POLICY["PIC10F320_RETURN_STACK_LIMIT"] in result.stderr,
               "an internally inconsistent return-stack record was accepted")
         pic_log.write_text(text, encoding="utf-8")
+
+        # One published static-RAM figure per part is only honest if the part's
+        # variants agree.  Give one variant a different allocation and the
+        # aggregate must fail rather than pick a winner -- and a failing run
+        # must publish nothing, because these records are evidence of a pass.
+        write_elf(image_path(fixture, "attiny45", "cd4053_simple"),
+                  FLASH["attiny45"][0], STATIC_BYTES + 1)
+        result = run(fixture, *strict_arguments(evidence))
+        check(result.returncode != 0
+              and "do not agree on static data" in result.stderr,
+              "one part's variants were allowed to disagree on static data")
+        check(not emitted_records(result.stdout, "RESOURCE_IMAGE"),
+              "a failing candidate still published resource records")
+
+        # Both AVR measurements describe the same statics: the ELF walker sums
+        # allocated data-space sections, the canary gate reads the simulated
+        # device's symbol table.  Move all three variants together and they
+        # agree with each other while disagreeing with the simulator.
+        for variant, size in zip(VARIANTS, FLASH["attiny45"]):
+            write_elf(image_path(fixture, "attiny45", variant), size,
+                      STATIC_BYTES + 1)
+        result = run(fixture, *strict_arguments(evidence))
+        check(result.returncode != 0
+              and "but its canary gate measured" in result.stderr,
+              "the ELF and canary static-data oracles were allowed to disagree")
+        for variant, size in zip(VARIANTS, FLASH["attiny45"]):
+            write_elf(image_path(fixture, "attiny45", variant), size)
+
+        # The qualified build and the reproducibility rebuild each report the
+        # PIC12F675's Data space.  One figure per variant is published, so the
+        # two builds must have reserved the same bytes; checking each against
+        # the limit alone would accept builds that disagreed with each other.
+        data_log = evidence / "pic12f675-qualification.log"
+        text = data_log.read_text(encoding="utf-8")
+        edited = text.replace("variant=cd4053_simple used=30",
+                              "variant=cd4053_simple used=31", 1)
+        check(edited != text, "PIC12F675 Data-space fixture anchor was not found")
+        data_log.write_text(edited, encoding="utf-8")
+        result = run(fixture, *strict_arguments(evidence))
+        check(result.returncode != 0
+              and "builds disagree on Data space" in result.stderr,
+              "two PIC12F675 builds were allowed to disagree on Data space")
+        data_log.write_text(text, encoding="utf-8")
 
         result = run(fixture, *strict_arguments(evidence))
         check(result.returncode == 0 and machine in result.stdout,

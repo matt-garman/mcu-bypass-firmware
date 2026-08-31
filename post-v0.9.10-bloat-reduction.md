@@ -587,29 +587,115 @@ needed updating.
 
 ## BR-RES-03 - Publish release resource data as a generated release view
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-RES-01, BR-REL-01
 
+**What the measurement found.** The item assumed the release had no resource
+view to generate. It had two, and neither was the one that was checked.
+
+`test/test_resource_tables.py --require-all-images` already measured everything
+this item asks for -- 21 image sizes, 12 AVR static-data figures, 9 Classic AVR
+stack high-waters, the AVR-XT frame bound, PIC12F675 Data space, 9 PIC
+return-stack witnesses -- validated each against the reviewed ceiling that
+bounds it, and then **discarded every value**, retaining six counts:
+
+```
+RESOURCE_TABLES_RESULT format=1 status=pass source_commit=...
+  images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9
+```
+
+Meanwhile `img_row` in `scripts/make-release.sh` derived its own `flash used`
+column, arm by arm, from build logs and `avr-size`. Two producers of one fact,
+never compared -- and the one that was published was not the one that was
+checked. The published column in `v0.9.11`, ordered by how close each image sits
+to its ceiling:
+
+| image | used / ceiling | % of ceiling | published as |
+|---|---|---|---|
+| `bypass-pic10f322-cd4053_with_mute.hex` | 502 / 512 w | 98.0% | `n/a` |
+| `bypass-pic10f322-tq2_l2_5v_relay.hex` | 493 / 512 w | 96.3% | `n/a` |
+| `bypass-attiny13a-cd4053_with_mute.hex` | 878 / 921 B | 95.3% | `878 B` |
+| `bypass-pic10f320-tq2_l2_5v_relay.hex` | 242 / 256 w | 94.5% | `242 / 256 words` |
+| `bypass-pic10f322-cd4053_simple.hex` | 476 / 512 w | 93.0% | `n/a` |
+
+**Every image that is actually near its limit was one whose limit the release
+did not publish.** The PIC10F322 arm derived nothing and printed `n/a` (its
+comment, "XC8 reports words, not bytes", was stale -- two other PIC arms print
+words). The ATtiny13a ceiling is `ATTINY13A_FLASH_BUDGET`-derived at 921 B, not
+the 1024 B of silicon, so `878 B` alone read as a comfortable 86% of the device
+rather than 95% of the reviewed budget, 43 B from the gate that stops the build.
+
+Three formats and one blank across seven parts. Static RAM was measured on all
+twelve AVR ELFs and published nowhere. The nine Classic AVR stack observations
+were worse than unpublished: they are read from `test-long.log`, which staging
+does not retain, so they existed only inside a run.
+
 **Work:**
 
-- [ ] Define the exact release resource fields and units.
-- [ ] Include each canonical image exactly once.
-- [ ] Include hard ceiling, measured usage, free margin, tool identity, and
-  measurement method where appropriate.
-- [ ] Include static data, stack, and PIC return-stack results only when the
+- [x] Define the exact release resource fields and units. One `RESOURCE_*`
+  record per published figure, each carrying its own `unit=` -- `bytes`,
+  `words` or `levels` -- because reporting a PIC figure in an AVR's unit is the
+  mistake the part table exists to prevent.
+- [x] Include each canonical image exactly once. Coverage is checked in both
+  directions against the Makefile's `RELEASE_IMAGES`, by the producer and again
+  by the verifier; `21` is not the authority for either.
+- [x] Include hard ceiling, measured usage, free margin, tool identity, and
+  measurement method where appropriate. Every record carries `ceiling=`,
+  `capacity=`, `free=` and `method=`; the ceiling and the margin now travel with
+  the figure on the release page.
+- [x] Include static data, stack, and PIC return-stack results only when the
   release evidence actually measures that quantity.
-- [ ] Do not imply that per-frame GCC stack data is a whole-path high-water
-  measurement.
-- [ ] Generate the human table from canonical release data.
-- [ ] Make the release publication page expose the generated table.
+- [x] Do not imply that per-frame GCC stack data is a whole-path high-water
+  measurement. The AVR-XT record is `RESOURCE_STACK_BOUND` with
+  `method=gcc-stack-usage-per-frame`, states only the ceiling every frame was
+  checked against, and is **rejected by the verifier if it carries `used=` or
+  `peak=` at all**. The log states "all frames <= 32 B", which is the limit and
+  not a measured maximum, so no maximum is published.
+- [x] Generate the human table from canonical release data. `img_row` no longer
+  derives flash usage; five per-arm derivations were deleted.
+- [x] Make the release publication page expose the generated table.
+  `MANIFEST.md` gains a `## Resources` section with five tables.
 
 **Acceptance:**
 
-- Released users can inspect exact resource use without checking out source.
-- The release table is source-commit- and toolchain-bound.
+- Released users can inspect exact resource use without checking out source --
+  including the RAM and stack figures no release has ever carried.
+- The release table is source-commit- and toolchain-bound: the records are
+  written with the run's `source_commit`, and `evidence/resource-tables.log` is
+  hashed into `QUALIFICATION`, listed in `SHA256SUMS` and recorded in
+  `evidence/INDEX`.
 - There is one machine authority for every displayed value.
 
+**Three agreements this added, none of which existed before.** Publishing one
+figure where two were measured requires proving the two agree, so each
+aggregation is now a check:
+
+- The two AVR static-data oracles -- allocated ELF sections, and the SRAM map
+  the simulated canary gate derives from the device's own symbols -- must
+  report the same statics. Nothing had ever compared them; the release could
+  have published either.
+- A part's three variants must agree before one static figure stands for the
+  part.
+- The PIC12F675 qualified build and its reproducibility rebuild must agree on
+  Data space. Each was checked against the limit separately, so two builds that
+  disagreed with each other both passed.
+
+**What this does not do.**
+
+- It does not attribute a Classic AVR stack observation to a variant. The canary
+  line names only the part, so the deepest of the three observations is
+  published for the part rather than an attribution the evidence does not carry.
+  Adding the variant to that line is a change to `test/avr/test_sim.c` and was
+  left alone.
+- It does not measure PIC10F322 or PIC10F320 data space. Neither is measured by
+  any gate today, so neither is published; only the PIC12F675 Data-space budget
+  exists as evidence.
+- It does not retain `test-long.log`. The nine Classic stack figures now survive
+  as records in the resource evidence, which is the narrow fix; whether the full
+  transcript should be retained is BR-REL-03's settled question, not this one's.
+
+---
 ---
 
 # C. PIC documentation consolidation
@@ -2825,7 +2911,7 @@ remaining candidate fields are left to whoever has a consumer that needs them.
 
 ## BR-REL-02 - Index retained evidence and bind the logs nothing was checking
 
-**Status:** DONE `<commit>` (archive half DECLINED, see below)
+**Status:** DONE `f401507` (archive half DECLINED, see below)
 
 **Depends on:** BR-REL-01
 
@@ -3683,7 +3769,7 @@ dependencies and acceptance criteria.
 | BR-AUTH-02 | Inventory references/contracts | DONE `bc267a8` |
 | BR-RES-01 | Remove mutable resource tables | DONE `e7c4f68` |
 | BR-RES-02 | Retire prose synchronization tests | DONE `e7c4f68` |
-| BR-RES-03 | Publish generated release resource view | TODO |
+| BR-RES-03 | Publish generated release resource view | DONE `<commit>` |
 | BR-PIC-01 | Create coherent PIC design section | DONE `b1b98c3` |
 | BR-PIC-02 | Merge PIC10F322 phase notes | DONE `3a3b661` |
 | BR-PIC-03 | Consolidate PIC10F320 documents | DONE `b8b4af1` |
@@ -3715,7 +3801,7 @@ dependencies and acceptance criteria.
 | BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
 | BR-REL-01 | Define canonical signed release index | DONE `bb5ba13` + `b5704f7` |
-| BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `<commit>` |
+| BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `f401507` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |

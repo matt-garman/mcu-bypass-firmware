@@ -62,9 +62,21 @@ makes no final-candidate claim when it verified nothing.
    against the reviewed limit it reports against -- a truncated, reordered or
    hand-edited log fails on its own arithmetic -- rather than against a
    remembered figure, which would put this file back in the business of
-   restating today's numbers.  On success it emits one machine record bound to
-   the exact source commit.  The release retains and hashes that record; this
-   mode may never pass at 0/21.
+   restating today's numbers.  On success it emits one machine record per
+   published figure, plus a terminal record counting them, all bound to the
+   exact source commit.  The release retains and hashes that log and renders its
+   published resource tables from those records, so the figure a reader sees is
+   the figure this gate passed on rather than one derived a second time by
+   whoever displays it.  This mode may never pass at 0/21.
+
+4. AGREEMENT, where one published figure summarizes more than one measurement.
+   Publishing a single number for a part means proving the measurements behind
+   it agree, so each aggregation is a check: the two AVR static-data oracles
+   (allocated ELF sections here, and the SRAM map the canary gate derives from
+   the simulated device's symbols) must report the same statics, a part's three
+   variants must agree before one figure stands for the part, and the PIC12F675
+   qualified build and reproducibility rebuild must agree on Data space.  Each
+   was previously checked only against its limit, never against the other.
 """
 
 import argparse
@@ -244,14 +256,27 @@ def check_policy(policy, ceilings):
 
 
 def check_built_images(policy, ceilings, require_all=False):
-    measured = 0
-    avr_static_measured = 0
+    """Measure every canonical image, and return what was measured.
+
+    The measurements are returned rather than only counted.  They are the
+    figures the release publishes, and a value that is measured here, checked
+    against its ceiling and then discarded has to be derived a second time by
+    whoever displays it -- which is how the manifest came to carry a flash
+    column this gate never saw.
+    """
+    rows = []
+    static_rows = []
     for part in sorted(PARTS):
         variable, default, extension = BUILD_DIRS[part]
         directory = ROOT / os.environ.get(variable) if os.environ.get(variable) \
             else ROOT / default
+        capacity, unit = PARTS[part]
         for variant in VARIANTS:
             image = directory / ("bypass-%s-%s.%s" % (part, variant, extension))
+            # An ELF is a build artifact and never ships, so every record names
+            # the published HEX whatever was measured; a record naming an ELF
+            # could not be matched to the release row it has to bind.
+            published = "bypass-%s-%s.hex" % (part, variant)
             if not image.exists():
                 if require_all:
                     check(False, "required final-candidate image is missing: %s" % image)
@@ -262,7 +287,6 @@ def check_built_images(policy, ceilings, require_all=False):
             try:
                 if extension == "elf":
                     actual, static_data = elf_resource_bytes(image)
-                    avr_static_measured += 1
                     # 16 B is the project's only reviewed static-RAM ceiling.
                     # Both AVR families allocate the same statics -- the shared
                     # core's context, its check word, and the ISR handshake --
@@ -273,22 +297,31 @@ def check_built_images(policy, ceilings, require_all=False):
                           "%s allocates %d B of static data; the reviewed ceiling "
                           "is %d B" % (image, static_data,
                                        policy["XT_STATIC_RAM_LIMIT"]))
+                    static_rows.append({
+                        "image": published, "part": part, "static": static_data,
+                        "ceiling": policy["XT_STATIC_RAM_LIMIT"],
+                    })
                 else:
-                    actual = hex_program_words(image, PARTS[part][0])
+                    actual = hex_program_words(image, capacity)
             except (ValueError, OSError) as error:
                 check(False, "%s is not a measurable image: %s" % (image, error))
                 continue
-            measured += 1
             check(0 < actual <= ceilings[part],
                   "%s measures %d %s; the reviewed ceiling is %d"
-                  % (image, actual, PARTS[part][1], ceilings[part]))
+                  % (image, actual, unit, ceilings[part]))
+            rows.append({
+                "image": published, "part": part, "unit": unit, "used": actual,
+                "ceiling": ceilings[part], "capacity": capacity,
+                "method": "elf-alloc-sections" if extension == "elf"
+                          else "hex-program-words",
+            })
     if require_all:
-        check(measured == 21,
-              "final-candidate mode requires 21 of 21 images; measured %d" % measured)
-        check(avr_static_measured == 12,
+        check(len(rows) == 21,
+              "final-candidate mode requires 21 of 21 images; measured %d" % len(rows))
+        check(len(static_rows) == 12,
               "final-candidate mode requires static-data measurements from 12 AVR ELFs; measured %d"
-              % avr_static_measured)
-    return measured, avr_static_measured
+              % len(static_rows))
+    return rows, static_rows
 
 
 def elf_resource_bytes(path):
@@ -377,6 +410,7 @@ PIC_STACK_PASS = r"^STACK-DEPTH PASS \[%s ([a-z0-9_]+)\]: ([0-9]+) \+ ([0-9]+) "
 
 def check_classic_stack_evidence(classic, floor):
     """Nine self-consistent canary observations, each above the gate's floor."""
+    observations = []
     rows = CLASSIC_HWM.findall(classic)
     check(len(rows) == 9,
           "test-long.log must contain exactly 9 Classic AVR stack HWM records; found %d"
@@ -413,11 +447,22 @@ def check_classic_stack_evidence(classic, floor):
         check(margin >= floor,
               "%s: %d B free is below the canary gate's %d B floor"
               % (label, margin, floor))
-    return len(rows)
+        observations.append({
+            "part": part, "deepest_sp": deepest_sp, "used": used,
+            "free": margin, "static": static_bytes, "sram": sram_size,
+            "floor": floor,
+        })
+    return observations
 
 
 def check_final_evidence(directory, policy, floor):
-    """Validate retained non-flash measurements from the release run logs."""
+    """Validate retained non-flash measurements from the release run logs.
+
+    Returns the measurements as well as validating them, for the reason
+    check_built_images does: these are the figures the release publishes, and
+    the Classic AVR stack observations in particular survive nowhere else --
+    they are read out of test-long.log, which staging does not retain.
+    """
     classic_stack = check_classic_stack_evidence(
         read_evidence_file(directory, "test-long.log"), floor)
 
@@ -439,6 +484,7 @@ def check_final_evidence(directory, policy, floor):
           "pic12f675-qualification.log must contain two Data-space records per "
           "variant (qualified and reproducibility builds); found %d records"
           % len(data_rows))
+    data_used = {}
     for variant, used, limit, capacity in data_rows:
         check((int(limit), int(capacity)) == (policy["PIC12F675_DATA_LIMIT"],
                                               policy["PIC12F675_DATA_BYTES"]),
@@ -449,8 +495,15 @@ def check_final_evidence(directory, policy, floor):
         check(0 < int(used) <= int(limit),
               "the PIC12F675 %s build reserves %s of %s permitted Data-space bytes"
               % (variant, used, limit))
+        # Publishing one figure per variant requires the qualified build and the
+        # reproducibility rebuild to have reserved the same Data space.  Checking
+        # each record against the limit separately, as this gate used to, would
+        # accept two builds that disagreed with each other.
+        check(data_used.setdefault(variant, int(used)) == int(used),
+              "the PIC12F675 %s builds disagree on Data space: %d B and %s B"
+              % (variant, data_used.get(variant, -1), used))
 
-    pic_stack = 0
+    pic_stack = []
     for part, filename in (("PIC10F322", "pic10f322-test.log"),
                            ("PIC10F320", "pic10f320-test.log"),
                            ("PIC12F675", "pic12f675-qualification.log")):
@@ -472,14 +525,163 @@ def check_final_evidence(directory, policy, floor):
             check(int(peak) > 0 and int(peak) + int(reserve) + int(spare) == int(depth),
                   "%s: peak %s + reserve %s + spare %s is not the %s-level "
                   "hardware stack" % (label, peak, reserve, spare, depth))
-        pic_stack += len(rows)
-    return classic_stack, len(data_rows), pic_stack
+            pic_stack.append({
+                "part": part.lower(), "variant": variant, "peak": int(peak),
+                "reserve": int(reserve), "spare": int(spare), "depth": int(depth),
+            })
+    return {
+        "classic_stack": classic_stack,
+        # The log states "all frames <= N B", which is the reviewed ceiling the
+        # reports were checked against -- not a measured maximum.  No largest
+        # frame is recorded anywhere, so none is published: a "frame_max" here
+        # would be this gate inventing a measurement, and a per-frame static
+        # bound is not a whole-path high-water figure in any case.
+        "xt_frame": {"reports": int(frame[0][0]),
+                     "ceiling": policy["XT_STACK_MAX_FRAME"]} if frame else None,
+        "pic_data": [{"part": "pic12f675", "variant": variant,
+                      "used": data_used[variant],
+                      "ceiling": policy["PIC12F675_DATA_LIMIT"],
+                      "capacity": policy["PIC12F675_DATA_BYTES"]}
+                     for variant in sorted(data_used)],
+        "pic_data_records": len(data_rows),
+        "pic_stack": pic_stack,
+    }
 
 
-def report(measured=None, require_all=False, source_commit=None,
-           avr_static_measured=0, evidence_counts=None):
+def static_by_part(static_rows):
+    """One reviewed static-RAM figure per AVR part, or None if a part disagrees.
+
+    Every variant of a part allocates the same statics -- the shared core's
+    context, its check word and the ISR handshake -- so one figure describes the
+    part.  That is checked rather than assumed: aggregating here, in the gate
+    that measured the images, keeps the published per-part row backed by a
+    record instead of by a renderer's arithmetic.
+    """
+    parts = {}
+    for row in static_rows:
+        parts.setdefault(row["part"], []).append(row)
+    aggregate = {}
+    for part in sorted(parts):
+        values = {row["static"] for row in parts[part]}
+        check(len(values) == 1,
+              "the %s images do not agree on static data: %s B"
+              % (part, ", ".join(str(value) for value in sorted(values))))
+        if len(values) != 1:
+            continue
+        aggregate[part] = {"part": part, "static": values.pop(),
+                           "ceiling": parts[part][0]["ceiling"],
+                           "images": len(parts[part])}
+    return aggregate
+
+
+def check_static_agreement(static_parts, classic_stack):
+    """Two independent measurements of the same statics must agree.
+
+    The ELF walker sums allocated data-space sections; the canary gate derives
+    its static region from the simulated device's own symbol table.  Nothing
+    compared them before, so the release could have published either.  A part
+    whose variants ever stop agreeing fails in static_by_part above, and a
+    divergence here says the two oracles disagree -- which is the only reason to
+    keep both.
+    """
+    for observation in classic_stack:
+        part = observation["part"]
+        if part not in static_parts:
+            continue
+        check(static_parts[part]["static"] == observation["static"],
+              "the %s ELF allocates %d B of static data but its canary gate "
+              "measured %d B" % (part, static_parts[part]["static"],
+                                 observation["static"]))
+
+
+def deepest_per_part(classic_stack):
+    """The worst of each Classic part's stack observations.
+
+    The canary line does not name the variant it came from, so a per-variant row
+    would have to invent an attribution the evidence does not carry.  The
+    deepest observation is the figure that bounds the part, and because used,
+    free and the deepest SP all come from that one record, the published row
+    still closes on its own arithmetic.
+    """
+    worst = {}
+    for observation in classic_stack:
+        part = observation["part"]
+        if part not in worst or observation["used"] > worst[part]["used"]:
+            worst[part] = dict(observation, observations=0)
+    for observation in classic_stack:
+        worst[observation["part"]]["observations"] += 1
+    return worst
+
+
+def emit(record, fields):
+    print("%s format=1 %s"
+          % (record, " ".join("%s=%s" % pair for pair in fields)))
+
+
+def emit_records(image_rows, static_parts, evidence):
+    """Print every measured figure the release publishes, in a fixed order."""
+    emitted = 0
+    for row in sorted(image_rows, key=lambda row: row["image"]):
+        emit("RESOURCE_IMAGE", (
+            ("image", row["image"]), ("part", row["part"]),
+            ("unit", row["unit"]), ("used", row["used"]),
+            ("ceiling", row["ceiling"]), ("capacity", row["capacity"]),
+            ("free", row["ceiling"] - row["used"]), ("method", row["method"])))
+        emitted += 1
+    for part in sorted(static_parts):
+        row = static_parts[part]
+        emit("RESOURCE_STATIC", (
+            ("part", part), ("unit", "bytes"), ("static", row["static"]),
+            ("ceiling", row["ceiling"]),
+            ("free", row["ceiling"] - row["static"]),
+            ("images", row["images"]), ("method", "elf-alloc-sections")))
+        emitted += 1
+    for part in sorted(evidence["classic_stack_worst"]):
+        row = evidence["classic_stack_worst"][part]
+        emit("RESOURCE_STACK", (
+            ("part", part), ("unit", "bytes"),
+            ("method", "simavr-canary-high-water"),
+            ("observations", row["observations"]),
+            ("deepest_sp", "0x%03X" % row["deepest_sp"]),
+            ("used", row["used"]), ("free", row["free"]),
+            ("static", row["static"]), ("sram", row["sram"]),
+            ("floor", row["floor"])))
+        emitted += 1
+    frame = evidence["xt_frame"]
+    if frame is not None:
+        # method= says what this figure is, because it is the one resource
+        # record on the page that is not a measurement of a run: it is a static
+        # per-frame bound from the compiler, and reading it as a whole-path
+        # high-water would overstate what the release checked.
+        emit("RESOURCE_STACK_BOUND", (
+            ("part", "attiny202"), ("unit", "bytes"),
+            ("method", "gcc-stack-usage-per-frame"),
+            ("reports", frame["reports"]), ("ceiling", frame["ceiling"])))
+        emitted += 1
+    for row in evidence["pic_data"]:
+        emit("RESOURCE_DATA", (
+            ("part", row["part"]), ("variant", row["variant"]),
+            ("unit", "bytes"), ("method", "xc8-data-budget"),
+            ("used", row["used"]), ("ceiling", row["ceiling"]),
+            ("capacity", row["capacity"]),
+            ("free", row["ceiling"] - row["used"])))
+        emitted += 1
+    for row in sorted(evidence["pic_stack"],
+                      key=lambda row: (row["part"], row["variant"])):
+        emit("RESOURCE_RETURN_STACK", (
+            ("part", row["part"]), ("variant", row["variant"]),
+            ("unit", "levels"), ("method", "gpsim-peak-depth"),
+            ("peak", row["peak"]), ("reserve", row["reserve"]),
+            ("spare", row["spare"]), ("depth", row["depth"])))
+        emitted += 1
+    return emitted
+
+
+def report(image_rows=None, require_all=False, source_commit=None,
+           static_parts=None, evidence=None):
     for message in failures:
         print("FAIL: %s" % message, file=sys.stderr)
+    measured = None if image_rows is None else len(image_rows)
     if measured is None:
         print("resource tables: %d checks, %d failures (no image measured: the "
               "reviewed ceilings must parse first)" % (checks, len(failures)))
@@ -489,11 +691,13 @@ def report(measured=None, require_all=False, source_commit=None,
               "(%d of 21 canonical images measured%s)"
               % (checks, len(failures), measured, qualifier))
     if require_all and not failures:
-        classic_stack, pic_data, pic_stack = evidence_counts
+        emitted = emit_records(image_rows, static_parts, evidence)
         print("RESOURCE_TABLES_RESULT format=1 status=pass source_commit=%s "
-              "images=%d avr_static=%d classic_stack=%d pic_data=%d pic_stack=%d"
-              % (source_commit, measured, avr_static_measured, classic_stack,
-                 pic_data, pic_stack))
+              "images=%d avr_static=%d classic_stack=%d pic_data=%d pic_stack=%d "
+              "records=%d"
+              % (source_commit, measured, evidence["avr_static"],
+                 len(evidence["classic_stack"]), evidence["pic_data_records"],
+                 len(evidence["pic_stack"]), emitted))
     return 1 if failures else 0
 
 
@@ -527,18 +731,24 @@ def main():
         return report()
     ceilings = flash_ceilings(policy)
     check_policy(policy, ceilings)
-    measured, avr_static_measured = check_built_images(
+    image_rows, static_rows = check_built_images(
         policy, ceilings, require_all=arguments.require_all_images)
-    evidence_counts = None
+    static_parts = static_by_part(static_rows)
+    evidence = None
     if arguments.require_all_images and arguments.evidence_dir is not None:
-        evidence_counts = check_final_evidence(
+        evidence = check_final_evidence(
             arguments.evidence_dir.resolve(), policy, floor)
-    if arguments.require_all_images and evidence_counts is None:
-        evidence_counts = (0, 0, 0)
-    return report(measured, require_all=arguments.require_all_images,
+        check_static_agreement(static_parts, evidence["classic_stack"])
+    if arguments.require_all_images and evidence is None:
+        evidence = {"classic_stack": [], "xt_frame": None, "pic_data": [],
+                    "pic_data_records": 0, "pic_stack": []}
+    if evidence is not None:
+        evidence["avr_static"] = len(static_rows)
+        evidence["classic_stack_worst"] = deepest_per_part(
+            evidence["classic_stack"])
+    return report(image_rows, require_all=arguments.require_all_images,
                   source_commit=arguments.source_commit,
-                  avr_static_measured=avr_static_measured,
-                  evidence_counts=evidence_counts)
+                  static_parts=static_parts, evidence=evidence)
 
 
 if __name__ == "__main__":

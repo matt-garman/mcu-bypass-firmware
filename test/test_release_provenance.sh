@@ -834,6 +834,41 @@ grep -qF -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`%s\`), %d retai
 grep -qF -- '- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_index_sha256]}\`), ${#indexed_names[@]} retained files by role and terminal record' "$QUALIFY" \
 	|| fail "verify-release-qualification.sh does not match the evidence index bullet make-release.sh writes"
 checks=$((checks + 1))
+
+# Every measured figure the manifest publishes is rendered by make-release.sh
+# and re-derived by verify-release-qualification.sh from the same RESOURCE_*
+# record. The two renderers are separate implementations on purpose -- the
+# verifier links nothing from the release script -- so nothing but this pin
+# stops one of them from changing shape alone. A drifted row would produce a
+# manifest the verifier rejects, first noticed at the end of a real 24-hour run.
+resource_row_formats=(
+	'%s / %s %s (%s free)'
+	'| `%s` | %s %s | %s %s | %s %s | %s |'
+	'| `%s` | %s | %s %s | %s %s | %s %s | %s %s | %s %s | %s |'
+	'| `%s` | %s | %s | every frame <= %s %s |'
+	'| `%s` | %s | %s %s | %s %s | %s %s | %s %s |'
+	'| `%s` | %s | %s | %s | %s | %s |'
+)
+for resource_format in "${resource_row_formats[@]}"; do
+	grep -qF -- "printf '$resource_format'" "$RELEASE" \
+		|| fail "make-release.sh does not render the resource row '$resource_format'"
+	grep -qF -- "printf '$resource_format'" "$QUALIFY" \
+		|| fail "verify-release-qualification.sh does not re-derive the resource row '$resource_format'"
+done
+checks=$((checks + 1))
+
+# The verifier picks the flash figure out of the image row by column position,
+# so the header it pins and the header the producer writes must be one string.
+resource_image_header='| image | MCU | clock | flash used / reviewed ceiling | fuses / config | sha256 |'
+grep -qF -- "printf '$resource_image_header" "$RELEASE" \
+	|| fail "make-release.sh does not write the image table header the verifier pins"
+grep -qF -- "grep -Fxq -- '$resource_image_header'" "$QUALIFY" \
+	|| fail "verify-release-qualification.sh does not pin the image table header make-release.sh writes"
+grep -qF -- "printf '## Resources" "$RELEASE" \
+	|| fail "make-release.sh does not write the measured resources section"
+grep -qF -- "grep -Fxq -- '## Resources'" "$QUALIFY" \
+	|| fail "verify-release-qualification.sh does not require the measured resources section"
+checks=$((checks + 1))
 checks=$((checks + 1))
 [ "${#xc8_322_lines[@]}" -eq 1 ] \
 	&& [ "${#xc8_320_lines[@]}" -eq 1 ] \

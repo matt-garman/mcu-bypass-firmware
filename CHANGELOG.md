@@ -45,6 +45,27 @@ historical records and are not retroactively compacted by this policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Releases publish the resource measurements they were already taking.**
+  `MANIFEST.md` gains a **Resources** section with static RAM, the deepest
+  observed Classic AVR stack, the AVR-XT per-frame compiler bound, PIC12F675
+  Data space and PIC return-stack depth, each beside the reviewed ceiling that
+  bounds it and the margin left. The images table's flash column now reads
+  `used / reviewed ceiling (free)` for every image, including the three
+  PIC10F322 images that published `n/a` while sitting closest to their limit,
+  and the ATtiny13a images whose reviewed budget is tighter than the silicon.
+  A downloaded release previously stated no RAM or stack figure for any part.
+
+  Every figure comes from one machine record in the signed
+  `evidence/resource-tables.log`, and the qualification verifier re-derives each
+  published row from those records; the release script no longer derives flash
+  usage of its own, so the figure that is checked and the figure that is
+  published are the same figure. The AVR-XT entry is labelled a per-frame static
+  bound and is rejected if it carries a high-water field, because
+  `-fstack-usage` does not measure the deepest path through the frames it
+  bounds.
+
 ### Changed
 
 - **Current resource measurements are no longer restated in development

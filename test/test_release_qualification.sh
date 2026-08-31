@@ -264,10 +264,93 @@ declare -A fixture_role=()
 for role_entry in "${evidence_role_entries[@]}"; do
 	fixture_role[${role_entry%%=*}]=${role_entry#*=}
 done
+read -r -a canonical_images \
+	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_IMAGES)"
 fw_base=$(make -s --no-print-directory -C "$ROOT" CC=: print-FW_BASE)
 pic12f675_tag=$(make -s --no-print-directory -C "$ROOT" CC=: print-PIC12F675_TAG)
 read -r -a pic12f675_variants \
 	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-CLASSIC_VARIANTS_SUPPORTED)"
+
+# The fixture's own resource-record producer and row renderer, written to mirror
+# what test_resource_tables.py emits and what make-release.sh renders rather than
+# to import either. A fixture that called the release script's own renderer could
+# not catch the producer and the verifier disagreeing, which is the whole point
+# of the verifier re-deriving these rows.
+#
+# Every figure is arbitrary and unlike the real matrix, so this fixture does not
+# fail on a firmware size change; the arithmetic each record must close on is
+# real, because that is what is under test.
+resource_fixture_ceiling=1000
+resource_fixture_capacity=1200
+declare -A resource_fixture_cell=()
+resource_fixture_rows=()
+
+write_resource_evidence() {
+	local image part unit label used free index=0 avr=() pic=() variants=()
+	local seen_part=" " seen_variant=" " variant
+	for image in "${canonical_images[@]}"; do
+		part=${image#*-}; part=${part%%-*}
+		variant=${image##*-}; variant=${variant%.hex}
+		case "$seen_part" in
+			*" $part "*) ;;
+			*) seen_part="$seen_part$part "
+			   case "$part" in pic*) pic+=("$part") ;; *) avr+=("$part") ;; esac ;;
+		esac
+		case "$seen_variant" in
+			*" $variant "*) ;;
+			*) seen_variant="$seen_variant$variant "; variants+=("$variant") ;;
+		esac
+	done
+	resource_fixture_cell=()
+	resource_fixture_rows=()
+	{
+		printf 'resource tables: fixture checks, 0 failures (%d of %d canonical images measured; complete candidate required)\n' \
+			"${#canonical_images[@]}" "${#canonical_images[@]}"
+		for image in "${canonical_images[@]}"; do
+			part=${image#*-}; part=${part%%-*}
+			case "$part" in pic*) unit=words; label=words ;; *) unit=bytes; label=B ;; esac
+			used=$(( 300 + index ))
+			free=$(( resource_fixture_ceiling - used ))
+			printf 'RESOURCE_IMAGE format=1 image=%s part=%s unit=%s used=%d ceiling=%d capacity=%d free=%d method=fixture\n' \
+				"$image" "$part" "$unit" "$used" "$resource_fixture_ceiling" \
+				"$resource_fixture_capacity" "$free"
+			resource_fixture_cell[$image]="$used / $resource_fixture_ceiling $label ($free free)"
+			index=$(( index + 1 ))
+		done
+		for part in "${avr[@]}"; do
+			printf 'RESOURCE_STATIC format=1 part=%s unit=bytes static=6 ceiling=20 free=14 images=3 method=fixture\n' \
+				"$part"
+			resource_fixture_rows+=("$(printf '| `%s` | 6 B | 20 B | 14 B | 3 |' "$part")")
+		done
+		# The LAST AVR part stands in for the AVR-XT and carries the compiler
+		# frame bound; the others carry simulated high-water records. Which part
+		# plays which role is arbitrary -- the verifier renders what the records
+		# say, and nothing here encodes the production assignment.
+		for part in "${avr[@]::${#avr[@]}-1}"; do
+			printf 'RESOURCE_STACK format=1 part=%s unit=bytes method=fixture-high-water observations=3 deepest_sp=0x0F0 used=30 free=44 static=6 sram=80 floor=10\n' \
+				"$part"
+			resource_fixture_rows+=("$(printf '| `%s` | 0x0F0 | 30 B | 44 B | 6 B | 80 B | 10 B | 3 |' "$part")")
+		done
+		part=${avr[-1]}
+		printf 'RESOURCE_STACK_BOUND format=1 part=%s unit=bytes method=fixture-frame-bound reports=3 ceiling=40\n' \
+			"$part"
+		resource_fixture_rows+=("$(printf '| `%s` | fixture-frame-bound | 3 | every frame <= 40 B |' "$part")")
+		for variant in "${variants[@]}"; do
+			printf 'RESOURCE_DATA format=1 part=%s variant=%s unit=bytes method=fixture used=25 ceiling=45 capacity=60 free=20\n' \
+				"${pic[0]}" "$variant"
+			resource_fixture_rows+=("$(printf '| `%s` | %s | 25 B | 45 B | 60 B | 20 B |' "${pic[0]}" "$variant")")
+		done
+		for part in "${pic[@]}"; do
+			for variant in "${variants[@]}"; do
+				printf 'RESOURCE_RETURN_STACK format=1 part=%s variant=%s unit=levels method=fixture peak=3 reserve=1 spare=2 depth=6\n' \
+					"$part" "$variant"
+				resource_fixture_rows+=("$(printf '| `%s` | %s | 3 | 1 | 2 | 6 |' "$part" "$variant")")
+			done
+		done
+		printf 'RESOURCE_TABLES_RESULT format=1 status=pass source_commit=%s images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9 records=%d\n' \
+			"$sha" "$(( ${#canonical_images[@]} + ${#resource_fixture_rows[@]} ))"
+	} > "$release/evidence/resource-tables.log"
+}
 
 reset_fixture() {
 	local mode=${1:-production}
@@ -286,10 +369,7 @@ reset_fixture() {
 
 TEST_LONG_RESULT format=1 status=pass source_commit=$sha target=test-long strict_tools=1 mutation_allow_skip=0
 EOF
-	cat > "$release/evidence/resource-tables.log" <<EOF
-resource tables: fixture checks, 0 failures (21 of 21 canonical images measured; complete candidate required)
-RESOURCE_TABLES_RESULT format=1 status=pass source_commit=$sha images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9
-EOF
+	write_resource_evidence
 	for variant in "${pic12f675_variants[@]}"; do
 		stem="$fw_base-$pic12f675_tag-$variant"
 		printf 'shipping fixture: %s\n' "$variant" > "$matrix_build/$stem.hex"
@@ -387,6 +467,15 @@ EOF
 			printf -- '| fixture-tool-%s | 1.%s.0 |\n' "$tool_index" "$tool_index"
 		done
 		printf '\n## Images\n\n'
+		printf -- '| image | MCU | clock | flash used / reviewed ceiling | fuses / config | sha256 |\n'
+		printf -- '|---|---|---|---|---|---|\n'
+		for image in "${canonical_images[@]}"; do
+			printf -- '| `%s` | fixture-mcu | fixture-clock | %s | fixture-config | `%s` |\n' \
+				"$image" "${resource_fixture_cell[$image]}" \
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		done
+		printf '\n## Resources\n\n'
+		printf '%s\n' "${resource_fixture_rows[@]}"
 	} > "$release/MANIFEST.md"
 	{
 		printf '# %s\n\n' "$version"
@@ -638,6 +727,108 @@ reset_fixture
 sed -i 's/resource-tables.log` (SHA-256 `[0-9a-f]\{64\}`)/resource-tables.log` (SHA-256 `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`)/' \
 	"$release/MANIFEST.md"
 expect_fail "wrong manifest resource digest" "MANIFEST.md resource evidence digest"
+
+# --- the measured figures, and the manifest rows derived from them -----------
+# The release used to publish a flash column the producer derived for itself and
+# no one checked, including three "n/a" cells where it derived nothing at all.
+# Every figure now comes from a record in this log, so every way a record and a
+# published row can disagree is a control here.
+
+reset_fixture
+grep -v "^RESOURCE_IMAGE format=1 image=${canonical_images[0]} " \
+	"$release/evidence/resource-tables.log" > "$work/resource.tmp"
+mv "$work/resource.tmp" "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "unmeasured release image" "no measured resource record for the release image"
+
+reset_fixture
+printf 'RESOURCE_IMAGE format=1 image=bypass-nosuch-cd4053_simple.hex part=nosuch unit=bytes used=300 ceiling=1000 capacity=1200 free=700 method=fixture\n' \
+	>> "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "record for an unshipped image" "which this release does not ship"
+
+reset_fixture
+head -2 "$release/evidence/resource-tables.log" | tail -1 \
+	>> "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "duplicate image measurement" "two RESOURCE_IMAGE records for"
+
+reset_fixture
+sed -i '0,/^RESOURCE_IMAGE /s/ free=/ free=1/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "free margin that does not close" "free margin that is not its ceiling less its use"
+
+reset_fixture
+sed -i '0,/^RESOURCE_IMAGE /s/ capacity=1200/ capacity=900/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "ceiling wider than the device" "does not order use, ceiling and capacity"
+
+reset_fixture
+sed -i '0,/^RESOURCE_STACK /s/ sram=80/ sram=81/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "stack record that loses SRAM" "does not account for the whole device SRAM"
+
+reset_fixture
+sed -i '0,/^RESOURCE_RETURN_STACK /s/ spare=2/ spare=3/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "return-stack record that loses a level" "does not account for the whole hardware stack"
+
+# A per-frame compiler bound is not a whole-path high-water measurement, and the
+# release must not be able to publish it as one.
+reset_fixture
+sed -i 's/^\(RESOURCE_STACK_BOUND .*\)$/\1 used=99/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "frame bound claiming a high-water figure" "claims a high-water figure the evidence does not contain"
+
+reset_fixture
+sed -i 's/^\(RESOURCE_STACK_BOUND .*\) reports=3/\1 reports=three/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "non-decimal measurement" "has no decimal reports field"
+
+reset_fixture
+printf 'RESOURCE_INVENTED format=1 unit=bytes value=1\n' \
+	>> "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "unknown resource record" "unknown resource record in the resource evidence"
+
+reset_fixture
+sed -i 's/ records=41$/ records=40/' "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "terminal count below the records present" "no exact source-bound complete result"
+
+reset_fixture
+victim=${canonical_images[0]}
+sed -i "s|${resource_fixture_cell[$victim]}|999 / 1000 B (1 free)|" \
+	"$release/MANIFEST.md"
+expect_fail "manifest flash cell that was not measured" "the measured record says"
+
+reset_fixture
+grep -vFx "${resource_fixture_rows[0]}" "$release/MANIFEST.md" > "$work/manifest.tmp"
+mv "$work/manifest.tmp" "$release/MANIFEST.md"
+expect_fail "manifest missing a measured row" "omits a measured resource row"
+
+reset_fixture
+grep -F -- "| \`${canonical_images[0]}\` |" "$release/MANIFEST.md" > "$work/row.tmp"
+cat "$work/row.tmp" >> "$release/MANIFEST.md"
+expect_fail "duplicate manifest image row" "image rows for ${canonical_images[0]}, expected 1"
+
+# The flash figure is read out of the image row by column position, so the
+# column order is part of the contract, not a formatting detail.
+reset_fixture
+sed -i 's/^| image | MCU | clock | flash used \/ reviewed ceiling |/| image | MCU | clock | flash |/' \
+	"$release/MANIFEST.md"
+expect_fail "reordered image table header" "expected image table header"
+
+reset_fixture
+grep -vFx '## Resources' "$release/MANIFEST.md" > "$work/manifest.tmp"
+mv "$work/manifest.tmp" "$release/MANIFEST.md"
+expect_fail "manifest without the resources section" "measured resources section"
 
 reset_fixture
 sed -i 's/^version=.*/version=v99.0.1/' "$release/QUALIFICATION"

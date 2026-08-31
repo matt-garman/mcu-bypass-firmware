@@ -207,6 +207,9 @@ canonical_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 result_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-RELEASE_EVIDENCE_RESULT_ROLES) \
 	|| die "cannot read RELEASE_EVIDENCE_RESULT_ROLES from the Makefile"
+canonical_images=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-RELEASE_IMAGES) \
+	|| die "cannot read RELEASE_IMAGES from the Makefile"
 matrix_tool_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-PIC12F675_MATRIX_EVIDENCE) \
 	|| die "cannot read PIC12F675_MATRIX_EVIDENCE from the Makefile"
@@ -321,10 +324,9 @@ resource_digest=$(sha256sum -- "$resource_log") \
 resource_digest=${resource_digest%% *}
 [ "$resource_digest" = "${q[resource_tables_sha256]}" ] \
 	|| die "retained resource evidence digest does not match QUALIFICATION"
-resource_result="RESOURCE_TABLES_RESULT format=1 status=pass source_commit=${q[source_commit]} images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9"
-mapfile -t resource_results < <(grep '^RESOURCE_TABLES_RESULT ' "$resource_log" || true)
-[ "${#resource_results[@]}" -eq 1 ] && [ "${resource_results[0]}" = "$resource_result" ] \
-	|| die "retained resource evidence has no exact source-bound complete result"
+# The terminal result is checked further down, with the records it summarizes:
+# its records= count has to equal the number of figures actually present, and
+# that number is not known until they have been parsed.
 
 # test-long's complete transcript is transient diagnostic output, not release
 # evidence. Its retained summary must still establish the exact aggregate,
@@ -540,6 +542,204 @@ done
 
 grep -Fxq -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_index_sha256]}\`), ${#indexed_names[@]} retained files by role and terminal record" "$manifest" \
 	|| die "MANIFEST.md evidence index digest does not match QUALIFICATION"
+
+# --- the measured resource figures, and the manifest rows they produced -------
+# Until now the release published a flash column the producer derived for itself,
+# arm by arm, from build logs and avr-size -- and derived nothing at all for the
+# PIC10F322, printing "n/a" for the three tightest images in the release. The
+# gate that measured the same artifacts against the reviewed ceilings kept only
+# counts. Neither figure was ever compared with the other, because only one of
+# them existed at a time.
+#
+# Both now come from the RESOURCE_* records in evidence/resource-tables.log,
+# which SHA256SUMS signs, evidence/INDEX records and QUALIFICATION binds by
+# digest. This block re-derives every published row from those records and
+# requires the manifest to carry it exactly. The derivations below are a
+# deliberate second implementation of the producer's, not a shared one: this
+# verifier links nothing from the release script on purpose, so a renderer that
+# drifts from the record it renders is caught by disagreement rather than
+# reproduced identically on both sides.
+# $resource_log was set and its digest checked against QUALIFICATION above.
+
+resource_unit_label() {
+	case "$1" in
+		bytes)  printf 'B\n' ;;
+		words)  printf 'words\n' ;;
+		levels) printf 'levels\n' ;;
+		*) return 1 ;;
+	esac
+}
+
+resource_decimal() {
+	case "$1" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+}
+
+# The decimal fields each record kind must carry. A record missing one is a
+# truncated record, not a record with a default, so the field list is declared
+# rather than discovered from whatever the record happens to contain.
+declare -A resource_required=(
+	[RESOURCE_IMAGE]="used ceiling capacity free"
+	[RESOURCE_STATIC]="static ceiling free images"
+	[RESOURCE_STACK]="used free static sram floor observations"
+	[RESOURCE_STACK_BOUND]="reports ceiling"
+	[RESOURCE_DATA]="used ceiling capacity free"
+	[RESOURCE_RETURN_STACK]="peak reserve spare depth"
+)
+declare -A resource_cell=()
+declare -A resource_seen=()
+resource_rows=()
+resource_summaries=0
+while IFS= read -r resource_line; do
+	resource_kind=${resource_line%% *}
+	case "$resource_kind" in
+		RESOURCE_TABLES_RESULT)
+			resource_summaries=$((resource_summaries + 1)); continue ;;
+	esac
+	declare -A rf=()
+	for resource_pair in $resource_line; do
+		case "$resource_pair" in
+			*=*) rf[${resource_pair%%=*}]=${resource_pair#*=} ;;
+		esac
+	done
+	[ "${rf[format]:-}" = 1 ] \
+		|| die "a $resource_kind record in the resource evidence is not format=1"
+	resource_label=$(resource_unit_label "${rf[unit]:-}") \
+		|| die "a $resource_kind record names no known unit"
+	[ "${resource_required[$resource_kind]+set}" = set ] \
+		|| die "unknown resource record in the resource evidence: $resource_kind"
+	for resource_key in ${resource_required[$resource_kind]}; do
+		resource_decimal "${rf[$resource_key]:-}" \
+			|| die "a $resource_kind record has no decimal $resource_key field"
+	done
+	case "$resource_kind" in
+	RESOURCE_IMAGE)
+		[ -n "${rf[image]:-}" ] || die "a RESOURCE_IMAGE record names no image"
+		[ "${resource_seen[${rf[image]}]+set}" != set ] \
+			|| die "two RESOURCE_IMAGE records for ${rf[image]}"
+		resource_seen[${rf[image]}]=1
+		[ "${rf[free]}" -eq $(( rf[ceiling] - rf[used] )) ] \
+			|| die "${rf[image]} reports a free margin that is not its ceiling less its use"
+		[ "${rf[used]}" -gt 0 ] && [ "${rf[used]}" -le "${rf[ceiling]}" ] \
+			&& [ "${rf[ceiling]}" -le "${rf[capacity]}" ] \
+			|| die "${rf[image]} does not order use, ceiling and capacity"
+		resource_cell[${rf[image]}]=$(printf '%s / %s %s (%s free)' \
+			"${rf[used]}" "${rf[ceiling]}" "$resource_label" "${rf[free]}") ;;
+	RESOURCE_STATIC)
+		[ "${rf[free]}" -eq $(( rf[ceiling] - rf[static] )) ] \
+			|| die "the ${rf[part]:-?} static record's free margin does not close"
+		[ "${rf[static]}" -gt 0 ] && [ "${rf[images]}" -gt 0 ] \
+			|| die "the ${rf[part]:-?} static record measures nothing"
+		resource_rows+=("$(printf '| `%s` | %s %s | %s %s | %s %s | %s |' \
+			"${rf[part]:-}" "${rf[static]}" "$resource_label" \
+			"${rf[ceiling]}" "$resource_label" "${rf[free]}" "$resource_label" \
+			"${rf[images]}")") ;;
+	RESOURCE_STACK)
+		[ $(( rf[static] + rf[used] + rf[free] )) -eq "${rf[sram]}" ] \
+			|| die "the ${rf[part]:-?} stack record does not account for the whole device SRAM"
+		[ "${rf[free]}" -ge "${rf[floor]}" ] \
+			|| die "the ${rf[part]:-?} stack record is below the canary gate's own floor"
+		[ "${rf[observations]}" -gt 0 ] \
+			|| die "the ${rf[part]:-?} stack record summarizes no observation"
+		resource_rows+=("$(printf '| `%s` | %s | %s %s | %s %s | %s %s | %s %s | %s %s | %s |' \
+			"${rf[part]:-}" "${rf[deepest_sp]:-}" "${rf[used]}" "$resource_label" \
+			"${rf[free]}" "$resource_label" "${rf[static]}" "$resource_label" \
+			"${rf[sram]}" "$resource_label" "${rf[floor]}" "$resource_label" \
+			"${rf[observations]}")") ;;
+	RESOURCE_STACK_BOUND)
+		[ "${rf[reports]}" -gt 0 ] \
+			|| die "the ${rf[part]:-?} frame-bound record cites no report"
+		# A per-frame compiler bound is not a high-water measurement, and this
+		# row must not read as one: the record carries no use or peak, and the
+		# rendered row states only the ceiling every frame was checked against.
+		[ "${rf[used]+set}" != set ] && [ "${rf[peak]+set}" != set ] \
+			|| die "the ${rf[part]:-?} frame-bound record claims a high-water figure the evidence does not contain"
+		resource_rows+=("$(printf '| `%s` | %s | %s | every frame <= %s %s |' \
+			"${rf[part]:-}" "${rf[method]:-}" "${rf[reports]}" \
+			"${rf[ceiling]}" "$resource_label")") ;;
+	RESOURCE_DATA)
+		[ -n "${rf[variant]:-}" ] || die "a RESOURCE_DATA record names no variant"
+		[ "${rf[free]}" -eq $(( rf[ceiling] - rf[used] )) ] \
+			|| die "the ${rf[part]:-?} ${rf[variant]} data record's free margin does not close"
+		[ "${rf[used]}" -gt 0 ] && [ "${rf[used]}" -le "${rf[ceiling]}" ] \
+			&& [ "${rf[ceiling]}" -le "${rf[capacity]}" ] \
+			|| die "the ${rf[part]:-?} ${rf[variant]} data record does not order use, ceiling and capacity"
+		resource_rows+=("$(printf '| `%s` | %s | %s %s | %s %s | %s %s | %s %s |' \
+			"${rf[part]:-}" "${rf[variant]}" "${rf[used]}" "$resource_label" \
+			"${rf[ceiling]}" "$resource_label" "${rf[capacity]}" "$resource_label" \
+			"${rf[free]}" "$resource_label")") ;;
+	RESOURCE_RETURN_STACK)
+		[ -n "${rf[variant]:-}" ] \
+			|| die "a RESOURCE_RETURN_STACK record names no variant"
+		[ $(( rf[peak] + rf[reserve] + rf[spare] )) -eq "${rf[depth]}" ] \
+			|| die "the ${rf[part]:-?} ${rf[variant]} return-stack record does not account for the whole hardware stack"
+		[ "${rf[peak]}" -gt 0 ] \
+			|| die "the ${rf[part]:-?} ${rf[variant]} return-stack record measures no call depth"
+		resource_rows+=("$(printf '| `%s` | %s | %s | %s | %s | %s |' \
+			"${rf[part]:-}" "${rf[variant]}" "${rf[peak]}" "${rf[reserve]}" \
+			"${rf[spare]}" "${rf[depth]}")") ;;
+	# Reached only if a kind gains a required-field list above without gaining
+	# a row here, which would otherwise render nothing and check nothing.
+	*) die "resource record $resource_kind has no rendered row" ;;
+	esac
+done < <(grep '^RESOURCE_[A-Z_]* ' "$resource_log" || true)
+[ "$resource_summaries" -eq 1 ] \
+	|| die "the resource evidence carries $resource_summaries terminal result records, expected 1"
+
+# Coverage in both directions against the canonical image set, not against a
+# remembered count: an image with no measurement is as wrong as a measurement
+# for an image this release does not ship.
+for resource_image in $canonical_images; do
+	[ "${resource_cell[$resource_image]+set}" = set ] \
+		|| die "no measured resource record for the release image $resource_image"
+done
+for resource_image in "${!resource_cell[@]}"; do
+	case " $canonical_images " in
+		*" $resource_image "*) ;;
+		*) die "a resource record measures $resource_image, which this release does not ship" ;;
+	esac
+done
+
+# The terminal record's own count must equal the figures actually present. A
+# truncated log loses records; one that lost records must not still claim to
+# summarize them.
+resource_result="RESOURCE_TABLES_RESULT format=1 status=pass source_commit=${q[source_commit]} images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9 records=$(( ${#resource_cell[@]} + ${#resource_rows[@]} ))"
+mapfile -t resource_results < <(grep '^RESOURCE_TABLES_RESULT ' "$resource_log" || true)
+[ "${resource_results[0]}" = "$resource_result" ] \
+	|| die "retained resource evidence has no exact source-bound complete result"
+
+# The column order is pinned before any cell is read from it: this block picks
+# the flash figure out of the row by position, so a producer that reordered the
+# columns would otherwise have it comparing the clock against a measurement.
+grep -Fxq -- '| image | MCU | clock | flash used / reviewed ceiling | fuses / config | sha256 |' "$manifest" \
+	|| die "MANIFEST.md does not carry the expected image table header"
+grep -Fxq -- '## Resources' "$manifest" \
+	|| die "MANIFEST.md does not carry the measured resources section"
+
+# The manifest's flash column, cell by cell. The rest of the row -- MCU, clock,
+# fuses, digest -- is bound elsewhere; what is checked here is that the figure
+# the reader sees is the figure the gate passed on.
+for resource_image in $canonical_images; do
+	mapfile -t resource_matches < <(grep -F -- "| \`$resource_image\` |" "$manifest" || true)
+	[ "${#resource_matches[@]}" -eq 1 ] \
+		|| die "MANIFEST.md carries ${#resource_matches[@]} image rows for $resource_image, expected 1"
+	IFS='|' read -r -a resource_cells <<<"${resource_matches[0]}"
+	[ "${#resource_cells[@]}" -ge 6 ] \
+		|| die "MANIFEST.md image row for $resource_image has too few columns"
+	resource_shown=${resource_cells[4]}
+	resource_shown=${resource_shown#"${resource_shown%%[![:space:]]*}"}
+	resource_shown=${resource_shown%"${resource_shown##*[![:space:]]}"}
+	[ "$resource_shown" = "${resource_cell[$resource_image]}" ] \
+		|| die "MANIFEST.md publishes '$resource_shown' for $resource_image; the measured record says '${resource_cell[$resource_image]}'"
+done
+
+for resource_row in "${resource_rows[@]}"; do
+	grep -Fxq -- "$resource_row" "$manifest" \
+		|| die "MANIFEST.md omits a measured resource row: $resource_row"
+done
+[ "${#resource_rows[@]}" -gt 0 ] \
+	|| die "the resource evidence published no resource rows at all"
 
 # --- the provenance files are inside the signature ---------------------------
 # verify-release-images.sh proves SHA256SUMS LISTS exactly the declared
