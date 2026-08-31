@@ -89,6 +89,20 @@ historical records and are not retroactively compacted by this policy.
 
 ### Removed
 
+- **Retired the flashing-simplicity design journal.** The 678-line
+  `docs/flashing_simplicity.md` recorded a v0.9.9 design discussion in the
+  present tense of the branch it was argued on, so every section had to be read
+  as a proposal unless an update paragraph said otherwise. Both proposals it
+  recorded as shipped are stated where they are enforced -- the AVR
+  build-before-hardware repair by `make test-avr-program-order`, the PIC12F675
+  no-compiler path by `scripts/flash-pic12f675.py` and `FLASHING.md` -- and the
+  command-shape and pasteability defects it described are fixed above. What
+  remains open moved to `TODO.md` as three actionable items and two declined
+  ones. Its `release_validate_flashing_simplicity_status` preflight contract
+  goes with it: the contract existed to stop a preserved proposal from denying
+  the implementation its own body recorded, and a document that no longer
+  exists cannot mislead a reader.
+
 - **Retired the one-shot v0.9.8 rename-identity lane.** The signed v0.9.8 tag
   retains the historical verifier and its 17-identical/one-changed report.
   Current releases continue to require exact canonical image reproduction,

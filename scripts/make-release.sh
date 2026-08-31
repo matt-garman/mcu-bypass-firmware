@@ -414,7 +414,6 @@ for renderer in release_validate_current_documentation \
 		release_validate_pic12f675_finalization \
 		release_validate_pic12f675_finalization_document \
 		release_validate_pic12f675_flashing_helper \
-		release_validate_flashing_simplicity_status \
 		release_render_scope release_render_validation \
 		release_render_toolchain_table release_render_pic12f675_flashing \
 		release_render_flashing \
@@ -946,12 +945,6 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	# branch work rather than after someone has erased a device's factory trim.
 	release_validate_pic12f675_flashing_helper "$REPO_ROOT" "$VERSION" \
 		|| die "published PIC12F675 flashing instructions do not match the release-shipped helper contract"
-	# A preserved design discussion whose proposals have since shipped must say
-	# so where a reader stops -- its status banner -- and at each proposal that
-	# landed. Checked here, on the live tree, so the banner is reconciled on the
-	# branch that implements a proposal rather than left denying it in a release.
-	release_validate_flashing_simplicity_status "$REPO_ROOT" \
-		|| die "the flashing-simplicity design document contradicts its own implementation updates"
 fi
 
 # Scratch area for evidence + per-combo soak run dirs. Preserved on failure so a

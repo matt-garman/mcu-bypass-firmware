@@ -1109,10 +1109,10 @@ release_validate_pic12f675_flashing_helper() {
 	#    the defective form while describing the defect.
 	#
 	#    The superseded states are named as exact sentences rather than matched
-	#    by pattern. docs/flashing_simplicity.md legitimately records its own
-	#    retired position IN THE PAST TENSE ("The position was that no
-	#    no-compiler path ... had been designed"), and a pattern wide enough to
-	#    catch the live claim would fail on the record of how it was retired.
+	#    by pattern. A document may legitimately record its own retired
+	#    position IN THE PAST TENSE ("The position was that no no-compiler
+	#    path ... had been designed"), and a pattern wide enough to catch the
+	#    live claim would fail on the record of how it was retired.
 	#    Matched case-insensitively, and so spelled in lower case here: the same
 	#    sentence at the start of a sentence is the same claim.
 	local -a retired_state=(
@@ -1178,102 +1178,6 @@ release_validate_pic12f675_flashing_helper() {
 		_release_documentation_error "generated release documentation denies that any ipecmd procedure is published" || rc=1
 	fi
 	_release_pic12f675_raw_writer_scan "generated release documentation" <<<"$rendered" || rc=1
-	return "$rc"
-}
-
-# docs/flashing_simplicity.md is a DESIGN DISCUSSION, deliberately preserved in
-# the present tense of the branch it was argued on, and parts of it have since
-# shipped. That combination is only safe while the banner says so. The document
-# opened with "Nothing here is implemented" for the whole of the v0.9.10
-# candidate while its own body carried "Update (v0.9.10)" paragraphs recording
-# what had been built -- and a status banner is precisely the line a reader
-# stops at, so the one sentence most likely to be read was the one contradicting
-# the rest of the file.
-#
-# Three anchors, each of them something a later edit has to keep true rather
-# than a phrase to be matched:
-#
-#   1. If the body records ANY implementation update, the banner may not deny
-#      implementation, and must name every version the body says shipped. A
-#      sixth update paragraph for a later version fails until the banner
-#      follows it.
-#   2. The section-1 build-before-hardware defect and
-#   3. the sequencing step that proposes repairing it
-#      describe a hardware-safety defect -- a failed build leaving changed AVR
-#      fuses and no matching firmware -- that was actually repaired. Unmarked,
-#      each reads as an open defect in the current tree, which is the most
-#      expensive thing this document could be wrong about.
-release_validate_flashing_simplicity_status() {
-	[ "$#" -eq 1 ] || return 2
-	local repo_root=$1
-	local label='docs/flashing_simplicity.md'
-	local document="$repo_root/$label"
-	local update_re='\*Update \(v[0-9]+\.[0-9]+\.[0-9]+\)'
-	local banner updates version rc=0
-
-	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
-		|| _release_documentation_error "$label is not a regular nonempty file" || return
-
-	# The banner is the first **Status:** paragraph, read to its blank line.
-	banner=$(awk '/^\*\*Status:\*\*/ { found=1 } found { if (/^[[:space:]]*$/) exit; print }' \
-		"$document") || return
-	[ -n "$banner" ] \
-		|| _release_documentation_error "$label has no **Status:** banner paragraph" || return
-	banner=$(printf '%s' "$banner" | tr '\n\t' '  ' | tr -s ' ')
-
-	updates=$(grep -Eo -- "$update_re" "$document" \
-		| grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | sort -u) || true
-	if [ -n "$updates" ]; then
-		case "${banner,,}" in
-			*'nothing here is implemented'*)
-				_release_documentation_error "$label records implementation updates but its status banner still says nothing here is implemented" || rc=1 ;;
-		esac
-		while IFS= read -r version; do
-			[ -n "$version" ] || continue
-			case "$banner" in
-				*"$version"*) ;;
-				*) _release_documentation_error "$label records $version implementation updates its status banner does not name" || rc=1 ;;
-			esac
-		done <<<"$updates"
-	fi
-
-	# The two build-before-hardware statements. Each is located by the sentence
-	# that states the defect or proposes the repair, and must carry a version
-	# acknowledgement within the passage that follows it -- not merely somewhere
-	# in a 700-line document.
-	awk -v label="$label" '
-		BEGIN { rc = 0 }
-		index($0, "before either hardware side effect") {
-			defect = NR
-		}
-		index($0, "**Repair build-before-hardware semantics.**") {
-			proposal = NR
-		}
-		defect && NR > defect && NR <= defect + 12 && /v[0-9]+\.[0-9]+\.[0-9]+/ {
-			defect_marked = 1
-		}
-		proposal && NR >= proposal && NR <= proposal + 8 && /v[0-9]+\.[0-9]+\.[0-9]+/ {
-			proposal_marked = 1
-		}
-		END {
-			if (!defect) {
-				printf "release documentation: %s no longer states the build-before-hardware defect this contract tracks\n", label > "/dev/stderr"
-				rc = 1
-			} else if (!defect_marked) {
-				printf "release documentation: %s states the AVR build-before-hardware defect at line %d without acknowledging the release that repaired it\n", label, defect > "/dev/stderr"
-				rc = 1
-			}
-			if (!proposal) {
-				printf "release documentation: %s no longer carries the build-before-hardware sequencing step this contract tracks\n", label > "/dev/stderr"
-				rc = 1
-			} else if (!proposal_marked) {
-				printf "release documentation: %s proposes repairing build-before-hardware semantics at line %d without acknowledging the release that did\n", label, proposal > "/dev/stderr"
-				rc = 1
-			}
-			exit rc
-		}
-	' "$document" || rc=1
-
 	return "$rc"
 }
 
