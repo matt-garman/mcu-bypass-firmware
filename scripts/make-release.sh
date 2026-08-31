@@ -1783,11 +1783,39 @@ resource_number() {
 # Reads one resource-tables.log into the rows above, validating as it goes.
 # $2 names the log in failure messages.
 parse_resource_records() {
-	local log=$1 context=$2 line pair kind label part
+	local log=$1 context=$2 line pair key kind label part identity image variant
+	local expected_part expected_result result_line=""
 	local summaries=0
-	local -A field
-	local -A seen_image=()
-	local -A seen_part=()
+	local -a tokens=()
+	local -A field=()
+	local -A schema=(
+		[RESOURCE_IMAGE]="format image part unit used ceiling capacity free method"
+		[RESOURCE_STATIC]="format part unit static ceiling free images method"
+		[RESOURCE_STACK]="format part unit method observations deepest_sp used free static sram floor"
+		[RESOURCE_STACK_BOUND]="format part unit method reports ceiling"
+		[RESOURCE_DATA]="format part variant unit method used ceiling capacity free"
+		[RESOURCE_RETURN_STACK]="format part variant unit method peak reserve spare depth"
+		[RESOURCE_TABLES_RESULT]="format status source_commit images avr_static classic_stack pic_data pic_stack records"
+	)
+	local -A expected_identity=()
+	local -A seen_identity=()
+	for image in $RELEASE_IMAGES; do
+		expected_identity["RESOURCE_IMAGE|$image"]=1
+	done
+	for part in "$ATTINY13A_MCU" $TINYX5_PARTS "$XT_TAG"; do
+		expected_identity["RESOURCE_STATIC|$part"]=1
+	done
+	for part in "$ATTINY13A_MCU" $TINYX5_PARTS; do
+		expected_identity["RESOURCE_STACK|$part"]=1
+	done
+	expected_identity["RESOURCE_STACK_BOUND|$XT_TAG"]=1
+	for variant in $VARIANTS; do
+		expected_identity["RESOURCE_DATA|$PIC12F675_TAG/$variant"]=1
+		for part in "$PIC10F322_TAG" "$PIC10F320_TAG" "$PIC12F675_TAG"; do
+			expected_identity["RESOURCE_RETURN_STACK|$part/$variant"]=1
+		done
+	done
+	expected_identity["RESOURCE_TABLES_RESULT|singleton"]=1
 	RESOURCE_IMAGE_CELL=()
 	RESOURCE_STATIC_ROWS=()
 	RESOURCE_STACK_ROWS=()
@@ -1796,22 +1824,43 @@ parse_resource_records() {
 	RESOURCE_RETURN_ROWS=()
 	[ -f "$log" ] && [ ! -L "$log" ] && [ -s "$log" ] \
 		|| die "$context: the resource evidence is missing or not a regular file"
-	while IFS= read -r line; do
-		kind=${line%% *}
-		# The terminal summary carries counts rather than a measurement, so it
-		# has no unit to resolve and no row to render. It is still counted: a
-		# log of figures with no terminal record is a truncated log.
-		case "$kind" in
-			RESOURCE_TABLES_RESULT) summaries=$((summaries + 1)); continue ;;
-		esac
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in RESOURCE_*) ;; *) continue ;; esac
+		IFS=' ' read -r -a tokens <<<"$line"
+		kind=${tokens[0]}
+		[ "${schema[$kind]+set}" = set ] \
+			|| die "$context: unknown resource record '$kind'"
 		field=()
-		for pair in $line; do
-			case "$pair" in
-				*=*) field[${pair%%=*}]=${pair#*=} ;;
+		for pair in "${tokens[@]:1}"; do
+			[[ "$pair" =~ ^([a-z][a-z0-9_]*)=([A-Za-z0-9._-]+)$ ]] \
+				|| die "$context: a $kind record has malformed field '$pair'"
+			key=${BASH_REMATCH[1]}
+			case " ${schema[$kind]} " in
+				*" $key "*) ;;
+				*) die "$context: a $kind record has unknown field '$key'" ;;
 			esac
+			[ "${field[$key]+set}" != set ] \
+				|| die "$context: a $kind record repeats field '$key'"
+			field[$key]=${BASH_REMATCH[2]}
+		done
+		for key in ${schema[$kind]}; do
+			[ "${field[$key]+set}" = set ] \
+				|| die "$context: a $kind record is missing field '$key'"
 		done
 		[ "${field[format]:-}" = 1 ] \
 			|| die "$context: a $kind record is not format=1"
+		# The terminal summary carries counts rather than a measurement, so it
+		# has no unit to resolve and no row to render. It is still schema-checked
+		# and identity-checked: an added field or second result is not evidence.
+		if [ "$kind" = RESOURCE_TABLES_RESULT ]; then
+			summaries=$((summaries + 1))
+			identity="$kind|singleton"
+			[ "${seen_identity[$identity]+set}" != set ] \
+				|| die "$context: two RESOURCE_TABLES_RESULT records"
+			seen_identity[$identity]=1
+			result_line=$line
+			continue
+		fi
 		case "${field[unit]:-}" in
 			bytes)  label=B ;;
 			words)  label=words ;;
@@ -1824,11 +1873,11 @@ parse_resource_records() {
 			resource_number ceiling "${field[ceiling]:-}" "$context"
 			resource_number capacity "${field[capacity]:-}" "$context"
 			resource_number free "${field[free]:-}" "$context"
-			[ -n "${field[image]:-}" ] \
-				|| die "$context: a RESOURCE_IMAGE record names no image"
-			[ -z "${seen_image[${field[image]}]:-}" ] \
-				|| die "$context: two RESOURCE_IMAGE records for ${field[image]}"
-			seen_image[${field[image]}]=1
+			identity=${field[image]}
+			expected_part=${field[image]#"$FW_BASE-"}
+			expected_part=${expected_part%%-*}
+			[ "${field[part]}" = "$expected_part" ] \
+				|| die "$context: ${field[image]} is attributed to ${field[part]}, expected $expected_part"
 			# The arithmetic closes on itself, so a truncated or hand-edited
 			# staged log fails here without this script holding a copy of the
 			# figures it is checking.
@@ -1846,10 +1895,7 @@ parse_resource_records() {
 			resource_number free "${field[free]:-}" "$context"
 			resource_number images "${field[images]:-}" "$context"
 			part=${field[part]:-}
-			[ -n "$part" ] || die "$context: a RESOURCE_STATIC record names no part"
-			[ -z "${seen_part[static-$part]:-}" ] \
-				|| die "$context: two RESOURCE_STATIC records for $part"
-			seen_part[static-$part]=1
+			identity=$part
 			[ "${field[free]}" -eq $(( field[ceiling] - field[static] )) ] \
 				|| die "$context: the $part static record's free margin does not close"
 			[ "${field[static]}" -gt 0 ] && [ "${field[images]}" -gt 0 ] \
@@ -1865,10 +1911,7 @@ parse_resource_records() {
 			resource_number floor "${field[floor]:-}" "$context"
 			resource_number observations "${field[observations]:-}" "$context"
 			part=${field[part]:-}
-			[ -n "$part" ] || die "$context: a RESOURCE_STACK record names no part"
-			[ -z "${seen_part[stack-$part]:-}" ] \
-				|| die "$context: two RESOURCE_STACK records for $part"
-			seen_part[stack-$part]=1
+			identity=$part
 			[ $(( field[static] + field[used] + field[free] )) -eq "${field[sram]}" ] \
 				|| die "$context: the $part stack record does not account for the whole device SRAM"
 			[ "${field[free]}" -ge "${field[floor]}" ] \
@@ -1884,7 +1927,7 @@ parse_resource_records() {
 			resource_number reports "${field[reports]:-}" "$context"
 			resource_number ceiling "${field[ceiling]:-}" "$context"
 			part=${field[part]:-}
-			[ -n "$part" ] || die "$context: a RESOURCE_STACK_BOUND record names no part"
+			identity=$part
 			[ "${field[reports]}" -gt 0 ] \
 				|| die "$context: the $part frame-bound record cites no report"
 			# The record carries no used= or peak= and this row invents none:
@@ -1898,8 +1941,8 @@ parse_resource_records() {
 			resource_number ceiling "${field[ceiling]:-}" "$context"
 			resource_number capacity "${field[capacity]:-}" "$context"
 			resource_number free "${field[free]:-}" "$context"
-			part=${field[part]:-}; [ -n "${field[variant]:-}" ] \
-				|| die "$context: a RESOURCE_DATA record names no variant"
+			part=${field[part]:-}
+			identity="$part/${field[variant]}"
 			[ "${field[free]}" -eq $(( field[ceiling] - field[used] )) ] \
 				|| die "$context: the $part ${field[variant]} data record's free margin does not close"
 			[ "${field[used]}" -gt 0 ] \
@@ -1915,8 +1958,8 @@ parse_resource_records() {
 			resource_number reserve "${field[reserve]:-}" "$context"
 			resource_number spare "${field[spare]:-}" "$context"
 			resource_number depth "${field[depth]:-}" "$context"
-			part=${field[part]:-}; [ -n "${field[variant]:-}" ] \
-				|| die "$context: a RESOURCE_RETURN_STACK record names no variant"
+			part=${field[part]:-}
+			identity="$part/${field[variant]}"
 			[ $(( field[peak] + field[reserve] + field[spare] )) -eq "${field[depth]}" ] \
 				|| die "$context: the $part ${field[variant]} return-stack record does not account for the whole hardware stack"
 			[ "${field[peak]}" -gt 0 ] \
@@ -1924,31 +1967,26 @@ parse_resource_records() {
 			RESOURCE_RETURN_ROWS+=("$(printf '| `%s` | %s | %s | %s | %s | %s |' \
 				"$part" "${field[variant]}" "${field[peak]}" "${field[reserve]}" \
 				"${field[spare]}" "${field[depth]}")") ;;
-		*) die "$context: unknown resource record '$kind'" ;;
+		*) die "$context: resource record $kind has no parser" ;;
 		esac
-	done < <(grep '^RESOURCE_[A-Z_]* ' "$log" || true)
+		identity="$kind|$identity"
+		[ "${expected_identity[$identity]+set}" = set ] \
+			|| die "$context: unexpected resource identity '$identity'"
+		[ "${seen_identity[$identity]+set}" != set ] \
+			|| die "$context: duplicate resource identity '$identity'"
+		seen_identity[$identity]=1
+	done < "$log"
 	[ "$summaries" -eq 1 ] \
 		|| die "$context: the resource evidence carries $summaries terminal result records, expected 1"
-	# Coverage in both directions, like the evidence role map: a record for an
-	# image that is not shipped is as wrong as a shipped image with no record,
-	# and "21" is not the authority for either -- RELEASE_IMAGES is.
-	local image
-	for image in $RELEASE_IMAGES; do
-		[ -n "${RESOURCE_IMAGE_CELL[$image]:-}" ] \
-			|| die "$context: no measured resource record for the release image $image"
+	expected_result="RESOURCE_TABLES_RESULT format=1 status=pass source_commit=$GIT_SHA images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9 records=$(( ${#expected_identity[@]} - 1 ))"
+	[ "$result_line" = "$expected_result" ] \
+		|| die "$context: the resource evidence has no exact source-bound complete result"
+	# Coverage in both directions against the reviewed topology, not against the
+	# terminal counts. Duplicating one valid part/variant cannot replace another.
+	for identity in "${!expected_identity[@]}"; do
+		[ "${seen_identity[$identity]+set}" = set ] \
+			|| die "$context: missing resource identity '$identity'"
 	done
-	for image in "${!RESOURCE_IMAGE_CELL[@]}"; do
-		case " $RELEASE_IMAGES " in
-			*" $image "*) ;;
-			*) die "$context: a resource record measures $image, which this release does not ship" ;;
-		esac
-	done
-	[ "${#RESOURCE_STATIC_ROWS[@]}" -gt 0 ] \
-		&& [ "${#RESOURCE_STACK_ROWS[@]}" -gt 0 ] \
-		&& [ "${#RESOURCE_BOUND_ROWS[@]}" -eq 1 ] \
-		&& [ "${#RESOURCE_DATA_ROWS[@]}" -gt 0 ] \
-		&& [ "${#RESOURCE_RETURN_ROWS[@]}" -gt 0 ] \
-		|| die "$context: the resource evidence is missing a whole class of measurement"
 }
 
 # Strict resource evidence, measured HERE for the same reason the rename/change

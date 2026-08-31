@@ -269,6 +269,7 @@ read -r -a canonical_images \
 	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_IMAGES)"
 fw_base=$(make -s --no-print-directory -C "$ROOT" CC=: print-FW_BASE)
 pic12f675_tag=$(make -s --no-print-directory -C "$ROOT" CC=: print-PIC12F675_TAG)
+xt_tag=$(make -s --no-print-directory -C "$ROOT" CC=: print-XT_TAG)
 read -r -a pic12f675_variants \
 	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-CLASSIC_VARIANTS_SUPPORTED)"
 
@@ -323,23 +324,23 @@ write_resource_evidence() {
 				"$part"
 			resource_fixture_rows+=("$(printf '| `%s` | 6 B | 20 B | 14 B | 3 |' "$part")")
 		done
-		# The LAST AVR part stands in for the AVR-XT and carries the compiler
-		# frame bound; the others carry simulated high-water records. Which part
-		# plays which role is arbitrary -- the verifier renders what the records
-		# say, and nothing here encodes the production assignment.
-		for part in "${avr[@]::${#avr[@]}-1}"; do
+		# The record identities are part of the contract, not arbitrary labels:
+		# Classic AVR parts carry observed high-water rows and the AVR-XT carries
+		# the compiler's per-frame bound.
+		for part in "${avr[@]}"; do
+			[ "$part" = "$xt_tag" ] && continue
 			printf 'RESOURCE_STACK format=1 part=%s unit=bytes method=fixture-high-water observations=3 deepest_sp=0x0F0 used=30 free=44 static=6 sram=80 floor=10\n' \
 				"$part"
 			resource_fixture_rows+=("$(printf '| `%s` | 0x0F0 | 30 B | 44 B | 6 B | 80 B | 10 B | 3 |' "$part")")
 		done
-		part=${avr[-1]}
+		part=$xt_tag
 		printf 'RESOURCE_STACK_BOUND format=1 part=%s unit=bytes method=fixture-frame-bound reports=3 ceiling=40\n' \
 			"$part"
 		resource_fixture_rows+=("$(printf '| `%s` | fixture-frame-bound | 3 | every frame <= 40 B |' "$part")")
 		for variant in "${variants[@]}"; do
 			printf 'RESOURCE_DATA format=1 part=%s variant=%s unit=bytes method=fixture used=25 ceiling=45 capacity=60 free=20\n' \
-				"${pic[0]}" "$variant"
-			resource_fixture_rows+=("$(printf '| `%s` | %s | 25 B | 45 B | 60 B | 20 B |' "${pic[0]}" "$variant")")
+				"$pic12f675_tag" "$variant"
+			resource_fixture_rows+=("$(printf '| `%s` | %s | 25 B | 45 B | 60 B | 20 B |' "$pic12f675_tag" "$variant")")
 		done
 		for part in "${pic[@]}"; do
 			for variant in "${variants[@]}"; do
@@ -806,13 +807,13 @@ reset_fixture
 printf 'RESOURCE_IMAGE format=1 image=bypass-nosuch-cd4053_simple.hex part=nosuch unit=bytes used=300 ceiling=1000 capacity=1200 free=700 method=fixture\n' \
 	>> "$release/evidence/resource-tables.log"
 refresh_resource_digest
-expect_fail "record for an unshipped image" "which this release does not ship"
+expect_fail "record for an unshipped image" "unexpected resource identity: RESOURCE_IMAGE|"
 
 reset_fixture
 head -2 "$release/evidence/resource-tables.log" | tail -1 \
 	>> "$release/evidence/resource-tables.log"
 refresh_resource_digest
-expect_fail "duplicate image measurement" "two RESOURCE_IMAGE records for"
+expect_fail "duplicate image measurement" "duplicate resource identity: RESOURCE_IMAGE|"
 
 reset_fixture
 sed -i '0,/^RESOURCE_IMAGE /s/ free=/ free=1/' \
@@ -838,13 +839,22 @@ sed -i '0,/^RESOURCE_RETURN_STACK /s/ spare=2/ spare=3/' \
 refresh_resource_digest
 expect_fail "return-stack record that loses a level" "does not account for the whole hardware stack"
 
+# Every field is accounted for before interpretation. A repeated value is not a
+# harmless restatement: accepting it would make parser choice decide which
+# signed evidence the release means.
+reset_fixture
+sed -i '0,/^RESOURCE_DATA /s/ used=25/ used=25 used=25/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "duplicate resource field" "RESOURCE_DATA record repeats field: used"
+
 # A per-frame compiler bound is not a whole-path high-water measurement, and the
 # release must not be able to publish it as one.
 reset_fixture
 sed -i 's/^\(RESOURCE_STACK_BOUND .*\)$/\1 used=99/' \
 	"$release/evidence/resource-tables.log"
 refresh_resource_digest
-expect_fail "frame bound claiming a high-water figure" "claims a high-water figure the evidence does not contain"
+expect_fail "frame bound claiming a high-water figure" "RESOURCE_STACK_BOUND record has unknown field: used"
 
 reset_fixture
 sed -i 's/^\(RESOURCE_STACK_BOUND .*\) reports=3/\1 reports=three/' \
@@ -857,6 +867,39 @@ printf 'RESOURCE_INVENTED format=1 unit=bytes value=1\n' \
 	>> "$release/evidence/resource-tables.log"
 refresh_resource_digest
 expect_fail "unknown resource record" "unknown resource record in the resource evidence"
+
+reset_fixture
+sed -i 's/^RESOURCE_TABLES_RESULT /RESOURCE_TABLES_RESULT reviewed=1 /' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "unknown terminal resource field" "RESOURCE_TABLES_RESULT record has unknown field: reviewed"
+
+# Record counts do not prove topology. These controls duplicate, remove or
+# invent an identity while the terminal result continues to claim 41 records.
+reset_fixture
+sed -i '0,/^RESOURCE_DATA .*variant=cd4053_simple /s/variant=cd4053_simple/variant=cd4053_with_mute/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "duplicate Data-space identity" "duplicate resource identity: RESOURCE_DATA|$pic12f675_tag/cd4053_with_mute"
+
+reset_fixture
+grep -v '^RESOURCE_DATA .*variant=cd4053_simple ' \
+	"$release/evidence/resource-tables.log" > "$work/resource.tmp"
+mv "$work/resource.tmp" "$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "missing Data-space identity" "missing resource identity: RESOURCE_DATA|$pic12f675_tag/cd4053_simple"
+
+reset_fixture
+sed -i '0,/^RESOURCE_STATIC /{ /^RESOURCE_STATIC /s/part=[^ ]*/part=nosuch/; }' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "substituted static-resource identity" "unexpected resource identity: RESOURCE_STATIC|nosuch"
+
+reset_fixture
+sed -i '0,/^RESOURCE_IMAGE /s/ part=[^ ]*/ part=nosuch/' \
+	"$release/evidence/resource-tables.log"
+refresh_resource_digest
+expect_fail "image attributed to another part" "is attributed to nosuch, expected"
 
 reset_fixture
 sed -i 's/ records=41$/ records=40/' "$release/evidence/resource-tables.log"
