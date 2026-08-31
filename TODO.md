@@ -525,8 +525,8 @@ statements below are now the definition rather than a summary of one:
   Losing it yields an untrimmed clock: wrong tick cadence, wrong coil-pulse
   widths, and a device that still appears to work. The guarded workflow now
   compares the complete word before/after and fails on a change; run it with a
-  real PICkit, retain the generated JSON, then write the measured result into
-  `release/README.md`'s flashing procedure.
+  real PICkit, retain the generated JSON, then add the controlled result to
+  `HARDWARE_VALIDATION_LOG.md`.
 - **8 - `ipecmd` actually runs against the part.** The pinned device pack lists
   the PIC12F675 with the same MPLAB hardware-tool set as the PIC10F322, but
   neither programmer binary is installed on any machine this repository is

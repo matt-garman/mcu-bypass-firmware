@@ -544,9 +544,11 @@ make pic10f322 && make pic10f320-variants && make pic12f675
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 
-The qualification verifier checks the retained local validation and 24-hour
-soak evidence. The image verifier resolves symlink aliases to physical directory paths and rejects
-both committed-as-fresh reuse and duplicate fresh directories. It copies
+The qualification verifier checks the retained local validation and the
+mode-required soak evidence: at least 24 hours for production or at least one
+hour for express. The image verifier resolves symlink aliases to physical
+directory paths and rejects both committed-as-fresh reuse and duplicate fresh
+directories. It copies
 `SHA256SUMS`, the committed images, and all fresh images into private storage
 before comparing sets or bytes, so later source mutations cannot contaminate
 the checksum phase. A passing verifier proves those three private snapshots are

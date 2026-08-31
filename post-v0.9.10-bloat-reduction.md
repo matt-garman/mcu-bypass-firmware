@@ -4162,13 +4162,22 @@ prospective release implementation.
   state that no simulator observes relay mechanics. `test-reference-contract`:
   10 checks, 0 failures; `test-makefile-name-contract`: 48 checks, 0 failures.
 
-- [ ] **BR-RVW-12 -- LOW -- repair three live-document contradictions.**
+- [x] **BR-RVW-12 -- LOW -- repair three live-document contradictions.**
   `docs/context_seu_detection.md:14-20` says no published release binds F2 even
   though `v0.9.11` retains explicit F2 evidence; `release/README.md:543-544`
   says the verifier checks 24-hour soak evidence even for the supported one-hour
   express mode; and `TODO.md:504-510` sends a controlled hardware result to
   `release/README.md` instead of the authority-map owner,
   `HARDWARE_VALIDATION_LOG.md`.
+
+  **Resolved:** The F2 safety record now recognizes the explicit evidence in the
+  published `v0.9.11` qualification while preserving the distinction between
+  local completion, retained qualification and publication. Release reproduction
+  guidance states the verifier's mode-dependent soak floors: 24 hours for
+  production and one hour for express. The PIC12F675 bench task now sends its
+  controlled result to `HARDWARE_VALIDATION_LOG.md`, the sole live owner, while
+  retaining the generated JSON. `test-reference-contract`: 10 checks, 0
+  failures; `test-todo-index`: 102 checks, 0 failures.
 
 - [ ] **BR-RVW-13 -- LOW -- enforce the prospective concise changelog policy
   (BR-CHANGELOG-01, `da1d62d`).** The policy at `CHANGELOG.md:24-32` excludes
