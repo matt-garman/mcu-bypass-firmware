@@ -235,11 +235,12 @@ _release_reject_extra_current_blocks() {
 # The reconciliation is deliberately ONE-SIDED. A tree that declares a release
 # whose retained record is absent must disclose that in the block a reader reads;
 # a disclosure left standing after the cut is permitted, because the artifact
-# commit may change only release/<version>/ and so structurally cannot retract
-# it. Refusing the stale direction too would put main red between the artifact
-# commit and a retraction commit, which is a worse property than a disclosure
-# that understates. The next source finalization rewrites the line for its own
-# version, which is where a stale one is caught.
+# commit may change only release/<version>/ and its exact publication-registry
+# append, so it structurally cannot retract the disclosure. Refusing the stale
+# direction too would put main red between the artifact commit and a retraction
+# commit, which is a worse property than a disclosure that understates. The next
+# source finalization rewrites the line for its own version, which is where a
+# stale one is caught.
 release_validate_development_state() {
 	[ "$#" -eq 3 ] || return 2
 	local repo_root=$1 image_count=$2 soak_count=$3

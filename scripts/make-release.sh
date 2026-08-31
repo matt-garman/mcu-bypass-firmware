@@ -75,7 +75,8 @@
 #        already committed (step 0 validates the declarations), and it stages
 #        release/<VERSION>/ without committing anything.
 #     3. ARTIFACT COMMIT -- one commit whose sole parent is the qualified source
-#        commit and which changes only release/<VERSION>/.
+#        commit and which changes only release/<VERSION>/ plus the exact
+#        append-only publication block for that directory.
 #     4. SIGNED TAG + PUSH -- the tag names the artifact commit; tag CI rebuilds
 #        and republishes from it.
 #   Steps 1 and 3 are necessarily separate commits: verify-release-history.sh
@@ -3077,10 +3078,12 @@ Review the staging dir, then sign + commit + tag + push. The pushed tag triggers
 .github/workflows/release.yml, which reproduces the image hashes on a clean
 runner and publishes the GitHub Release.
 
-The release commit must contain ONLY $OUTPUT_DIR. Tag CI requires its sole
-parent to be the source commit qualified above and rejects every changed path
-outside release/$VERSION/, so changelog/status documentation is finalized in the
-PRECEDING commit -- as it already was, or this run would not have started.
+The release commit must contain ONLY $OUTPUT_DIR plus the exact generated append
+to test/published_release_digests.txt. Tag CI requires its sole parent to be the
+source commit qualified above, rejects every other changed path, and verifies
+that the registry kept its parent bytes and gained one canonical block. Thus
+changelog/status documentation is finalized in the PRECEDING commit -- as it
+already was, or this run would not have started.
 Until the tag below is pushed, main carries the $VERSION contract while
 release/$VERSION/ is unpublished; if you abandon or postpone the release from
 here, revert or correct that source-finalization commit rather than leaving the
@@ -3094,14 +3097,17 @@ workflow can make two separate GitHub API operations atomic.
 
   # 2. sign the checksums (detached, ASCII-armored) -- adds SHA256SUMS.asc
   gpg --local-user $RELEASE_SIGNING_FINGERPRINT --armor --detach-sign $OUTPUT_DIR/SHA256SUMS
-  # 3. commit the whole release dir (uses the generated message)
-  git add $OUTPUT_DIR
+  # 3. register every file the signed checksum list does not cover, then verify
+  ./test/test_published_release_immutability.py --print-record $VERSION >> test/published_release_digests.txt
+  ./test/test_published_release_immutability.py
+  # 4. commit the release and its exact append-only registration
+  git add $OUTPUT_DIR test/published_release_digests.txt
   git commit -F $OUTPUT_DIR/commit_msg.txt
 
-  # 4. create a SIGNED, annotated tag on that commit
+  # 5. create a SIGNED, annotated tag on that commit
   git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION -m "Firmware release $VERSION"
 
-  # 5. push the commit and the tag
+  # 6. push the commit and the tag
   git push
   git push origin $VERSION
 

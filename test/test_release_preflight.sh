@@ -1536,6 +1536,35 @@ handoff_line=$(grep -Fn 'staged -- next steps (run by hand)' \
 	|| fail "staged-documentation check must run BEFORE the commit/tag hand-off (check at line $staged_call_line, hand-off at line $handoff_line)"
 checks=$((checks + 1))
 
+# The prospective release is not immutable until its post-signature registry
+# block exists. Pin the human handoff order because these commands deliberately
+# run after the script stops: sign, generate, verify, stage both paths, commit,
+# then tag.
+sign_line=$(grep -Fn 'gpg --local-user $RELEASE_SIGNING_FINGERPRINT --armor --detach-sign $OUTPUT_DIR/SHA256SUMS' \
+	"$release_script" | head -1 | cut -d: -f1)
+record_line=$(grep -Fn './test/test_published_release_immutability.py --print-record $VERSION >> test/published_release_digests.txt' \
+	"$release_script" | head -1 | cut -d: -f1)
+immutability_line=$(grep -Fxn '  ./test/test_published_release_immutability.py' \
+	"$release_script" | head -1 | cut -d: -f1)
+artifact_add_line=$(grep -Fn 'git add $OUTPUT_DIR test/published_release_digests.txt' \
+	"$release_script" | head -1 | cut -d: -f1)
+artifact_commit_line=$(grep -Fn 'git commit -F $OUTPUT_DIR/commit_msg.txt' \
+	"$release_script" | head -1 | cut -d: -f1)
+tag_line=$(grep -Fn 'git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION' \
+	"$release_script" | head -1 | cut -d: -f1)
+for handoff_step in "$sign_line" "$record_line" "$immutability_line" \
+		"$artifact_add_line" "$artifact_commit_line" "$tag_line"; do
+	[[ "$handoff_step" =~ ^[0-9]+$ ]] \
+		|| fail "could not locate every publication-registration handoff command"
+done
+[ "$sign_line" -lt "$record_line" ] \
+	&& [ "$record_line" -lt "$immutability_line" ] \
+	&& [ "$immutability_line" -lt "$artifact_add_line" ] \
+	&& [ "$artifact_add_line" -lt "$artifact_commit_line" ] \
+	&& [ "$artifact_commit_line" -lt "$tag_line" ] \
+	|| fail "release handoff does not sign, register, verify, stage, commit and tag in order"
+checks=$((checks + 1))
+
 # R3: a PUBLISHED PIC12F675 finalization command must carry the identity of the
 # transaction it recovers. `make pic12f675-finalize` passes the CALLER-selected
 # identity to the recovery oracle, which compares it against what the reservation

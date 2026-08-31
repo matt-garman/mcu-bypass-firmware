@@ -7605,8 +7605,9 @@ origins:
 #      release/<VERSION>/ with the .hex images, SHA256SUMS, a provenance MANIFEST
 #      (toolchain versions, per-image fuse bytes / CONFIG word, flashing command,
 #      soak evidence) and a README;
-#   5. STOPS and prints the exact `git add` / `git commit` / `git tag -s` and
-#      checksum-signing commands for you to run by hand (it never commits or tags).
+#   5. STOPS and prints the exact checksum-signing, publication-registration,
+#      `git add` / `git commit` / `git tag -s` commands for you to run by hand
+#      (it never commits or tags).
 # The pushed tag then triggers .github/workflows/release.yml, which rebuilds from
 # the tag on a clean runner, verifies the committed image hashes reproduce
 # bit-for-bit, and publishes the GitHub Release.

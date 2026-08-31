@@ -3771,17 +3771,25 @@ prospective release implementation.
 
 **Findings:**
 
-- [ ] **BR-RVW-01 -- CRITICAL -- future releases cannot pass tag CI
+- [x] **BR-RVW-01 -- CRITICAL -- future releases cannot pass tag CI
   (BR-REL-07, `24c2ded`/`7fe055b`).** The artifact commit is restricted to
-  `release/<version>/` by `scripts/verify-release-history.sh:64-78`, but every
-  new release must also add a block to `test/published_release_digests.txt` by
-  `test/test_published_release_immutability.py:439-453`. That gate is in
-  `test-long` (`Makefile:3134-3159,3203-3208`), which tag CI reruns
-  (`.github/workflows/release.yml:398-403`). The qualified source commit cannot
-  record evidence that does not exist yet, and the artifact-only child may not
-  update the registry. Define a topology in which the prospective release is
-  registered without weakening either the source-parent rule or historical
-  immutability, and add an end-to-end synthetic future-release case.
+  `release/<version>/`, but every new release must also add a block to
+  `test/published_release_digests.txt`. The qualified source commit cannot record
+  evidence that does not exist yet, and the artifact-only child may not update
+  the registry.
+
+  **Resolved:** A parent carrying the publication registry now requires its
+  single child to change only `release/<version>/` plus one exact canonical
+  registry append. The history gate preserves the parent bytes and file mode,
+  regenerates the suffix from the committed release, and retains the old
+  release-subtree-only rule for historical parents that predate the registry.
+  The handoff signs checksums before generating and verifying the block. A
+  synthetic future prerelease passes history and the complete immutability gate;
+  omission, prefix rewrite and noncanonical-suffix controls fail.
+  `test-release-history`: 92 checks, 0 failures.
+  `test-published-release-immutability`: 2,719 checks, 0 failures. A focused
+  `test-release-preflight` run exceeded 300 seconds before a verdict; shell
+  parsing, handoff-order inspection and `git diff --check` passed.
 
 - [x] **BR-RVW-02 -- HIGH -- a verified PIC10F320 command can program the wrong
   image (BR-FLASH-02, `23eac73`).** Producer and verifier require the expected

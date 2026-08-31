@@ -223,8 +223,12 @@ separation between the first and the third is enforced rather than conventional.
    the bounded declaration against the inventory it actually staged, so "21
    images; 18 soak combinations" is verified against 21 files and 18 soak
    records rather than against the Makefile that predicted them.
-3. **Artifact commit.** One commit whose sole parent is the qualified source
-   commit and which changes only `release/vX.Y.Z/`.
+3. **Artifact and registration commit.** After `SHA256SUMS.asc` is created, one
+   generated block for the files `SHA256SUMS` does not cover is appended to
+   `test/published_release_digests.txt`. One commit whose sole parent is the
+   qualified source commit changes only `release/vX.Y.Z/` and that exact
+   append-only registration. The history gate preserves every prior registry
+   byte and independently regenerates the new block from the committed release.
 4. **Signed tag and push.** The annotated tag names the artifact commit; tag CI
    rebuilds from it and publishes only if the image bytes reproduce. A bare
    `vX.Y.Z` tag publishes as an ordinary GitHub release; an accepted suffixed
@@ -257,8 +261,8 @@ test-release-preflight` reads the declared version out of the block and the
 image and soak counts out of the Makefile that builds them, so a declaration
 that drifts from the tree fails on the commit that writes it. The disclosure is
 required, never refused: the artifact commit may change only `release/vX.Y.Z/`
-and so cannot retract the line it makes stale, and the next source finalization
-rewrites it for its own version.
+and its publication-registration append, so it still cannot retract the line it
+makes stale. The next source finalization rewrites it for its own version.
 
 ## Which image do I want?
 
