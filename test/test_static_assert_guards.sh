@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Assert that the firmware's compile-time guards actually FIRE when the thing
-# they guard is violated.
+# Assert that selected compile-time guards actually FIRE when the thing they
+# guard is violated, and census every guard so additions or deletions are loud.
 #
 # WHY THIS EXISTS. The `static_assert`s in the config headers and MCU shells are
-# checked on every build, but only in the sense that they do not fire. Nothing
-# in the suite proves they *would*. A guard that is still enforcing an invariant
-# and a guard that has been quietly defused look exactly alike from the outside:
+# checked on every build, but only in the sense that they do not fire. Without a
+# negative fixture, a guard that is still enforcing an invariant and a guard
+# that has been quietly defused look exactly alike from the outside:
 # both are silent, and every build stays green. Reorder a header so the
 # constants arrive after the check, drop an `#include`, weaken `>` to `>=`,
 # comment one out during a debugging session -- the build does not notice, and
@@ -34,8 +34,11 @@
 #   3. the failure carries the guard's OWN message -- a mutant that fails to
 #      compile for an unrelated reason would otherwise score as a pass.
 #
-# SCOPE, stated so the next reader does not over-trust it: guard mutations compile
-# the classic-AVR lane only, with avr-gcc. The shared invariants in
+# SCOPE, stated so the next reader does not over-trust it: mutations cover
+# selected high-consequence predicates, not every static assertion. The census
+# catches a changed per-file count, but cannot detect an existing predicate
+# replaced by unconditional truth. Guard mutations here compile the classic-AVR
+# lane only, with avr-gcc. The shared invariants in
 # bypass_compile_checks.h are MCU-neutral and reach every modular shell through a
 # direct include. That include topology and its negative fixtures are checked
 # below without target tools; the AVR-XT and PIC shell-local pin, clock and
@@ -225,11 +228,13 @@ done
 # version of this file behaved, and removing `sizeof(effect_state_t)` alone went
 # unnoticed.
 #
-# Counting is the cheap complement: a mutation proves the mechanism works, the
-# census proves nothing has quietly left. Adding a guard fails this too, on
-# purpose -- someone then decides whether the new one needs a mutation, and in
-# which file: the classic-AVR mutations are below, the target-toolchain ones are
-# in test/test_target_guard_mutations.sh.
+# Counting is the cheap structural complement: a mutation proves its selected
+# predicate works, while the census proves only that the per-file number of
+# guard declarations has not changed. Adding a guard fails this too, on purpose
+# -- someone then decides whether the new one needs a mutation, and in which
+# file: the classic-AVR mutations are below, the target-toolchain ones are in
+# test/test_target_guard_mutations.sh. The census is not semantic coverage of
+# predicates that have no mutation.
 #
 # EVERY shell is counted, not only the ones this file compiles. The four target
 # shells hold 52 of the 79 guards; their mutations live behind optional

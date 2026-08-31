@@ -3712,8 +3712,8 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 **Status:** DONE `781cb43`
 
 **Observation:** Existing static-assert negative testing is strongest for
-Classic AVR/shared sources and does not equivalently exercise every target-local
-guard.
+Classic AVR/shared sources and does not equivalently exercise target-local
+guard families.
 
 **Work:**
 
@@ -3726,8 +3726,10 @@ guard.
 
 **Acceptance:**
 
-- Deleting or bypassing any required guard is detected even when firmware bytes
-  would otherwise remain valid.
+- Adding or deleting a required guard declaration changes the per-file census.
+- Selected high-consequence predicates in each target-local risk family are
+  proven load-bearing under the relevant toolchain. This does not claim that an
+  arbitrary predicate rewrite in every declaration is mutation-covered.
 
 **Result:**
 
@@ -3741,7 +3743,7 @@ mutated input against any of them. Neither half of the pair was in place: no
 mutation could prove one of those guards fires, and the census did not even
 count them, so deleting one outright was also invisible.
 
-Those 52 are exactly the guards no shared proof can stand in for. A pin assert
+Those 52 contain guards no shared proof can stand in for. A pin assert
 resolves `_PORTA_RA3_POSN` out of the Microchip device pack or `PIN7_bp` out of
 `<avr/io.h>`; a clock assert reads the `-D_XTAL_FREQ` or `-DF_CPU` only that
 part's build passes; a watchdog assert compares against that part's own de-rated
@@ -3749,7 +3751,8 @@ floor over a tick and an ISR duty that also differ by part. Compiled with
 another part's toolchain each one evaluates a different expression, or does not
 preprocess at all.
 
-`test/test_target_guard_mutations.sh` closes it, in the discipline the
+`test/test_target_guard_mutations.sh` closes the target-toolchain gap for the
+selected risk families, in the discipline the
 classic-AVR file established: copy `src/` to a throwaway tree, break one INPUT
 to a guard, compile with flags read from the Makefile via `print-<VAR>`, and
 require the failure to carry that guard's own message. 53 fixtures over 20
@@ -4087,7 +4090,7 @@ prospective release implementation.
   `CONST`, `STRCODE`, `CONFIG`, `EEDATA`, an unreviewed `BANK1` and an invented
   uppercase class. `test-xc8-helpers`: 34 checks, 0 failures.
 
-- [ ] **BR-RVW-08 -- MEDIUM -- target guard coverage does not meet its stated
+- [x] **BR-RVW-08 -- MEDIUM -- target guard coverage does not meet its stated
   all-guards acceptance criterion (BR-SRC-03, `781cb43`).** The census checks
   only the number of `static_assert` lines
   (`test/test_static_assert_guards.sh:244-263`), while target-toolchain mutations
@@ -4096,6 +4099,14 @@ prospective release implementation.
   Either add a load-bearing mutation for every required guard or narrow and
   justify the acceptance claim without representing a census as semantic
   coverage.
+
+  **Resolved:** The acceptance claim now matches the implemented evidence. The
+  toolchain-backed mutations prove selected high-consequence pin, clock,
+  layout, threshold and timing-budget predicates, while the independent
+  79-guard census detects only changed per-file declaration counts. Test and
+  changelog descriptions now state explicitly that neither the census nor the
+  representative mutation roster detects arbitrary weakening of an unmutated
+  predicate. No fixture behavior or firmware changed.
 
 - [ ] **BR-RVW-09 -- MEDIUM -- mutable release and test inventories remain
   mandatory prose duplication (BR-AUTH-01, BR-README-01, BR-TESTDOC-01 and

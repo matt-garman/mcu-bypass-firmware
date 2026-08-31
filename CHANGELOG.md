@@ -265,9 +265,10 @@ historical records and are not retroactively compacted by this policy.
   simulators, hardware qualification) to a subject and target of its own. The
   firmware is unchanged.
 
-- **The compile-time guards in the AVR-XT and PIC shells are now proven to
-  fire.** 52 of the firmware's 79 `static_assert` guards live in the four MCU
-  shells that need a target toolchain, and nothing compiled a mutated input
+- **Selected compile-time guards in the AVR-XT and PIC shells are now proven to
+  fire under their target toolchains.** 52 of the firmware's 79 `static_assert`
+  guards live in the four MCU shells that need a target toolchain, and nothing
+  compiled a mutated input
   against any of them; the guard census did not count them either, so a deleted
   guard was equally invisible. These are the guards no shared proof can stand in
   for -- a pin assert resolves against the part's device pack, a clock assert
@@ -278,9 +279,11 @@ historical records and are not retroactively compacted by this policy.
   throwaway copy of `src/` and requiring the build to fail with that guard's own
   message: wrong pin, wrong clock, wrong part selector, enum width, and every
   part's watchdog pet-to-pet budget pinned to its exact millisecond by a
-  reject/accept pair. Both skip cleanly without their toolchain and fail closed
-  under `STRICT_TOOLS=1`; the census is deliberately left outside them so it
-  covers all 79 guards on a host with no XC8. Three configurations the firmware
+  reject/accept pair. These are representative safety families, not semantic
+  mutation coverage of every assertion. Both skip cleanly without their
+  toolchain and fail closed under `STRICT_TOOLS=1`; the separate census is left
+  outside them so it detects changed declaration counts across all 79 guards on
+  a host with no XC8. Three configurations the firmware
   still accepts in silence -- two output selectors on one shell, a driver built
   under a foreign selector, and the PIC10F320's dual-scheme rejection that comes
   from undeclared identifiers rather than a guard -- are recorded as fixtures
@@ -2099,7 +2102,7 @@ historical records and are not retroactively compacted by this policy.
   and unhelpfully. That fixture is now position-independent, so the next guard
   added to that rule does not fail it.
 
-- **The firmware's compile-time guards are now proven to actually fire.** Every
+- **Selected firmware compile-time guards are now proven to actually fire.** Every
   build checks the `static_assert`s in the config headers and MCU shells, but
   only in the sense that they stay silent — and a guard still enforcing its
   invariant is indistinguishable from one that has been defused, because both
