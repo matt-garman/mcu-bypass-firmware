@@ -3239,7 +3239,7 @@ that the removal cannot be quiet.
 
 ## BR-REL-05 - Keep future releases self-contained
 
-**Status:** DONE `<commit>`
+**Status:** DONE `a636400`
 
 **Rationale:** Repeated firmware images are inexpensive and self-contained
 releases are safer than deltas or links to prior assets.
@@ -3340,6 +3340,31 @@ an image and got identical bytes because the source genuinely did not change --
 that is indistinguishable from restaging, and correctly so, since the two
 produce the same release. And it says nothing about the images a release adds or
 drops; the canonical set and the identity pin own that.
+
+**Correction, `<commit>`:** the row as first committed blocked every future
+release, and the full suite is what found it. `test-release-history` builds a
+synthetic future prerelease and runs this complete gate against it; that release
+inherits images and can declare nothing, so the gate failed. The synthetic one
+only stood in for the real problem: a release's continuity counts are not known
+until its images are built, and the commit that publishes them may change only
+`release/<version>/` plus the one canonical append to the publication registry,
+so no commit existed in which a new release's declaration could land. That is
+the defect class BR-RVW-01 found -- a gate no prospective release can pass --
+reintroduced by the gate written to close a different hole.
+
+The requirement is now owed one release later rather than never. The newest
+release is not required to carry a declaration; a declaration it does carry is
+still checked; and the requirement returns the moment the next release
+supersedes it, because that release's own source commit cannot go green without
+it. Three controls over the declaration table alone, with the published tree
+read unmodified: removing a superseded release's entry (`v0.9.10`) is rejected
+by name; removing the newest release's entry (`v0.9.11`) passes, at 2,760 checks
+against 2,764 -- exactly the four the exemption costs; and giving the newest
+release the wrong counts is still rejected. A green run is not silent about
+the deferral either: while the newest release has not declared, the passing
+summary carries `(<version> owes one)`, so the operator who just published
+it is told rather than whoever cuts the next release finding out.
+`test-release-history` returns 92 checks, 0 failures.
 
 **Acceptance:**
 
@@ -4542,7 +4567,7 @@ dependencies and acceptance criteria.
 | BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `f401507` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
-| BR-REL-05 | Keep releases self-contained | DONE `<commit>` |
+| BR-REL-05 | Keep releases self-contained | DONE `a636400` |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
 | BR-REL-08 | Collapse duplicate release phase logs | TODO |
