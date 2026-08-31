@@ -433,7 +433,7 @@ EOF
 	index_digest=$(sha256sum -- "$release/evidence/INDEX")
 	index_digest=${index_digest%% *}
 	cat > "$release/QUALIFICATION" <<EOF
-format=6
+format=7
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -553,17 +553,20 @@ write_flashing_section() {
 # Appends the terminal record to every build/target-test log first, because that
 # changes their size and the index records sizes.
 write_evidence_index() {
-	local name role size record lines
+	local name role size record lines payload_digest
 	for name in "${!fixture_role[@]}"; do
 		role=${fixture_role[$name]}
 		case "$role" in build|target-test) ;; *) continue ;; esac
 		grep -q '^EVIDENCE_RESULT ' "$release/evidence/$name" && continue
 		lines=$(wc -l < "$release/evidence/$name")
-		printf 'EVIDENCE_RESULT format=1 status=pass role=%s evidence=%s lines=%d source_commit=%s\n' \
-			"$role" "$name" "$lines" "$sha" >> "$release/evidence/$name"
+		payload_digest=$(sha256sum -- "$release/evidence/$name")
+		payload_digest=${payload_digest%% *}
+		printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+			"$role" "$name" "$lines" "$payload_digest" "$sha" \
+			>> "$release/evidence/$name"
 	done
 	{
-		printf 'EVIDENCE_INDEX format=1 source_commit=%s\n' "$sha"
+		printf 'EVIDENCE_INDEX format=2 source_commit=%s\n' "$sha"
 		while IFS= read -r name; do
 			role=${fixture_role[$name]}
 			size=$(stat -c%s "$release/evidence/$name")
@@ -582,7 +585,7 @@ write_evidence_index() {
 			esac
 			printf '%s\t%s\t%s\t%s\n' "$name" "$role" "$size" "$record"
 		done < <(printf '%s\n' "${!fixture_role[@]}" | sort)
-		printf 'EVIDENCE_INDEX_RESULT format=1 status=pass members=%d source_commit=%s\n' \
+		printf 'EVIDENCE_INDEX_RESULT format=2 status=pass members=%d source_commit=%s\n' \
 			"${#fixture_role[@]}" "$sha"
 	} > "$release/evidence/INDEX"
 }
@@ -606,11 +609,14 @@ reseal_evidence_index() {
 # exactly the derivation the verifier uses, so the control proves what it is
 # about instead of tripping the size or record check on the way there.
 restate_index_row() {
-	local name=$1 role size lines record
+	local name=$1 role size lines payload_lines payload_digest record
 	role=${fixture_role[$name]}
 	size=$(stat -c%s "$release/evidence/$name")
 	lines=$(wc -l < "$release/evidence/$name")
-	record="EVIDENCE_RESULT format=1 status=pass role=$role evidence=$name lines=$((lines - 1)) source_commit=$sha"
+	payload_lines=$((lines - 1))
+	payload_digest=$(head -n "$payload_lines" "$release/evidence/$name" | sha256sum)
+	payload_digest=${payload_digest%% *}
+	record="EVIDENCE_RESULT format=2 status=pass role=$role evidence=$name lines=$payload_lines payload_sha256=$payload_digest source_commit=$sha"
 	sed -i "s|^${name//./\\.}\t.*|$name\t$role\t$size\t$record|" \
 		"$release/evidence/INDEX"
 	reseal_evidence_index
@@ -755,20 +761,18 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=6\n' >> "$release/QUALIFICATION"
+printf 'format=7\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
-# format=3 is every release v0.9.10-v0.9.11: the contract in which SHA256SUMS
-# covered the images and the helper and left QUALIFICATION, MANIFEST.md and
-# README.md outside the signature. It is rejected rather than accepted as a
-# legacy mode, because this verifier only ever runs on a directory being staged
-# or a tag being published -- both of which must sign their own provenance.
+# Format 6 is the superseded length-attributed evidence contract. It is rejected
+# rather than accepted as a legacy mode because this verifier only runs on a
+# directory being staged or a tag being published.
 reset_fixture
-sed -i 's/^format=6$/format=3/' "$release/QUALIFICATION"
+sed -i 's/^format=7$/format=6/' "$release/QUALIFICATION"
 expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
-sed -i 's/^format=6$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=7$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
@@ -954,14 +958,21 @@ reset_fixture
 flash_pic_victim=""
 for image in "${canonical_images[@]}"; do
 	case "$image" in
-		*-pic12f675-*) continue ;;
-		*-pic*) flash_pic_victim=$image; break ;;
+		*-pic10f320-*) flash_pic_victim=$image; break ;;
 	esac
 done
-[ -n "$flash_pic_victim" ] || fail "the canonical image set contains no PIC10F32x image"
+[ -n "$flash_pic_victim" ] || fail "the canonical image set contains no PIC10F320 image"
 flash_pic_command=$(fixture_flash_command "$flash_pic_victim")
 sed -i "s|^${flash_pic_command}\$|${flash_pic_command/ -Y/}|" "$release/MANIFEST.md"
 expect_fail "PIC command with no verify pass" "performs no verify pass"
+
+# Naming the expected image in a comment does not make it the image pk2cmd
+# reads. The sole -F operand is the programming operation's authority.
+reset_fixture
+sed -i "s|^${flash_pic_command}\$|pk2cmd -Pfixture -Fwrong-image.hex -M -Y -R # ${flash_pic_victim}|" \
+	"$release/MANIFEST.md"
+expect_fail "PIC command whose expected image appears only in inert text" \
+	"does not select $flash_pic_victim as its sole -F image operand"
 
 # The part that must not appear. A per-image shortcut for it is the defect the
 # guarded transaction exists to prevent.
@@ -1149,10 +1160,11 @@ expect_fail "toolchain record without a version" \
 # --- the evidence index, and the logs it made checkable -----------------------
 # Thirteen retained files -- every build log, every target-test log, 62% of the
 # evidence tree by bytes -- were checked for their name and their non-emptiness
-# and nothing else until format=6. These controls hold the index to the Makefile
-# and to the files, in both directions, and hold each of the thirteen to its own
-# record. A missing INDEX is caught by the canonical evidence-set comparison,
-# which runs first and is the right authority for an absent evidence file.
+# and nothing else until format=6; format 7 seals their exact operation payload.
+# These controls hold the index to the Makefile and to the files, in both
+# directions, and hold each of the thirteen to its own record. A missing INDEX is
+# caught by the canonical evidence-set comparison, which runs first and is the
+# right authority for an absent evidence file.
 #
 # The controls below corrupt the index and re-pin its digest WITHOUT
 # re-rendering it. Regenerating would rewrite the edit away and leave a control
@@ -1163,14 +1175,14 @@ expect_fail "evidence index edited after recording" \
 	"evidence index digest does not match QUALIFICATION"
 
 reset_fixture
-sed -i "s/^EVIDENCE_INDEX format=1 source_commit=$sha$/EVIDENCE_INDEX format=1 source_commit=$other_sha/" \
+sed -i "s/^EVIDENCE_INDEX format=2 source_commit=$sha$/EVIDENCE_INDEX format=2 source_commit=$other_sha/" \
 	"$release/evidence/INDEX"
 reseal_evidence_index
 expect_fail "evidence index bound to another commit" \
 	"evidence index has no source-bound header record"
 
 reset_fixture
-sed -i 's/^EVIDENCE_INDEX_RESULT format=1 status=pass members=36 /EVIDENCE_INDEX_RESULT format=1 status=pass members=35 /' \
+sed -i 's/^EVIDENCE_INDEX_RESULT format=2 status=pass members=36 /EVIDENCE_INDEX_RESULT format=2 status=pass members=35 /' \
 	"$release/evidence/INDEX"
 reseal_evidence_index
 expect_fail "evidence index miscounting its own members" \
@@ -1219,13 +1231,13 @@ expect_fail "evidence index lists a member twice" \
 # The index reports a verdict the file does not carry. The member's own bytes are
 # untouched, so nothing but this cross-check catches it.
 reset_fixture
-sed -i 's/^\(build-avr-xt\.log\tbuild\t[0-9]*\t\)EVIDENCE_RESULT format=1 status=pass/\1EVIDENCE_RESULT format=1 status=fail/' \
+sed -i 's/^\(build-avr-xt\.log\tbuild\t[0-9]*\t\)EVIDENCE_RESULT format=2 status=pass/\1EVIDENCE_RESULT format=2 status=fail/' \
 	"$release/evidence/INDEX"
 reseal_evidence_index
 expect_fail "evidence index misreports a member's terminal record" \
 	"evidence index misreports the terminal record of build-avr-xt.log"
 
-# --- the thirteen logs, each bound to this commit and to its own length -------
+# --- the thirteen operation-sealed, content-bound logs ------------------------
 # These corrupt the LOG. restate_index_row puts the row back in step first, using
 # the verifier's own derivation, so what fires is the member check under test
 # rather than the size or record mismatch on the way to it.
@@ -1255,14 +1267,14 @@ reset_fixture
 sed -i "s/^\(EVIDENCE_RESULT .*\)source_commit=$sha$/\1source_commit=$other_sha/" \
 	"$release/evidence/build-avr-xt.log"
 expect_fail "retained build log bound to another commit" \
-	"build-avr-xt.log has no exact source-bound terminal record"
+	"build-avr-xt.log payload digest or result metadata does not match"
 
 # A failing run's log retained as if it had passed. Same length again.
 reset_fixture
-sed -i 's/^\(EVIDENCE_RESULT format=1 status=\)pass/\1fail/' \
+sed -i 's/^\(EVIDENCE_RESULT format=2 status=\)pass/\1fail/' \
 	"$release/evidence/build-avr-xt.log"
 expect_fail "retained build log recording a failure" \
-	"build-avr-xt.log has no exact source-bound terminal record"
+	"build-avr-xt.log payload digest or result metadata does not match"
 
 # One log substituted for its neighbour. Both are build logs bound to this same
 # commit and this same run, so only the `evidence` field tells them apart.
@@ -1271,7 +1283,35 @@ sed -i 's/evidence=build-avr-xt\.log/evidence=build-avr-classic.log/' \
 	"$release/evidence/build-avr-xt.log"
 restate_index_row build-avr-xt.log
 expect_fail "retained build log carrying another file's record" \
-	"build-avr-xt.log has no exact source-bound terminal record"
+	"build-avr-xt.log payload digest or result metadata does not match"
+
+# The original defect: replace payload bytes without changing either byte size
+# or line count. The stored result and index remain self-consistent;
+# only independent payload hashing can reject this.
+reset_fixture
+sed -i '1s/retained/replaced/' "$release/evidence/build-avr-xt.log"
+expect_fail "same-shape retained build log substitution" \
+	"build-avr-xt.log payload digest or result metadata does not match"
+
+# Even a syntactically valid digest copied into both authorities is only a claim.
+# Re-pin the outer index root and require the verifier to hash the payload.
+reset_fixture
+sed -i 's/payload_sha256=[0-9a-f]\{64\}/payload_sha256=0000000000000000000000000000000000000000000000000000000000000000/' \
+	"$release/evidence/build-avr-xt.log"
+sed -i '/^build-avr-xt\.log\t/s/payload_sha256=[0-9a-f]\{64\}/payload_sha256=0000000000000000000000000000000000000000000000000000000000000000/' \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "self-consistent false payload digest" \
+	"build-avr-xt.log payload digest or result metadata does not match"
+
+reset_fixture
+sed -i 's/EVIDENCE_RESULT format=2/EVIDENCE_RESULT format=1/' \
+	"$release/evidence/build-avr-xt.log"
+sed -i '/^build-avr-xt\.log\t/s/EVIDENCE_RESULT format=2/EVIDENCE_RESULT format=1/' \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "length-only evidence result downgrade" \
+	"build-avr-xt.log payload digest or result metadata does not match"
 
 # Content appended after the record was written. The line count in the record no
 # longer describes the file, which is the whole reason it is recorded.
@@ -1279,7 +1319,7 @@ reset_fixture
 printf 'smuggled in after the record\n' >> "$release/evidence/build-avr-xt.log"
 restate_index_row build-avr-xt.log
 expect_fail "retained build log extended after recording" \
-	"build-avr-xt.log has no exact source-bound terminal record"
+	"build-avr-xt.log EVIDENCE_RESULT is not the final line"
 
 # --- the index digest reaches the manifest and the schema ---------------------
 reset_fixture

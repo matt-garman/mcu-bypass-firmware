@@ -66,8 +66,11 @@ ROOT = Path(os.environ.get("PUBLISHED_RELEASE_ROOT")
             or Path(__file__).resolve().parent.parent)
 RELEASE = ROOT / "release"
 RECORD = ROOT / "test" / "published_release_digests.txt"
-HEADING = re.compile(r"^#\s*(v[0-9.]+)\s*--\s*(\d+) files signed by its own "
-                     r"SHA256SUMS, (\d+) recorded here\s*$")
+VERSION_TEXT = (r"v[0-9]+\.[0-9]+\.[0-9]+"
+                r"(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?")
+VERSION = re.compile(r"^%s$" % VERSION_TEXT)
+HEADING = re.compile(r"^#\s*(%s)\s*--\s*(\d+) files signed by its own "
+                     r"SHA256SUMS, (\d+) recorded here\s*$" % VERSION_TEXT)
 
 # Files a release signs for itself, and therefore the four this gate requires
 # before it will believe a directory is a published release at all.
@@ -461,29 +464,78 @@ def the_directories_and_the_record_name_the_same_releases():
                     "release/%s has no %s" % (version, name))
 
 
-def print_record(version):
-    """Print the block to append for a release, computed from the tree."""
+def record_block(version):
+    """Return the canonical block appended for one release."""
+    if not VERSION.fullmatch(version):
+        raise ValueError("invalid release version: %s" % version)
     signed = payload_of(version)
     if signed is None:
-        print("no release/%s/SHA256SUMS: not a published release directory"
-              % version, file=sys.stderr)
-        return 1
+        raise ValueError(
+            "no release/%s/SHA256SUMS: not a published release directory"
+            % version)
     members = sorted(present(version))
     unsigned = [name for name in members if name not in signed]
-    print("")
-    print("# %s -- %d files signed by its own SHA256SUMS, %d recorded here"
-          % (version, len(signed), len(unsigned)))
+    lines = ["", "# %s -- %d files signed by its own SHA256SUMS, %d recorded here"
+             % (version, len(signed), len(unsigned))]
     for name in unsigned:
-        print("%s  release/%s/%s"
-              % (digest_of(RELEASE / version / name), version, name))
+        lines.append("%s  release/%s/%s"
+                     % (digest_of(RELEASE / version / name), version, name))
+    return "\n".join(lines) + "\n"
+
+
+def print_record(version):
+    """Print the block to append for a release, computed from the tree."""
+    try:
+        block = record_block(version)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
+    if version in record_headings():
+        print("release/%s is already registered" % version, file=sys.stderr)
+        return 1
+    sys.stdout.write(block)
+    return 0
+
+
+def verify_record_append(version):
+    """Verify RECORD is the parent bytes plus one canonical release block."""
+    try:
+        block = record_block(version).encode("utf-8")
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
+    parent = sys.stdin.buffer.read()
+    try:
+        parent_text = parent.decode("utf-8")
+    except UnicodeDecodeError:
+        print("parent publication registry is not UTF-8", file=sys.stderr)
+        return 1
+    if any(match and match.group(1) == version
+           for match in (HEADING.match(line)
+                         for line in parent_text.splitlines())):
+        print("parent publication registry already names release/%s" % version,
+              file=sys.stderr)
+        return 1
+    if not RECORD.is_file() or RECORD.is_symlink():
+        print("publication registry is missing or not a regular file",
+              file=sys.stderr)
+        return 1
+    if RECORD.read_bytes() != parent + block:
+        print("publication registry is not the parent bytes plus the exact "
+              "canonical block for release/%s" % version, file=sys.stderr)
+        return 1
+    print("publication registration: exact append for release/%s" % version)
     return 0
 
 
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "--print-record":
         raise SystemExit(print_record(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] == "--verify-record-append":
+        raise SystemExit(verify_record_append(sys.argv[2]))
     if len(sys.argv) != 1:
-        print("usage: %s [--print-record vX.Y.Z]" % sys.argv[0], file=sys.stderr)
+        print("usage: %s [--print-record vX.Y.Z | "
+              "--verify-record-append vX.Y.Z]" % sys.argv[0], file=sys.stderr)
         raise SystemExit(2)
 
     for _, _, check in REGISTER:

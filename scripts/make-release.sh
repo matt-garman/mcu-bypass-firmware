@@ -75,7 +75,8 @@
 #        already committed (step 0 validates the declarations), and it stages
 #        release/<VERSION>/ without committing anything.
 #     3. ARTIFACT COMMIT -- one commit whose sole parent is the qualified source
-#        commit and which changes only release/<VERSION>/.
+#        commit and which changes only release/<VERSION>/ plus the exact
+#        append-only publication block for that directory.
 #     4. SIGNED TAG + PUSH -- the tag names the artifact commit; tag CI rebuilds
 #        and republishes from it.
 #   Steps 1 and 3 are necessarily separate commits: verify-release-history.sh
@@ -857,6 +858,9 @@ RELEASE_EVIDENCE_ROLES=$(mkv RELEASE_EVIDENCE_ROLES)
 RELEASE_EVIDENCE_RESULT_ROLES=$(mkv RELEASE_EVIDENCE_RESULT_ROLES)
 [ -n "${RELEASE_EVIDENCE_RESULT_ROLES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_RESULT_ROLES is empty"
+[ "$(printf '%s\n' $RELEASE_EVIDENCE_RESULT_ROLES | LC_ALL=C sort)" \
+	= $'build\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build and target-test"
 declare -A RELEASE_EVIDENCE_ROLE=()
 for role_entry in $RELEASE_EVIDENCE_ROLES; do
 	role_base=${role_entry%%=*}
@@ -1402,12 +1406,58 @@ esac
 release_reject_branch_only_documents "$REPO_ROOT" \
 	|| die "refusing to release: a branch-only working document is still present or referenced (see the diagnostic above)."
 
+# Seal a command's transcript at operation closure, before anything can replace
+# it and before staging. The digest covers every payload byte, including its
+# final newline; the result line is excluded to avoid a self-referential hash.
+seal_evidence_result() {
+	[ "$#" -eq 1 ] || die "seal_evidence_result takes one evidence path"
+	local path=$1 base role lines digest
+	base=${path##*/}
+	role=${RELEASE_EVIDENCE_ROLE[$base]:-}
+	[ -n "$role" ] \
+		|| die "cannot seal evidence absent from the declared role map: $base"
+	case " $RELEASE_EVIDENCE_RESULT_ROLES " in
+		*" $role "*) ;;
+		*) die "evidence role $role does not carry an EVIDENCE_RESULT: $base" ;;
+	esac
+	[ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] \
+		|| die "evidence payload is missing, empty, or not a regular file: $base"
+	! grep -q '^EVIDENCE_RESULT ' "$path" \
+		|| die "evidence payload already carries an EVIDENCE_RESULT: $base"
+	[ -z "$(tail -c 1 "$path")" ] \
+		|| die "evidence payload does not end with a newline: $base"
+	lines=$(wc -l < "$path") \
+		|| die "could not count evidence payload lines: $base"
+	[ "$lines" -gt 0 ] || die "evidence payload has no complete line: $base"
+	digest=$(sha256sum -- "$path") \
+		|| die "could not hash evidence payload: $base"
+	digest=${digest%% *}
+	printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+		"$role" "$base" "$lines" "$digest" "$GIT_SHA" >> "$path" \
+		|| die "could not seal evidence payload: $base"
+}
+
+expected_evidence_result() {
+	[ "$#" -eq 3 ] || return 2
+	local path=$1 base=$2 role=$3 total_lines payload_lines digest
+	[ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] || return 1
+	[ -z "$(tail -c 1 "$path")" ] || return 1
+	total_lines=$(wc -l < "$path") || return 1
+	[ "$total_lines" -ge 2 ] || return 1
+	payload_lines=$((total_lines - 1))
+	digest=$(head -n "$payload_lines" "$path" | sha256sum) || return 1
+	digest=${digest%% *}
+	printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+		"$role" "$base" "$payload_lines" "$digest" "$GIT_SHA"
+}
+
 # ============================================================================
 # 1. CLEAN BUILD -- every image
 # ============================================================================
 section "1. clean build (all variants x release-supported MCUs)"
 make clean >/dev/null
 make attiny13a attiny85 attiny45 >"$EVID/build-avr-classic.log" 2>&1 || { cat "$EVID/build-avr-classic.log" >&2; die "AVR build failed."; }
+seal_evidence_result "$EVID/build-avr-classic.log"
 # ATtiny202: STRICT_TOOLS=1 so an absent ATtiny_DFP is a hard failure here rather
 # than a clean skip that would leave build_avr_xt/ empty and be caught much later
 # as three missing images. The build enforces both flash and static-RAM limits;
@@ -1416,12 +1466,15 @@ make attiny202 STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
 	XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
 	>"$EVID/build-avr-xt.log" 2>&1 \
 	|| { cat "$EVID/build-avr-xt.log" >&2; die "ATtiny202 build failed."; }
+seal_evidence_result "$EVID/build-avr-xt.log"
 make pic10f322 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/build-pic10f322.log" 2>&1 || { cat "$EVID/build-pic10f322.log" >&2; die "PIC build failed."; }
+seal_evidence_result "$EVID/build-pic10f322.log"
 # pic10f320-variants builds all three and, on any failure, removes the WHOLE image
 # set rather than leaving a partial matrix behind for a later step to stage.
 make pic10f320-variants PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
 	>"$EVID/build-pic10f320.log" 2>&1 \
 	|| { cat "$EVID/build-pic10f320.log" >&2; die "PIC10F320 build failed."; }
+seal_evidence_result "$EVID/build-pic10f320.log"
 # PIC12F675 shares PIC_CC/PIC_DFP with the 322. `make pic12f675` builds all three
 # shipped HEXes plus the 1024-word flash and 48/64-byte Data-space gates and,
 # like the 322, removes its whole product set on any failure rather than leaving
@@ -1432,6 +1485,7 @@ make pic12f675 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
 	PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT" \
 	>"$EVID/build-pic12f675.log" 2>&1 \
 	|| { cat "$EVID/build-pic12f675.log" >&2; die "PIC12F675 build failed."; }
+seal_evidence_result "$EVID/build-pic12f675.log"
 
 # Enumerate the expected image set and assert each exists.
 IMAGES=()
@@ -1590,6 +1644,7 @@ make attiny202-test STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
 	XT_STACK_MAX_FRAME="$RELEASE_XT_STACK_MAX_FRAME" \
 	>"$EVID/attiny202-test.log" 2>&1 \
 	|| { tail -40 "$EVID/attiny202-test.log" >&2; die "make attiny202-test FAILED."; }
+seal_evidence_result "$EVID/attiny202-test.log"
 ok "attiny202-test passed."
 
 # Fail-closed AVR-XT target aggregate (yasimavr), the counterpart of the two PIC
@@ -1602,12 +1657,14 @@ make attiny202-test-target STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
 	XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
 	>"$EVID/attiny202-test-target.log" 2>&1 \
 	|| { tail -60 "$EVID/attiny202-test-target.log" >&2; die "make attiny202-test-target FAILED."; }
+seal_evidence_result "$EVID/attiny202-test-target.log"
 ok "attiny202-test-target passed."
 validated_xt_image_hashes=$(hash_xt_image_set "${XT_IMAGES[@]}")
 validated_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 
 log "running make pic10f322-test (PIC CONFIG word + analyze + gpsim)..."
 make pic10f322-test STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" >"$EVID/pic10f322-test.log" 2>&1 || { tail -40 "$EVID/pic10f322-test.log" >&2; die "make pic10f322-test FAILED."; }
+seal_evidence_result "$EVID/pic10f322-test.log"
 ok "pic10f322-test passed."
 
 # Fail-closed PIC target aggregate (libgpsim): per variant, require target fault
@@ -1619,12 +1676,14 @@ log "running make pic10f322-test-target-variants (fault + lock-step + target I/O
 make pic10f322-test-target-variants STRICT_TOOLS=1 PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
 	>"$EVID/pic10f322-test-target-variants.log" 2>&1 \
 	|| { tail -60 "$EVID/pic10f322-test-target-variants.log" >&2; die "make pic10f322-test-target-variants FAILED."; }
+seal_evidence_result "$EVID/pic10f322-test-target-variants.log"
 ok "pic10f322-test-target-variants passed."
 
 log "running make pic10f320-test (PIC10F320 host lanes + hashes + CONFIG + stack + analysis + gpsim, all variants)..."
 make pic10f320-test STRICT_TOOLS=1 PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
 	>"$EVID/pic10f320-test.log" 2>&1 \
 	|| { tail -60 "$EVID/pic10f320-test.log" >&2; die "make pic10f320-test FAILED."; }
+seal_evidence_result "$EVID/pic10f320-test.log"
 ok "pic10f320-test passed."
 
 log "running make pic10f320-test-target-variants (fault + lock-step + target I/O on the real HEX)..."
@@ -1632,6 +1691,7 @@ make pic10f320-test-target-variants STRICT_TOOLS=1 \
 	PIC10F320_CC="$PIC10F320_CC" PIC10F320_DFP="$PIC10F320_DFP" \
 	>"$EVID/pic10f320-test-target-variants.log" 2>&1 \
 	|| { tail -60 "$EVID/pic10f320-test-target-variants.log" >&2; die "make pic10f320-test-target-variants FAILED."; }
+seal_evidence_result "$EVID/pic10f320-test-target-variants.log"
 ok "pic10f320-test-target-variants passed."
 validated_pic_image_hashes=$(hash_pic_image_set "${PIC_IMAGES[@]}")
 
@@ -2045,6 +2105,7 @@ for v in $VARIANTS; do
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
+seal_evidence_result "$EVID/soak-build.log"
 # Baseline the derived simcal images now that they exist. The shipped HEXes were
 # already hashed after their gate; both sets are re-checked unchanged across the
 # soak below, and the gate proved simcal = shipped-HEX with only word 0x3FF
@@ -2183,6 +2244,7 @@ for elf in "${AVR_ELFS[@]}"; do old_file_args+=("--old-file=$elf"); done
 make "${old_file_args[@]}" attiny13a attiny85 attiny45 AVR_REBUILD_PREREQ= \
 	>"$EVID/final-image-build.log" 2>&1 \
 	|| { tail -60 "$EVID/final-image-build.log" >&2; die "final classic HEX regeneration FAILED."; }
+seal_evidence_result "$EVID/final-image-build.log"
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 [ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
 	|| die "a validated classic AVR ELF changed during final HEX regeneration"
@@ -2419,21 +2481,23 @@ parse_resource_records "$OUTPUT_DIR/evidence/resource-tables.log" "staged resour
 # toolchain record and the test-long summary each carry an exact source-bound
 # terminal record the verifier matches, and the PIC12F675 pair is bound by
 # pic12f675_matrix_sha256 and its matrix verifier. These thirteen were not, so a
-# log kept from an earlier run, truncated, or extended after the fact satisfied
-# every gate. test/published_release_digests.txt then freezes exactly what was
-# staged, which makes a wrong log permanent rather than catching it: that record
-# is an immutability gate, and this is the qualification one it cannot be.
+# log kept from an earlier run, substituted without changing its size or line
+# count, truncated, or extended after the fact satisfied every gate.
+# test/published_release_digests.txt then freezes exactly what was staged, which
+# makes a wrong log permanent rather than catching it: that record is an
+# immutability gate, and this is the qualification one it cannot be.
 #
 # ONE record shape for all thirteen rather than a per-role BUILD_RESULT and
 # TARGET_TEST_RESULT: the role is a field, so the verifier is one loop instead
 # of two parsers and a fourteenth log is a Makefile entry rather than a branch.
 #
-# WHAT THIS DOES NOT DO. It adds no verdict. Reaching this line means each of
-# these commands already exited zero and this script already acted on that. What
-# the record adds is ATTRIBUTION: `evidence` names the file the record belongs
-# to and `lines` counts what precedes it, so a log from a different run, a log
-# substituted for its neighbour, a truncated log and a padded log all stop
-# matching, and `source_commit` ties all thirteen to the commit being released.
+# WHAT THIS DOES NOT DO. It adds no verdict. Each command already exited zero and
+# this script already acted on that. The result was written at that operation's
+# closure: `payload_sha256` commits every preceding byte, `evidence` and `role`
+# bind those bytes to their declared purpose, `lines` defines the hashed prefix,
+# and `source_commit` ties all thirteen to the commit being released. Staging
+# validates and copies that record; it must never regenerate one around whatever
+# bytes happen to be present later.
 evidence_result_roles=" $RELEASE_EVIDENCE_RESULT_ROLES "
 evidence_bound=0
 for evidence_base in $RELEASE_EVIDENCE_FILES; do
@@ -2446,24 +2510,21 @@ for evidence_base in $RELEASE_EVIDENCE_FILES; do
 	staged_evidence="$OUTPUT_DIR/evidence/$evidence_base"
 	[ -f "$staged_evidence" ] && [ ! -L "$staged_evidence" ] && [ -s "$staged_evidence" ] \
 		|| die "retained evidence is missing or not a regular file: $evidence_base"
-	if grep -q '^EVIDENCE_RESULT ' "$staged_evidence"; then
-		die "retained evidence already carries an EVIDENCE_RESULT record: $evidence_base"
-	fi
-	# wc -l counts newlines, so a log with no final newline would both miscount
-	# and have the record concatenated onto its last line.
-	[ -z "$(tail -c 1 "$staged_evidence")" ] \
-		|| die "retained evidence does not end with a newline: $evidence_base"
-	evidence_lines=$(wc -l < "$staged_evidence") \
-		|| die "could not measure retained evidence: $evidence_base"
-	printf 'EVIDENCE_RESULT format=1 status=pass role=%s evidence=%s lines=%d source_commit=%s\n' \
-		"$evidence_role" "$evidence_base" "$evidence_lines" "$GIT_SHA" \
-		>> "$staged_evidence" \
-		|| die "could not record the terminal result for $evidence_base"
+	mapfile -t evidence_results < <(grep '^EVIDENCE_RESULT ' "$staged_evidence" || true)
+	[ "${#evidence_results[@]}" -eq 1 ] \
+		|| die "retained evidence carries ${#evidence_results[@]} EVIDENCE_RESULT records: $evidence_base"
+	expected_result=$(expected_evidence_result \
+		"$staged_evidence" "$evidence_base" "$evidence_role") \
+		|| die "could not rederive the payload-bound result for $evidence_base"
+	[ "${evidence_results[0]}" = "$expected_result" ] \
+		|| die "retained evidence payload or result changed after operation closure: $evidence_base"
+	[ "$(tail -n 1 "$staged_evidence")" = "$expected_result" ] \
+		|| die "retained evidence result is not the final line: $evidence_base"
 	evidence_bound=$((evidence_bound + 1))
 done
 [ "$evidence_bound" -gt 0 ] \
 	|| die "no retained evidence carries an EVIDENCE_RESULT record"
-ok "bound $evidence_bound retained logs to $GIT_SHORT with a terminal record."
+ok "verified $evidence_bound operation-sealed logs against their payload digests."
 
 # --- evidence/INDEX: what each retained file is, and what it concluded --------
 # The table of contents the evidence directory never had. Thirty-six rows of
@@ -2471,12 +2532,11 @@ ok "bound $evidence_bound retained logs to $GIT_SHORT with a terminal record."
 # role map rather than from the directory, so a member that went missing is a
 # row the verifier cannot satisfy instead of a row that was never written.
 #
-# It carries NO digest column, deliberately. test/published_release_digests.txt
-# already records every published evidence file by digest and enforces, with
-# each release's own SHA256SUMS, a partition covering every published file
-# exactly once. A digest here would be a second record of the same fact with no
-# rule about which one wins when they disagree. What was missing is what this
-# supplies: what each file is for, and what it concluded.
+# It carries NO digest column, deliberately. The thirteen operation transcripts
+# carry their one payload digest inside EVIDENCE_RESULT; this index commits that
+# result rather than inventing another digest. test/published_release_digests.txt
+# records the different, final published file for historical immutability. What
+# this index supplies is what each file is for and the result that concluded it.
 #
 # INDEX cannot list itself. Its own authority is evidence_index_sha256 in
 # QUALIFICATION, which SHA256SUMS covers and the release signature signs.
@@ -2503,7 +2563,7 @@ release_terminal_record() {
 }
 evidence_members=0
 {
-	printf 'EVIDENCE_INDEX format=1 source_commit=%s\n' "$GIT_SHA"
+	printf 'EVIDENCE_INDEX format=2 source_commit=%s\n' "$GIT_SHA"
 	for evidence_base in $(printf '%s\n' $RELEASE_EVIDENCE_FILES \
 			| grep -v '^INDEX$' | sort); do
 		evidence_role=${RELEASE_EVIDENCE_ROLE[$evidence_base]}
@@ -2516,7 +2576,7 @@ evidence_members=0
 			"$evidence_base" "$evidence_role" "$evidence_size" "$evidence_record"
 		evidence_members=$((evidence_members + 1))
 	done
-	printf 'EVIDENCE_INDEX_RESULT format=1 status=pass members=%d source_commit=%s\n' \
+	printf 'EVIDENCE_INDEX_RESULT format=2 status=pass members=%d source_commit=%s\n' \
 		"$evidence_members" "$GIT_SHA"
 } > "$OUTPUT_DIR/evidence/INDEX" \
 	|| die "could not write the evidence index"
@@ -2533,7 +2593,7 @@ ok "evidence index lists $indexed_rows retained files by role and terminal recor
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=6\n'
+	printf 'format=7\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -2664,9 +2724,10 @@ img_row() {
 # checked before, and all four properties were violated in v0.9.11.
 check_flash_commands() {
 	local file=$1 image profile command stem variant fuse name value block
+	local pk2_command pk2_arg pk2_image pk2_image_count
 	local pic322_published=""
 	local -A download_seen=()
-	local -a download_cmds=()
+	local -a download_cmds=() pk2_args=()
 
 	while IFS=$'\t' read -r image profile command; do
 		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
@@ -2739,11 +2800,26 @@ check_flash_commands() {
 				done
 				;;
 			pk2cmd)
-				case " $command " in
+				pk2_command=${command%%#*}
+				[[ "$pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
+					|| die "the pk2cmd command for $image is not one plain writer invocation: $command"
+				read -r -a pk2_args <<<"$pk2_command"
+				pk2_image=""
+				pk2_image_count=0
+				for pk2_arg in "${pk2_args[@]}"; do
+					case "$pk2_arg" in
+						-F*)
+							pk2_image=${pk2_arg#-F}
+							pk2_image_count=$((pk2_image_count + 1)) ;;
+					esac
+				done
+				[ "$pk2_image_count" -eq 1 ] && [ "$pk2_image" = "$image" ] \
+					|| die "the pk2cmd command for $image does not select $image as its sole -F image operand: $command"
+				case " $pk2_command " in
 					*' -M '*) ;;
 					*) die "the pk2cmd command for $image does not program the whole device (-M): $command" ;;
 				esac
-				case " $command " in
+				case " $pk2_command " in
 					*' -Y '*) ;;
 					*) die "the pk2cmd command for $image performs no verify pass (-Y): $command" ;;
 				esac
@@ -3061,10 +3137,12 @@ Review the staging dir, then sign + commit + tag + push. The pushed tag triggers
 .github/workflows/release.yml, which reproduces the image hashes on a clean
 runner and publishes the GitHub Release.
 
-The release commit must contain ONLY $OUTPUT_DIR. Tag CI requires its sole
-parent to be the source commit qualified above and rejects every changed path
-outside release/$VERSION/, so changelog/status documentation is finalized in the
-PRECEDING commit -- as it already was, or this run would not have started.
+The release commit must contain ONLY $OUTPUT_DIR plus the exact generated append
+to test/published_release_digests.txt. Tag CI requires its sole parent to be the
+source commit qualified above, rejects every other changed path, and verifies
+that the registry kept its parent bytes and gained one canonical block. Thus
+changelog/status documentation is finalized in the PRECEDING commit -- as it
+already was, or this run would not have started.
 Until the tag below is pushed, main carries the $VERSION contract while
 release/$VERSION/ is unpublished; if you abandon or postpone the release from
 here, revert or correct that source-finalization commit rather than leaving the
@@ -3078,14 +3156,17 @@ workflow can make two separate GitHub API operations atomic.
 
   # 2. sign the checksums (detached, ASCII-armored) -- adds SHA256SUMS.asc
   gpg --local-user $RELEASE_SIGNING_FINGERPRINT --armor --detach-sign $OUTPUT_DIR/SHA256SUMS
-  # 3. commit the whole release dir (uses the generated message)
-  git add $OUTPUT_DIR
+  # 3. register every file the signed checksum list does not cover, then verify
+  ./test/test_published_release_immutability.py --print-record $VERSION >> test/published_release_digests.txt
+  ./test/test_published_release_immutability.py
+  # 4. commit the release and its exact append-only registration
+  git add $OUTPUT_DIR test/published_release_digests.txt
   git commit -F $OUTPUT_DIR/commit_msg.txt
 
-  # 4. create a SIGNED, annotated tag on that commit
+  # 5. create a SIGNED, annotated tag on that commit
   git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION -m "Firmware release $VERSION"
 
-  # 5. push the commit and the tag
+  # 6. push the commit and the tag
   git push
   git push origin $VERSION
 

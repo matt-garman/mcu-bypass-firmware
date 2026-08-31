@@ -28,9 +28,12 @@
 # have happened once (the v0.9.0-v0.9.2 TMUX errata), but they are a deliberate
 # act recorded in the gate beside the reason, not a number replaced here.
 #
-# A new release appends a block. Generate it with:
+# A new release appends a block after SHA256SUMS.asc is created, verifies the
+# complete register, and commits that append with release/vX.Y.Z/. Generate it
+# with:
 #
-#     ./test/test_published_release_immutability.py --print-record vX.Y.Z
+#     ./test/test_published_release_immutability.py --print-record vX.Y.Z >> test/published_release_digests.txt
+#     ./test/test_published_release_immutability.py
 
 # v0.9.0 -- 20 files signed by its own SHA256SUMS, 24 recorded here
 41af4f525ccc7d459a82fa773f20fd428b1088052d14e4a20325191617f54c4f  release/v0.9.0/MANIFEST.md

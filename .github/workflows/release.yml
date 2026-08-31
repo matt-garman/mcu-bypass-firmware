@@ -11,7 +11,8 @@ name: Release
 # When the tag lands here, this workflow:
 #   1. verifies the checksum signature against the pinned maintainer key, then
 #      verifies the retained qualification belongs to the tag event's commit:
-#      an artifact-only child whose sole parent is the qualified source;
+#      a single-parent child of the qualified source containing only its release
+#      artifacts and exact append-only publication registration;
 #   2. rebuilds every release image from the TAGGED source on a clean runner
 #      (AVR Classic + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675);
 #   3. REPRODUCIBILITY GATE: asserts the committed files, SHA256SUMS entries,

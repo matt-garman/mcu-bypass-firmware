@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SOURCE_VERIFY="$ROOT/scripts/verify-release-history.sh"
+IMMUTABILITY_SOURCE="$ROOT/test/test_published_release_immutability.py"
+DIGEST_RECORD_SOURCE="$ROOT/test/published_release_digests.txt"
 TAG_VERIFY_SOURCE="$ROOT/scripts/verify-release-tag-target.sh"
 SIGNATURE_VERIFY_SOURCE="$ROOT/scripts/verify-release-signature.sh"
 PINNED_SIGNATURE_VERIFY="$SIGNATURE_VERIFY_SOURCE"
@@ -104,11 +106,22 @@ setup_fixture() {
 	local extra_path=${2:-none}
 	local merge_mode=${3:-no-merge}
 	local prior_release=${4:-absent}
+	local registry_mode=${5:-legacy}
+	local registration_mode=${6:-valid}
 	local qsource primary
 	rm -rf "$repo" "$snapshot"
 	mkdir -p "$repo/scripts"
 	cp "$SOURCE_VERIFY" "$repo/scripts/verify-release-history.sh"
 	chmod 755 "$repo/scripts/verify-release-history.sh"
+	if [ "$registry_mode" = registered ]; then
+		mkdir -p "$repo/test"
+		cp "$IMMUTABILITY_SOURCE" "$repo/test/test_published_release_immutability.py"
+		chmod 755 "$repo/test/test_published_release_immutability.py"
+		printf '# synthetic publication registry\n' \
+			> "$repo/test/published_release_digests.txt"
+	elif [ "$registry_mode" != legacy ]; then
+		fail "bad registry mode in fixture: $registry_mode"
+	fi
 	git -C "$repo" init -q
 	git -C "$repo" config user.name "Release History Test"
 	git -C "$repo" config user.email "release-history@example.invalid"
@@ -120,6 +133,10 @@ setup_fixture() {
 	printf '<!-- current-release:start -->\ndeclaration\n<!-- current-release:end -->\n' \
 		> "$repo/release/README.md"
 	git -C "$repo" add base.txt release/README.md scripts/verify-release-history.sh
+	if [ "$registry_mode" = registered ]; then
+		git -C "$repo" add test/test_published_release_immutability.py \
+			test/published_release_digests.txt
+	fi
 	git -C "$repo" -c commit.gpgsign=false commit -qm base
 	base_sha=$(git -C "$repo" rev-parse HEAD)
 	primary=$(git -C "$repo" symbolic-ref --short HEAD)
@@ -156,7 +173,39 @@ setup_fixture() {
 	printf 'source_commit=%s\n' "$qsource" > "$repo/release/$version/QUALIFICATION"
 	printf 'manifest\n' > "$repo/release/$version/MANIFEST.md"
 	printf 'evidence\n' > "$repo/release/$version/evidence/result.log"
+	if [ "$registry_mode" = registered ]; then
+		printf 'release readme\n' > "$repo/release/$version/README.md"
+		printf 'firmware\n' > "$repo/release/$version/firmware.hex"
+		(
+			cd "$repo/release/$version"
+			sha256sum -- firmware.hex QUALIFICATION MANIFEST.md README.md \
+				evidence/result.log > SHA256SUMS
+		)
+		printf 'detached signature fixture\n' \
+			> "$repo/release/$version/SHA256SUMS.asc"
+		case "$registration_mode" in
+			valid|extra)
+				python3 "$repo/test/test_published_release_immutability.py" \
+					--print-record "$version" \
+					>> "$repo/test/published_release_digests.txt" ;;
+			rewritten-prefix)
+				sed -i '1s/.*/# rewritten publication registry/' \
+					"$repo/test/published_release_digests.txt"
+				python3 "$repo/test/test_published_release_immutability.py" \
+					--print-record "$version" \
+					>> "$repo/test/published_release_digests.txt" ;;
+			omitted) ;;
+			*) fail "bad registration mode in fixture: $registration_mode" ;;
+		esac
+		if [ "$registration_mode" = extra ]; then
+			printf '# noncanonical suffix\n' \
+				>> "$repo/test/published_release_digests.txt"
+		fi
+	fi
 	git -C "$repo" add "release/$version"
+	if [ "$registry_mode" = registered ]; then
+		git -C "$repo" add test/published_release_digests.txt
+	fi
 	if [ "$extra_path" = outside ]; then
 		printf 'not release data\n' > "$repo/outside.txt"
 		git -C "$repo" add outside.txt
@@ -176,6 +225,48 @@ setup_fixture() {
 	if [ "$merge_mode" = merge ]; then
 		git -C "$repo" -c commit.gpgsign=false merge -q --no-ff side -m merge
 	fi
+	release_sha=$(git -C "$repo" rev-parse HEAD)
+	cp -a "$repo/release/$version" "$snapshot"
+}
+
+setup_complete_registered_fixture() {
+	rm -rf "$repo" "$snapshot"
+	mkdir -p "$repo/scripts" "$repo/test"
+	cp "$SOURCE_VERIFY" "$repo/scripts/verify-release-history.sh"
+	cp "$IMMUTABILITY_SOURCE" "$repo/test/test_published_release_immutability.py"
+	cp "$DIGEST_RECORD_SOURCE" "$repo/test/published_release_digests.txt"
+	cp -a "$ROOT/release" "$repo/release"
+	chmod 755 "$repo/scripts/verify-release-history.sh" \
+		"$repo/test/test_published_release_immutability.py"
+	git -C "$repo" init -q
+	git -C "$repo" config user.name "Release History Test"
+	git -C "$repo" config user.email "release-history@example.invalid"
+	printf 'base\n' > "$repo/base.txt"
+	git -C "$repo" add base.txt release scripts test
+	git -C "$repo" -c commit.gpgsign=false commit -qm base
+	printf 'qualified source\n' > "$repo/source.txt"
+	git -C "$repo" add source.txt
+	git -C "$repo" -c commit.gpgsign=false commit -qm source
+	source_sha=$(git -C "$repo" rev-parse HEAD)
+
+	mkdir -p "$repo/release/$version/evidence"
+	printf 'source_commit=%s\n' "$source_sha" \
+		> "$repo/release/$version/QUALIFICATION"
+	printf 'manifest\n' > "$repo/release/$version/MANIFEST.md"
+	printf 'release readme\n' > "$repo/release/$version/README.md"
+	printf 'evidence\n' > "$repo/release/$version/evidence/result.log"
+	printf 'firmware\n' > "$repo/release/$version/firmware.hex"
+	(
+		cd "$repo/release/$version"
+		sha256sum -- firmware.hex QUALIFICATION MANIFEST.md README.md \
+			evidence/result.log > SHA256SUMS
+	)
+	printf 'detached signature fixture\n' \
+		> "$repo/release/$version/SHA256SUMS.asc"
+	python3 "$repo/test/test_published_release_immutability.py" \
+		--print-record "$version" >> "$repo/test/published_release_digests.txt"
+	git -C "$repo" add "release/$version" test/published_release_digests.txt
+	git -C "$repo" -c commit.gpgsign=false commit -qm release
 	release_sha=$(git -C "$repo" rev-parse HEAD)
 	cp -a "$repo/release/$version" "$snapshot"
 }
@@ -202,6 +293,34 @@ expect_fail() {
 setup_fixture
 expect_pass "artifact-only child of qualified source"
 
+setup_fixture source none no-merge absent registered
+expect_pass "registered release child of qualified source"
+
+setup_fixture source none no-merge absent registered omitted
+expect_fail "registered release without publication registration" \
+	"does not append the publication registration" \
+	"$snapshot" "$version" "$release_sha"
+
+setup_fixture source none no-merge absent registered rewritten-prefix
+expect_fail "publication registration that rewrites its parent prefix" \
+	"does not append one exact canonical publication registration" \
+	"$snapshot" "$version" "$release_sha"
+
+setup_fixture source none no-merge absent registered extra
+expect_fail "publication registration with a noncanonical suffix" \
+	"does not append one exact canonical publication registration" \
+	"$snapshot" "$version" "$release_sha"
+
+version=v99.0.0-rc.1
+setup_complete_registered_fixture
+expect_pass "synthetic future prerelease history"
+PUBLISHED_RELEASE_ROOT="$repo" \
+	python3 "$repo/test/test_published_release_immutability.py" >/dev/null \
+	|| fail "synthetic future prerelease failed the complete immutability gate"
+checks=$((checks + 1))
+version=v99.0.0
+
+setup_fixture
 git -C "$repo" tag -a event-object -m "annotated event" "$release_sha"
 tag_object=$(git -C "$repo" rev-parse refs/tags/event-object)
 "$repo/scripts/verify-release-history.sh" "$snapshot" "$version" "$tag_object" \

@@ -211,7 +211,7 @@ unfinished release.
 
 ## BR-AUTH-01 - Finalize and publish the authority map
 
-**Status:** DONE `620234f`
+**Status:** DONE `620234f` + `0705898`
 
 **Depends on:** BR-BASE-01
 
@@ -260,6 +260,12 @@ programming commands are owned by the generated `MANIFEST.md` inside each
 release directory, which is where they are actually rendered, and target,
 variant and resource policy is owned by the Makefile's canonical maps, added as
 a row because it is one of the duplication classes this plan names.
+
+Follow-up `0705898` made the branch-only lifecycle executable rather than tied
+to an accumulating filename allowlist: a root-level working document is
+recognized by the declaration in its opening blockquote, while the release gate
+still rejects every root-level document outside the durable set. This plan is
+the first live consumer of that rule.
 
 `README.md` does not yet satisfy its own rule: its opening paragraph and target
 table restate the release-scope figures and first-released versions that
@@ -2310,16 +2316,6 @@ topology into target-specific and TODO documents.
 
 **Work:**
 
-- [ ] Define one human release-state authority.
-- [ ] Keep literal release identity in the Makefile where it serves as an
-  independent fail-closed production pin.
-- [ ] Remove global topology declarations from TODO and target-specific docs.
-- [ ] Generate human release topology where needed from canonical data.
-- [ ] Replace occurrence/prose synchronization tests with semantic release
-  identity checks.
-
-**Work:**
-
 - [x] Define one human release-state authority.
 - [x] Keep literal release identity in the Makefile where it serves as an
   independent fail-closed production pin.
@@ -2690,7 +2686,7 @@ may be valuable. Repeating the literal at every call site is not.
 
 ## BR-TEST-07 - Consolidate shared strict helpers and remove trivial wrappers
 
-**Status:** DONE `cee6bab`
+**Status:** DONE `cee6bab` + `0dada67`
 
 **Completed work:**
 
@@ -3104,16 +3100,19 @@ that rounds to zero. Declined on the measurement, not on effort.
 
 ### The index half: already built, by BR-REL-07
 
-`test/published_release_digests.txt` records every published evidence file by
-digest -- 306 of them -- and `test_published_release_immutability.py` enforces,
-together with each release's own `SHA256SUMS`, a partition covering every
-published file exactly once. Its header states the charter directly: "Every
-published file a release does not sign for itself." A per-member digest in a
-new `evidence/INDEX` would have been a second record of the same fact with no
-rule about which wins when they disagree.
+`test/published_release_digests.txt` records every final published evidence file
+by digest -- 306 of them -- and `test_published_release_immutability.py`
+enforces, together with each release's own `SHA256SUMS`, a partition covering
+every published file exactly once. Its header states the charter directly:
+"Every published file a release does not sign for itself." A full-file digest
+column in `evidence/INDEX` would have been a second record of the same fact with
+no rule about which wins when they disagree.
 
-So `evidence/INDEX` carries **no digest column**. It records what was missing:
-what each retained file is for, and what it concluded.
+So `evidence/INDEX` carries **no digest column**. The build/target terminal
+record it commits now contains the one digest of the different object that
+matters to qualification: the exact operation payload before that record was
+appended. The index records what each retained file is for and what concluded
+it; the publication registry freezes the resulting final file.
 
 ### What the measurement actually found
 
@@ -3141,9 +3140,10 @@ covers only the 18 named combinations.
   its name, so the index cannot be its own authority for what a member is.
 - [x] Write `evidence/INDEX`: one row per member with role, size and terminal
   record, plus a source-bound header and result record.
-- [x] Bind it as `evidence_index_sha256` from `QUALIFICATION` at `format=6`.
+- [x] Bind it as `evidence_index_sha256` from `QUALIFICATION` at `format=7`.
 - [x] Emit an `EVIDENCE_RESULT` record into each of the 13 unbound logs, binding
-  each to the released commit, to its own name, and to its own length.
+  each at operation closure to the released commit, declared role, own name,
+  payload line count and exact payload SHA-256.
 - [x] Verify the index against the Makefile and against the files, both
   directions: no member unlisted, no row unmatched.
 - [x] Retain raw logs where forensic detail is useful -- unchanged, and now the
@@ -3162,12 +3162,13 @@ covers only the 18 named combinations.
   evidence.~~ Withdrawn with it, and satisfied absolutely: there is no
   compression step.
 
-**What this does not do.** The `EVIDENCE_RESULT` records add no verdict. By the
-time they are written, each command has already exited zero and `make-release.sh`
-has already acted on that. What they add is attribution: a log from a different
-run, a log substituted for its neighbour, a truncated log and a padded log all
-stop matching. That is the difference between evidence that is present and
-evidence that is accounted for.
+**What this does not do.** The `EVIDENCE_RESULT` records add no verdict. Each is
+written immediately after its command exits zero, before staging can bless a
+stale or substituted transcript. What they add is payload identity and
+attribution: a log from a different run, a same-shape substitution, a log
+substituted for its neighbour, a truncation and padding all stop matching. That
+is the difference between evidence that is present and evidence that is
+accounted for.
 
 ## BR-REL-03 - Clarify full test-long log retention
 
@@ -3304,7 +3305,7 @@ tree rather than only the machinery that writes new ones.
 
 ## BR-REL-07 - Preserve historical releases during prospective migration
 
-**Status:** DONE `24c2ded`
+**Status:** DONE `24c2ded` + `7fe055b`
 
 **Work:**
 
@@ -3407,6 +3408,37 @@ but checking it against the signing key needs GnuPG and a trust decision
 `scripts/verify-release-signature.sh` already owns. The record covers
 `release/signing-key.asc` so the trust root cannot be swapped silently;
 `release/README.md` is deliberately not pinned, being current documentation.
+
+## BR-REL-08 - Collapse duplicate release phase logs
+
+**Status:** TODO
+
+**Depends on:** BR-REL-02
+
+**Rationale:** `build-avr-classic.log` and `final-image-build.log` were
+byte-identical in `v0.9.11`. BR-REL-02 deliberately did not collapse them,
+because doing so changes what the release runs rather than only how evidence is
+indexed. The deferral must have a real owner rather than pointing at an
+undefined task.
+
+**Work:**
+
+- [ ] Decide whether the initial and final build phases remain independently
+  useful operations or are duplicate execution.
+- [ ] If both operations remain, emit phase-specific structured records that
+  establish the distinct claim made by each.
+- [ ] If one operation is redundant, remove it and update the retained evidence
+  role map, index, qualification verifier, release documentation, and fixtures
+  atomically.
+- [ ] Preserve the final-candidate image identity and post-soak rebuild checks;
+  do not collapse two genuinely independent image witnesses into one.
+
+**Acceptance:**
+
+- No two retained logs exist solely as byte-identical copies of one command.
+- Every retained phase has a distinct release claim and a verifier that checks
+  it.
+- Final staged images remain bound to the qualified and reproduced bytes.
 
 ---
 
@@ -3724,6 +3756,220 @@ obligations ask for.
 
 # K. Final integration and verification
 
+## BR-REVIEW-01 - Resolve the completed-item review findings
+
+**Status:** TODO
+
+**Review baseline:** `23eac73` on 2026-08-31. The review covered every task
+marked `DONE`, its attributed commit or commits, later fixes affecting it, and
+the resulting branch tip. It judged the work against this project's
+correctness, robustness, reliability and simplification goals rather than only
+against whether the named positive tests passed.
+
+**Overall result:** Not yet at the project's release-quality bar. The document
+consolidation and deletion of completed journals are substantial and generally
+sound, but the review found one release blocker, two high-severity
+release/programming defects, eight medium-severity correctness or contract
+gaps, and lower-severity documentation and bookkeeping contradictions. The
+critical and high findings must close before this branch is treated as a valid
+prospective release implementation.
+
+**Findings:**
+
+- [x] **BR-RVW-01 -- CRITICAL -- future releases cannot pass tag CI
+  (BR-REL-07, `24c2ded`/`7fe055b`).** The artifact commit is restricted to
+  `release/<version>/`, but every new release must also add a block to
+  `test/published_release_digests.txt`. The qualified source commit cannot record
+  evidence that does not exist yet, and the artifact-only child may not update
+  the registry.
+
+  **Resolved:** A parent carrying the publication registry now requires its
+  single child to change only `release/<version>/` plus one exact canonical
+  registry append. The history gate preserves the parent bytes and file mode,
+  regenerates the suffix from the committed release, and retains the old
+  release-subtree-only rule for historical parents that predate the registry.
+  The handoff signs checksums before generating and verifying the block. A
+  synthetic future prerelease passes history and the complete immutability gate;
+  omission, prefix rewrite and noncanonical-suffix controls fail.
+  `test-release-history`: 92 checks, 0 failures.
+  `test-published-release-immutability`: 2,719 checks, 0 failures. A focused
+  `test-release-preflight` run exceeded 300 seconds before a verdict; shell
+  parsing, handoff-order inspection and `git diff --check` passed.
+
+- [x] **BR-RVW-02 -- HIGH -- a verified PIC10F320 command can program the wrong
+  image (BR-FLASH-02, `23eac73`).** Producer and verifier require the expected
+  basename only somewhere in the command. The `pk2cmd` arm checks `-M` and `-Y`
+  but, unlike the AVR arm, never requires the expected basename as the `-F`
+  argument.
+
+  **Resolved:** `check_flash_commands()` and the independent qualification
+  verifier now accept only one plain `pk2cmd` invocation and require exactly one
+  `-F` operand equal to the image named by that command's manifest row. A focused
+  negative fixture gives `pk2cmd` a different image while leaving the expected
+  basename in a trailing shell comment; qualification rejects it at the operand
+  check. `test-release-qualification`: 164 checks, 0 failures.
+
+- [x] **BR-RVW-03 -- HIGH -- the thirteen newly attributed logs are not
+  content-bound (BR-REL-02, `f401507`).** `EVIDENCE_RESULT` is appended after
+  execution and carries role, name, line count and source commit
+  (`scripts/make-release.sh:2444-2468`). The signed index deliberately carries
+  size and terminal record but no member digest
+  (`scripts/make-release.sh:2481-2489`), and the verifier rechecks those same
+  properties (`scripts/verify-release-qualification.sh:514-531`). A same-size,
+  same-line-count substitution passes qualification. The eventual signed Git
+  tag authenticates the committed bytes but does not establish that they are
+  the original output of the named operation. Bind each retained log's content
+  to the qualification root or replace it with the minimum structured result
+  the release claim actually needs; do not create a second conflicting digest
+  authority.
+
+  **Resolved:** Each producing operation now closes by hashing its exact log
+  payload and appending one `EVIDENCE_RESULT format=2`; staging validates and
+  copies that existing record rather than regenerating it. Index format 2
+  commits the record through `evidence_index_sha256` and `QUALIFICATION` format
+  7, so no parallel digest list was added. The independent verifier hashes the
+  byte prefix itself and rejects same-size/same-line-count substitution, a false
+  digest copied into both log and index, a format downgrade, and a nonterminal
+  record. `test-release-qualification`: 167 checks, 0 failures.
+  `test-release-provenance`: 73 checks, 0 failures.
+
+- [ ] **BR-RVW-04 -- MEDIUM -- resource records are neither closed schemas nor
+  uniquely covered outside image rows (BR-RES-03, `1ad315e`).** Both parsers
+  silently overwrite duplicate keys and accept unknown fields
+  (`scripts/make-release.sh:1754-1759` and
+  `scripts/verify-release-qualification.sh:600-605`). Exact identity coverage
+  applies to images, but duplicate `RESOURCE_DATA` or `RESOURCE_RETURN_STACK`
+  part/variant records can replace another record while preserving the terminal
+  count. Reject duplicate and unknown fields, and require the exact reviewed
+  identity set for every record kind in producer, independent verifier and
+  contract fixtures.
+
+- [ ] **BR-RVW-05 -- MEDIUM -- reviewed ceiling parsing can disagree with
+  effective Make policy (BR-RES-02, `e7c4f68`).** `parse_policy()` counts only
+  decimal assignments (`test/test_resource_tables.py:173-190`). One decimal
+  assignment followed by a computed reassignment therefore looks unique to the
+  checker while Make consumes the later value. Count every assignment first,
+  then require the sole assignment to have the reviewed constant form; add
+  duplicate-constant and constant-plus-computed negative cases.
+
+- [ ] **BR-RVW-06 -- MEDIUM -- an empty or symlinked `QUALIFICATION` suppresses
+  the pre-tag disclosure (BR-STATE-02, `d4675d0`).** Development-state
+  validation checks only `-f` (`scripts/release-documentation.sh:270-278`), and
+  `test/test_release_preflight.sh:1186-1193` explicitly calls an empty file a
+  released tree. Use the same minimum regular, nonempty, non-symlink retained
+  record boundary the release verifier relies on, with empty and symlink
+  negative cases.
+
+- [ ] **BR-RVW-07 -- MEDIUM -- the XC8 context parser does not prove data-memory
+  class (BR-TEST-07, `cee6bab`/`0dada67`).**
+  `test/check_pic_context_layout.sh:59-65` rejects only literal `CODE` and
+  accepts any other syntactically uppercase class. Define the reviewed XC8
+  data-memory class set and reject unknown and other program-memory classes;
+  exercise each boundary in `test/test_xc8_helpers.sh`.
+
+- [ ] **BR-RVW-08 -- MEDIUM -- target guard coverage does not meet its stated
+  all-guards acceptance criterion (BR-SRC-03, `781cb43`).** The census checks
+  only the number of `static_assert` lines
+  (`test/test_static_assert_guards.sh:244-263`), while target-toolchain mutations
+  exercise selected predicates (`test/test_target_guard_mutations.sh:218-249`).
+  Replacing an unmutated predicate with unconditional truth preserves the count.
+  Either add a load-bearing mutation for every required guard or narrow and
+  justify the acceptance claim without representing a census as semantic
+  coverage.
+
+- [ ] **BR-RVW-09 -- MEDIUM -- mutable release and test inventories remain
+  mandatory prose duplication (BR-AUTH-01, BR-README-01, BR-TESTDOC-01 and
+  BR-STATE-01).** The authority map forbids repeated counts and inventories
+  (`README.md:99-120`), while `README.md:6-11` and
+  `test/README.md:327-332` restate them, and
+  `test/test_release_qualification.sh:141-175` requires the copies. Remove or
+  generate mutable reader-facing counts while retaining independent executable
+  set and coverage oracles.
+
+- [ ] **BR-RVW-10 -- MEDIUM -- mutable resource figures remain in development
+  prose (BR-RES-01, `e7c4f68`).** Examples are current flash percentages in
+  `DESIGN_DOCUMENTATION.adoc:48-52`, static/stack/free-SRAM values in
+  `TODO.md:224-227`, and current PIC10F320 margins in `TODO.md:578-580`. Replace
+  them with stable consequences or bind genuinely historical measurements to an
+  immutable release/commit and exact toolchain.
+
+- [ ] **BR-RVW-11 -- MEDIUM -- the relay safety case overstates physical
+  convergence (BR-DOC-04, `8180569`).**
+  `docs/relay_coil_fault_correction.md:50-55` says recovery guarantees
+  logical/physical convergence, while lines 231-235 acknowledge that even an
+  above-minimum pulse may fail to move real hardware. State the electrical
+  firmware guarantee separately from the physical result and name the hardware
+  assumptions required for the latter.
+
+- [ ] **BR-RVW-12 -- LOW -- repair three live-document contradictions.**
+  `docs/context_seu_detection.md:14-20` says no published release binds F2 even
+  though `v0.9.11` retains explicit F2 evidence; `release/README.md:543-544`
+  says the verifier checks 24-hour soak evidence even for the supported one-hour
+  express mode; and `TODO.md:504-510` sends a controlled hardware result to
+  `release/README.md` instead of the authority-map owner,
+  `HARDWARE_VALIDATION_LOG.md`.
+
+- [ ] **BR-RVW-13 -- LOW -- enforce the prospective concise changelog policy
+  (BR-CHANGELOG-01, `da1d62d`).** The policy at `CHANGELOG.md:24-32` excludes
+  implementation journals and exhaustive fixture mechanics, but `[Unreleased]`
+  at lines 46-279 already carries substantial examples of both. Reduce the
+  current entry to user-visible behavior, safety/compatibility changes, material
+  residual limitations and migration actions before the next release.
+
+**Commit/status bookkeeping found by the review:**
+
+- [x] Record BR-FLASH-02's implementation as `23eac73` instead of
+  `DONE <commit>`.
+- [x] Attribute parser correction `0dada67` to BR-TEST-07 as part of its
+  completed implementation.
+- [x] Attribute symlink hardening `7fe055b` to BR-REL-07 as part of its
+  completed implementation.
+- [x] Attribute branch-only document lifecycle enforcement `0705898` to
+  BR-AUTH-01.
+- [x] Remove BR-STATE-01's stale duplicate unchecked `Work` block.
+- [x] Give BR-REL-02's deferred duplicate-phase-log work the real BR-REL-08 task
+  it referenced.
+
+**Measured branch shape:** Against `main` at the review baseline, the branch is
+16,606 insertions and 17,488 deletions, net -882 lines while this 3,929-line
+branch-only plan is still present. Deleting the plan under BR-FINAL-07 would put
+the net near -4,811. That is a meaningful reduction in active historical prose,
+but it masks substantial growth in release and test machinery; closing this
+review must prefer small semantic checks over another parallel framework.
+
+**Validation performed:**
+
+- `test-release-history`: 86 checks, 0 failures.
+- `test-published-release-immutability`: 2,719 checks, 0 failures, all 12 local
+  tags compared.
+- `test-release-qualification`: 163 checks, 0 failures.
+- `test-release-preflight`: 230 checks, 0 failures in a focused run. A later
+  combined rerun exceeded its 600-second command timeout during preflight after
+  the preceding gates passed; this was a review-run limit, not a gate verdict.
+- `test-resource-tables`: 46 checks, 0 failures, with 0 of 21 images available
+  to measure; its contract suite passed 120 checks.
+- `test-xc8-helpers`: 28 checks, 0 failures.
+- `test-deliberate-duplication`: 335 checks, 0 failures.
+- `git diff --check` passed and the worktree was clean before this review was
+  recorded.
+
+**Validation limits:** `avr-gcc` and the target toolchains were unavailable, so
+the full `make test`, strict target aggregates, 21-image resource run and image
+rebuilds were not completed. No hardware qualification was performed. Hosted
+asset state and repository protection settings remain outside this air-gapped
+review.
+
+**Acceptance:**
+
+- Every critical, high and medium finding above is closed by a focused negative
+  test and the relevant aggregate.
+- Low findings are corrected or explicitly declined with a reason consistent
+  with the authority map.
+- A synthetic future release can satisfy source-parent history, qualification,
+  immutability and tag-CI contracts together.
+- The resulting implementation is simpler in maintained authorities and does
+  not merely exchange documentation bloat for parallel release/test machinery.
+
 ## BR-FINAL-01 - Run a complete current-reference audit
 
 **Status:** DONE `<commit>`
@@ -4013,7 +4259,7 @@ dependencies and acceptance criteria.
 | Task | Summary | Status |
 |---|---|---|
 | BR-BASE-01 | Reconcile final release baseline | DONE `756e622` |
-| BR-AUTH-01 | Finalize authority map | DONE `620234f` |
+| BR-AUTH-01 | Finalize authority map | DONE `620234f` + `0705898` |
 | BR-AUTH-02 | Inventory references/contracts | DONE `bc267a8` |
 | BR-RES-01 | Remove mutable resource tables | DONE `e7c4f68` |
 | BR-RES-02 | Retire prose synchronization tests | DONE `e7c4f68` |
@@ -4045,7 +4291,7 @@ dependencies and acceptance criteria.
 | BR-TEST-04 | Centralize policy constants per surface | DONE `bc5f11d` |
 | BR-TEST-05 | Prefer behavioral fixtures | DONE `7aab253` |
 | BR-TEST-06 | Introduce named test profiles | DONE `746ddcf` |
-| BR-TEST-07 | Consolidate strict helpers/wrappers | DONE `cee6bab` |
+| BR-TEST-07 | Consolidate strict helpers/wrappers | DONE `cee6bab` + `0dada67` |
 | BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
 | BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
@@ -4055,11 +4301,13 @@ dependencies and acceptance criteria.
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
-| BR-REL-07 | Preserve historical releases | DONE `24c2ded` |
+| BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
+| BR-REL-08 | Collapse duplicate release phase logs | TODO |
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
+| BR-REVIEW-01 | Resolve completed-item review findings | TODO |
 | BR-FINAL-01 | Audit current references | DONE `<commit>` |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
 | BR-FINAL-03 | Verify independent oracles remain | TODO |
