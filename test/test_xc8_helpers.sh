@@ -102,6 +102,13 @@ expect_context_fail() {
 	checks=$((checks + 1))
 }
 
+expect_context_class_fail() {
+	local label=$1 symbol_class=$2
+	write_valid_context
+	printf '_ctx_ 5d 0 %s 1\n' "$symbol_class" > "$sym"
+	expect_context_fail "$label" "reviewed BANK0 data-memory class"
+}
+
 write_valid_context
 expect_context_pass "canonical context"
 
@@ -124,11 +131,16 @@ expect_context_fail "truncated symbol record" "malformed _ctx_ symbol"
 write_valid_context
 printf '%s\n' '_ctx_ 5d 0 BANK0 1' '_ctx_ 5e 0 BANK0 1' > "$sym"
 expect_context_fail "duplicate symbol" "expected exactly one"
-write_valid_context
-# A _ctx_ the linker resolved into program memory contradicts the `ds 3` data
-# allocation, so the address must not be handed to the SRAM harnesses.
-printf '_ctx_ 5d 0 CODE 0\n' > "$sym"
-expect_context_fail "symbol placed in program memory" "program memory"
+# Only BANK0 is established for this SRAM object under the pinned XC8/DFP and
+# supported PIC families. Reject other program spaces, non-SRAM data spaces, a
+# plausible but unreviewed bank, and an invented uppercase class.
+expect_context_class_fail "symbol placed in CODE program memory" CODE
+expect_context_class_fail "symbol placed in CONST program memory" CONST
+expect_context_class_fail "symbol placed in string program memory" STRCODE
+expect_context_class_fail "symbol placed in configuration memory" CONFIG
+expect_context_class_fail "symbol placed in EEPROM data" EEDATA
+expect_context_class_fail "symbol placed in an unreviewed RAM bank" BANK1
+expect_context_class_fail "symbol with an unknown uppercase class" NOT_A_CLASS
 write_valid_context
 # %segments and %locals records are not symbols; a psect that happens to be
 # named _ctx_ must neither satisfy nor corrupt the lookup.

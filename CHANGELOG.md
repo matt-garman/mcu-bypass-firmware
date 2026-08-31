@@ -129,6 +129,12 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **PIC context sidecars now prove the guarded context is in reviewed SRAM.**
+  The shared XC8 symbol resolver accepts `_ctx_` only in the `BANK0` class
+  emitted for all supported PIC families under the pinned toolchain. Program,
+  configuration, EEPROM, alternate-bank and unknown classes fail closed instead
+  of being treated as data memory merely because they are not named `CODE`.
+
 - **Every programming command a release publishes now runs as written.** Of the
   eighteen per-image commands in the v0.9.11 manifest, three were pasteable. Six
   carried the source-checkout alternative as parenthesised prose inside the

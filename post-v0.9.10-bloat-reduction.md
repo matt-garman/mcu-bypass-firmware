@@ -4073,12 +4073,19 @@ prospective release implementation.
   external validation run because it repeatedly exercises the complete release
   preflight.
 
-- [ ] **BR-RVW-07 -- MEDIUM -- the XC8 context parser does not prove data-memory
+- [x] **BR-RVW-07 -- MEDIUM -- the XC8 context parser does not prove data-memory
   class (BR-TEST-07, `cee6bab`/`0dada67`).**
   `test/check_pic_context_layout.sh:59-65` rejects only literal `CODE` and
   accepts any other syntactically uppercase class. Define the reviewed XC8
   data-memory class set and reject unknown and other program-memory classes;
   exercise each boundary in `test/test_xc8_helpers.sh`.
+
+  **Resolved:** Local XC8 history and both realistic sidecar producers establish
+  `BANK0` as the one reviewed `_ctx_` SRAM class for PIC10F322, PIC10F320 and
+  PIC12F675 under the pinned XC8/DFP. The resolver now uses that positive
+  allowlist rather than a `CODE` blacklist. Focused controls reject `CODE`,
+  `CONST`, `STRCODE`, `CONFIG`, `EEDATA`, an unreviewed `BANK1` and an invented
+  uppercase class. `test-xc8-helpers`: 34 checks, 0 failures.
 
 - [ ] **BR-RVW-08 -- MEDIUM -- target guard coverage does not meet its stated
   all-guards acceptance criterion (BR-SRC-03, `781cb43`).** The census checks

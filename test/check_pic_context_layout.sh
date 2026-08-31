@@ -46,9 +46,10 @@ allocation=$(
 # then switches to unrelated record shapes at the first %-directive
 # (%segments, then %locals). Only the global table resolves _ctx_ to the SRAM
 # address the gpsim harnesses poke, so the scan stops at that boundary instead
-# of matching a like-named psect or local-symbol record further down. A _ctx_
-# the linker placed in CODE would contradict the `ds 3` data allocation just
-# verified above, so that is rejected rather than handed back as an address.
+# of matching a like-named psect or local-symbol record further down. Across the
+# pinned XC8/DFP and all three supported PIC families, the reviewed _ctx_ class
+# is BANK0. Accept that exact data-memory class rather than guessing that every
+# syntactically valid class except CODE is SRAM.
 address=$(
 	awk '
 		BEGIN { globals = 1 }
@@ -61,7 +62,7 @@ address=$(
 				malformed++
 				next
 			}
-			if ($4 == "CODE") { in_program++; next }
+			if ($4 != "BANK0") { wrong_class++; symbol_class = $4; next }
 			address = toupper($2)
 		}
 		END {
@@ -69,8 +70,8 @@ address=$(
 				printf "malformed _ctx_ symbol record(s): %d\n", malformed > "/dev/stderr"
 				exit 2
 			}
-			if (in_program != 0) {
-				printf "_ctx_ symbol resolves into program memory, not data\n" > "/dev/stderr"
+			if (wrong_class != 0) {
+				printf "_ctx_ symbol class %s is not the reviewed BANK0 data-memory class\n", symbol_class > "/dev/stderr"
 				exit 3
 			}
 			if (records != 1) {
