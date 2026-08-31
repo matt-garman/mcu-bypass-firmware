@@ -954,14 +954,21 @@ reset_fixture
 flash_pic_victim=""
 for image in "${canonical_images[@]}"; do
 	case "$image" in
-		*-pic12f675-*) continue ;;
-		*-pic*) flash_pic_victim=$image; break ;;
+		*-pic10f320-*) flash_pic_victim=$image; break ;;
 	esac
 done
-[ -n "$flash_pic_victim" ] || fail "the canonical image set contains no PIC10F32x image"
+[ -n "$flash_pic_victim" ] || fail "the canonical image set contains no PIC10F320 image"
 flash_pic_command=$(fixture_flash_command "$flash_pic_victim")
 sed -i "s|^${flash_pic_command}\$|${flash_pic_command/ -Y/}|" "$release/MANIFEST.md"
 expect_fail "PIC command with no verify pass" "performs no verify pass"
+
+# Naming the expected image in a comment does not make it the image pk2cmd
+# reads. The sole -F operand is the programming operation's authority.
+reset_fixture
+sed -i "s|^${flash_pic_command}\$|pk2cmd -Pfixture -Fwrong-image.hex -M -Y -R # ${flash_pic_victim}|" \
+	"$release/MANIFEST.md"
+expect_fail "PIC command whose expected image appears only in inert text" \
+	"does not select $flash_pic_victim as its sole -F image operand"
 
 # The part that must not appear. A per-image shortcut for it is the defect the
 # guarded transaction exists to prevent.

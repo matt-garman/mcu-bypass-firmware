@@ -2664,9 +2664,10 @@ img_row() {
 # checked before, and all four properties were violated in v0.9.11.
 check_flash_commands() {
 	local file=$1 image profile command stem variant fuse name value block
+	local pk2_command pk2_arg pk2_image pk2_image_count
 	local pic322_published=""
 	local -A download_seen=()
-	local -a download_cmds=()
+	local -a download_cmds=() pk2_args=()
 
 	while IFS=$'\t' read -r image profile command; do
 		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
@@ -2739,11 +2740,26 @@ check_flash_commands() {
 				done
 				;;
 			pk2cmd)
-				case " $command " in
+				pk2_command=${command%%#*}
+				[[ "$pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
+					|| die "the pk2cmd command for $image is not one plain writer invocation: $command"
+				read -r -a pk2_args <<<"$pk2_command"
+				pk2_image=""
+				pk2_image_count=0
+				for pk2_arg in "${pk2_args[@]}"; do
+					case "$pk2_arg" in
+						-F*)
+							pk2_image=${pk2_arg#-F}
+							pk2_image_count=$((pk2_image_count + 1)) ;;
+					esac
+				done
+				[ "$pk2_image_count" -eq 1 ] && [ "$pk2_image" = "$image" ] \
+					|| die "the pk2cmd command for $image does not select $image as its sole -F image operand: $command"
+				case " $pk2_command " in
 					*' -M '*) ;;
 					*) die "the pk2cmd command for $image does not program the whole device (-M): $command" ;;
 				esac
-				case " $command " in
+				case " $pk2_command " in
 					*' -Y '*) ;;
 					*) die "the pk2cmd command for $image performs no verify pass (-Y): $command" ;;
 				esac

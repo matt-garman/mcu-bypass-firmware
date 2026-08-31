@@ -3783,16 +3783,18 @@ prospective release implementation.
   registered without weakening either the source-parent rule or historical
   immutability, and add an end-to-end synthetic future-release case.
 
-- [ ] **BR-RVW-02 -- HIGH -- a verified PIC10F320 command can program the wrong
+- [x] **BR-RVW-02 -- HIGH -- a verified PIC10F320 command can program the wrong
   image (BR-FLASH-02, `23eac73`).** Producer and verifier require the expected
-  basename only somewhere in the command
-  (`scripts/make-release.sh:2700-2703` and
-  `scripts/verify-release-qualification.sh:812-817`). The `pk2cmd` arm checks
-  `-M` and `-Y` but, unlike the AVR arm, never requires the expected basename as
-  the `-F` argument (`scripts/make-release.sh:2748-2757` and
-  `scripts/verify-release-qualification.sh:836-844`). Require the selected image
-  in the writer's image operand, independently in producer and verifier, and add
-  a negative case that places the expected basename only in inert shell text.
+  basename only somewhere in the command. The `pk2cmd` arm checks `-M` and `-Y`
+  but, unlike the AVR arm, never requires the expected basename as the `-F`
+  argument.
+
+  **Resolved:** `check_flash_commands()` and the independent qualification
+  verifier now accept only one plain `pk2cmd` invocation and require exactly one
+  `-F` operand equal to the image named by that command's manifest row. A focused
+  negative fixture gives `pk2cmd` a different image while leaving the expected
+  basename in a trailing shell comment; qualification rejects it at the operand
+  check. `test-release-qualification`: 164 checks, 0 failures.
 
 - [ ] **BR-RVW-03 -- HIGH -- the thirteen newly attributed logs are not
   content-bound (BR-REL-02, `f401507`).** `EVIDENCE_RESULT` is appended after

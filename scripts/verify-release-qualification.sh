@@ -834,11 +834,27 @@ for flash_image in "${!flash_command[@]}"; do
 				*) die "the published avrdude command for $flash_image does not write that image to flash" ;;
 			esac ;;
 		pk2cmd\ *)
-			case " $flash_line " in
+			flash_pk2_command=${flash_line%%#*}
+			[[ "$flash_pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
+				|| die "the published pk2cmd command for $flash_image is not one plain writer invocation"
+			read -r -a flash_pk2_args <<<"$flash_pk2_command"
+			flash_pk2_image=""
+			flash_pk2_image_count=0
+			for flash_pk2_arg in "${flash_pk2_args[@]}"; do
+				case "$flash_pk2_arg" in
+					-F*)
+						flash_pk2_image=${flash_pk2_arg#-F}
+						flash_pk2_image_count=$((flash_pk2_image_count + 1)) ;;
+				esac
+			done
+			[ "$flash_pk2_image_count" -eq 1 ] \
+				&& [ "$flash_pk2_image" = "$flash_image" ] \
+				|| die "the published pk2cmd command for $flash_image does not select $flash_image as its sole -F image operand"
+			case " $flash_pk2_command " in
 				*' -M '*) ;;
 				*) die "the published pk2cmd command for $flash_image does not program the whole device" ;;
 			esac
-			case " $flash_line " in
+			case " $flash_pk2_command " in
 				*' -Y '*) ;;
 				*) die "the published pk2cmd command for $flash_image performs no verify pass" ;;
 			esac ;;
