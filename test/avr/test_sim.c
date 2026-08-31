@@ -2453,8 +2453,8 @@ static void test_clean_press_phase_jitter(void) {
 //
 // Limitation: a register or local variable that coincidentally holds 0xAA
 // during a stack frame produces a false-clean canary byte, making the result
-// a conservative (optimistic) estimate. For a small MCU with ~4 bytes of BSS
-// and short ISR frames, collisions are extremely rare in practice.
+// a conservative (optimistic) estimate. For these small MCUs and short ISR
+// frames, collisions are extremely rare in practice.
 //////////////////////////////////////////////////////////////////////////////
 
 static void test_stack_high_water_mark(void) {

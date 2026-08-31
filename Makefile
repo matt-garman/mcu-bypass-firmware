@@ -590,8 +590,8 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 # --- Resource-budget gate thresholds -----------------------------------------
 # Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
 # This gates individual frames, not total depth; test-stack-bound remeasures
-# them. The whole-program runtime high-water mark is 31-33 B across the variants,
-# measured separately by test-sim-attiny13a.
+# them. The simulator separately measures whole-program runtime high water and
+# enforces the reviewed free-SRAM floor.
 # Run `make test-stack-bound` to re-measure every frame.  Any individual frame
 # above this threshold signals unintended bloat (e.g. an accidental local
 # array).
@@ -603,12 +603,8 @@ override AVR_STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
                           src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
-# Firmware is at 81.4/85.4/84.4% today for simple/mute/relay, so the 90%
-# ceiling leaves 4.6 points of margin at the tightest image. Run
-# `make test-flash-budget` to re-measure -- it prints the per-variant
-# percentages, so this comment can be
-# checked rather than trusted.  A future accidental bloat passes silently
-# without this gate.
+# Run `make test-flash-budget` to measure every current variant against the 90%
+# ceiling. A future accidental bloat passes silently without this gate.
 ATTINY13A_FLASH_BUDGET ?= 90
 override ATTINY13A_FLASH_MCU := attiny13a
 override ATTINY13A_FLASH_BYTES := 1024
@@ -3957,10 +3953,8 @@ test-stack-bound-regression:
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds ATTINY13A_FLASH_BUDGET% of 1024 B.
-# Firmware is at 81.4/85.4/84.4% today for simple/mute/relay, inside the 90%
-# default ceiling by 4.6 points at the tightest image. The target prints the
-# measured per-variant percentages, so this figure can be re-checked by running
-# it. A future accidental bloat would otherwise pass silently.
+# The target prints current per-variant measurements rather than duplicating
+# them here. A future accidental bloat would otherwise pass silently.
 # Override: make test-flash-budget ATTINY13A_FLASH_BUDGET=80
 test-flash-budget:
 	@if [ "$(ATTINY13A_MCU)" != "$(ATTINY13A_FLASH_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \

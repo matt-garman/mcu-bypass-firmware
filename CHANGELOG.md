@@ -129,6 +129,11 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **Maintained design and planning prose no longer freezes current resource
+  measurements.** Stable silicon capacities and reviewed budget consequences
+  remain documented; changing flash occupancy, static data, stack high-water and
+  free-space results come from build gates and retained release evidence.
+
 - **Reader guides no longer duplicate executable release inventories.** The
   project overview points to the release authority for exact image sets, while
   the test guide points to executable owners for profile checks, evidence and

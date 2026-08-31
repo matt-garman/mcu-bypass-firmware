@@ -4129,12 +4129,20 @@ prospective release implementation.
   encountering the absent AVR toolchain, so it produced no verdict and was left
   to the external full-suite run.
 
-- [ ] **BR-RVW-10 -- MEDIUM -- mutable resource figures remain in development
+- [x] **BR-RVW-10 -- MEDIUM -- mutable resource figures remain in development
   prose (BR-RES-01, `e7c4f68`).** Examples are current flash percentages in
   `DESIGN_DOCUMENTATION.adoc:48-52`, static/stack/free-SRAM values in
   `TODO.md:224-227`, and current PIC10F320 margins in `TODO.md:578-580`. Replace
   them with stable consequences or bind genuinely historical measurements to an
   immutable release/commit and exact toolchain.
+
+  **Resolved:** Current flash percentages, static-data/stack/free-SRAM results
+  and PIC10F320 image margins were removed from maintained design, planning,
+  Makefile and simulator prose. Stable silicon capacities and reviewed ceilings
+  remain where they explain a design constraint. Current measurements now come
+  only from their build/resource gates and retained per-release evidence; no
+  prose-synchronization check was added. `test-reference-contract`: 10 checks,
+  0 failures; `test-todo-index`: 102 checks, 0 failures.
 
 - [ ] **BR-RVW-11 -- MEDIUM -- the relay safety case overstates physical
   convergence (BR-DOC-04, `8180569`).**

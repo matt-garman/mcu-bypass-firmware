@@ -222,9 +222,8 @@ are replaced by the retained result. Publish the number as what it is:
 Dependencies: a provisioned pinned avr-gcc plus the fetched, SHA-verified
 ATtiny_DFP device specs and headers. Effort: about 30 minutes once that
 toolchain exists. Risk: Low and completeness-focused: ATtiny202 has 128 bytes of
-SRAM with 5 bytes of static data, while the ATtiny13A has half the SRAM and a
-tightest measured 33-byte stack high-water mark that still leaves 26 bytes free
-after static data.
+SRAM versus the ATtiny13A's 64 bytes, but that capacity comparison does not
+supply the missing retained whole-call-chain-plus-interrupt maximum.
 
 ### T25-pic320-thresholds - Optionally centralize PIC10F320 thresholds
 
@@ -596,10 +595,10 @@ the appropriate XC8 program-memory form on PIC. Inspect the generated image to
 measure any address-materialization or other retention cost rather than assuming
 the reference is free.
 
-Gate the feature per target: readable ASCII costs roughly one PIC program word
-per character, so PIC10F320 cannot carry the full repository URL within its
-current 11-36-word margins. Do not substitute a fragile URL shortener. Firmware
-edits must be made by the owner.
+Gate the feature per target: it consumes programmed flash, and PIC10F320's
+256-word capacity makes it the constraining case. Enable it only where every
+image passes its flash budget and final-HEX string-retention check. Do not
+substitute a fragile URL shortener. Firmware edits must be made by the owner.
 
 Dependencies: per-image flash budgets and final-HEX string verification.
 Effort: about 1-2 hours. Risk: Low; provenance polish only.

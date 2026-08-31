@@ -47,8 +47,9 @@ set.  It is the modern-silicon member of the supported set.
       open-tooling property that motivates AVR Classic is preserved
     * Current production part rather than a mature/legacy one, with a
       correspondingly long expected availability horizon
-    * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's flash and
-      SRAM, so the firmware sits at 47.3-50.8% of flash instead of 81.8-85.7%
+    * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's capacities,
+      providing materially more resource headroom. Exact image occupancy is
+      reported by the build and retained with published release results.
     * An **AEC-Q100 automotive-qualified** variant of this family exists
       (125 °C), which is a meaningfully stronger environmental rating than any
       other supported part carries
