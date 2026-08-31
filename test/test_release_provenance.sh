@@ -889,6 +889,69 @@ for resource_format in "${resource_row_formats[@]}"; do
 done
 checks=$((checks + 1))
 
+# The producer and independent verifier must account for every resource-record
+# field before either renders it. Keep their closed schemas identical while the
+# Python contract fixture independently pins what the measurement tool emits.
+resource_record_schemas=(
+	'[RESOURCE_IMAGE]="format image part unit used ceiling capacity free method"'
+	'[RESOURCE_STATIC]="format part unit static ceiling free images method"'
+	'[RESOURCE_STACK]="format part unit method observations deepest_sp used free static sram floor"'
+	'[RESOURCE_STACK_BOUND]="format part unit method reports ceiling"'
+	'[RESOURCE_DATA]="format part variant unit method used ceiling capacity free"'
+	'[RESOURCE_RETURN_STACK]="format part variant unit method peak reserve spare depth"'
+	'[RESOURCE_TABLES_RESULT]="format status source_commit images avr_static classic_stack pic_data pic_stack records"'
+)
+for resource_schema in "${resource_record_schemas[@]}"; do
+	grep -qF -- "$resource_schema" "$RELEASE" \
+		|| fail "make-release.sh does not close resource schema $resource_schema"
+	grep -qF -- "$resource_schema" "$QUALIFY" \
+		|| fail "verify-release-qualification.sh does not close resource schema $resource_schema"
+done
+checks=$((checks + 1))
+
+# Exercise the producer-side parser itself without running a release. Extracting
+# these two functions keeps this a test of the implementation make-release.sh
+# executes rather than a third parser that could reproduce neither defect.
+expect_producer_resource_fail() {
+	local label=$1 record=$2 needle=$3
+	printf '%s\n' "$record" > "$work/producer-resource.log"
+	if (
+		die() { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
+		RELEASE_IMAGES=bypass-attiny13a-v.hex
+		ATTINY13A_MCU=attiny13a
+		TINYX5_PARTS='attiny85 attiny45'
+		XT_TAG=attiny202
+		PIC10F322_TAG=pic10f322
+		PIC10F320_TAG=pic10f320
+		PIC12F675_TAG=pic12f675
+		VARIANTS=v
+		FW_BASE=bypass
+		GIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+		declare -A RESOURCE_IMAGE_CELL=()
+		declare -a RESOURCE_STATIC_ROWS=() RESOURCE_STACK_ROWS=()
+		declare -a RESOURCE_BOUND_ROWS=() RESOURCE_DATA_ROWS=()
+		declare -a RESOURCE_RETURN_ROWS=()
+		# shellcheck disable=SC1090
+		source <(sed -n '/^resource_number() {/,/^}/p; /^parse_resource_records() {/,/^}/p' "$RELEASE")
+		parse_resource_records "$work/producer-resource.log" "producer parser fixture"
+	) >"$log" 2>&1; then
+		fail "$label unexpectedly passed the producer resource parser"
+	fi
+	grep -Fq -- "$needle" "$log" \
+		|| fail "$label failed without '$needle': $(<"$log")"
+	checks=$((checks + 1))
+}
+
+expect_producer_resource_fail "producer duplicate field" \
+	'RESOURCE_IMAGE format=1 image=bypass-attiny13a-v.hex part=attiny13a unit=bytes used=1 used=1 ceiling=2 capacity=3 free=1 method=fixture' \
+	"RESOURCE_IMAGE record repeats field 'used'"
+expect_producer_resource_fail "producer unknown field" \
+	'RESOURCE_IMAGE format=1 image=bypass-attiny13a-v.hex part=attiny13a unit=bytes used=1 ceiling=2 capacity=3 free=1 method=fixture reviewed=1' \
+	"RESOURCE_IMAGE record has unknown field 'reviewed'"
+expect_producer_resource_fail "producer unexpected identity" \
+	'RESOURCE_STATIC format=1 part=nosuch unit=bytes static=1 ceiling=2 free=1 images=1 method=fixture' \
+	"unexpected resource identity 'RESOURCE_STATIC|nosuch'"
+
 # The verifier picks the flash figure out of the image row by column position,
 # so the header it pins and the header the producer writes must be one string.
 resource_image_header='| image | MCU | clock | flash used / reviewed ceiling | fuses / config | sha256 |'

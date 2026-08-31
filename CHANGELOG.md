@@ -64,7 +64,9 @@ historical records and are not retroactively compacted by this policy.
   published are the same figure. The AVR-XT entry is labelled a per-frame static
   bound and is rejected if it carries a high-water field, because
   `-fstack-usage` does not measure the deepest path through the frames it
-  bounds.
+  bounds. Each resource record now has one closed field schema and one exact
+  reviewed part/variant identity, so duplicate fields or count-preserving record
+  substitutions cannot change what a signed resource table means.
 
 ### Changed
 

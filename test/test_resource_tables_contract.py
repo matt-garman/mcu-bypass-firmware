@@ -16,6 +16,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 
@@ -232,8 +233,14 @@ def emitted_records(stdout, kind):
     found = []
     for line in stdout.splitlines():
         if line.startswith(kind + " "):
-            found.append(dict(field.split("=", 1)
-                              for field in line.split()[1:]))
+            fields = line.split()[1:]
+            if any(field.count("=") != 1 for field in fields):
+                fail("%s emitted a malformed field" % kind)
+            pairs = [field.split("=", 1) for field in fields]
+            keys = [pair[0] for pair in pairs]
+            if len(keys) != len(set(keys)):
+                fail("%s emitted a duplicate field" % kind)
+            found.append(dict(pairs))
     return found
 
 
@@ -244,6 +251,49 @@ def emitted_records(stdout, kind):
 RECORD_COUNTS = (("RESOURCE_IMAGE", 21), ("RESOURCE_STATIC", 4),
                  ("RESOURCE_STACK", 3), ("RESOURCE_STACK_BOUND", 1),
                  ("RESOURCE_DATA", 3), ("RESOURCE_RETURN_STACK", 9))
+
+RECORD_SCHEMAS = {
+    "RESOURCE_IMAGE": {"format", "image", "part", "unit", "used",
+                       "ceiling", "capacity", "free", "method"},
+    "RESOURCE_STATIC": {"format", "part", "unit", "static", "ceiling",
+                        "free", "images", "method"},
+    "RESOURCE_STACK": {"format", "part", "unit", "method",
+                       "observations", "deepest_sp", "used", "free",
+                       "static", "sram", "floor"},
+    "RESOURCE_STACK_BOUND": {"format", "part", "unit", "method",
+                             "reports", "ceiling"},
+    "RESOURCE_DATA": {"format", "part", "variant", "unit", "method",
+                      "used", "ceiling", "capacity", "free"},
+    "RESOURCE_RETURN_STACK": {"format", "part", "variant", "unit",
+                              "method", "peak", "reserve", "spare", "depth"},
+    "RESOURCE_TABLES_RESULT": {"format", "status", "source_commit", "images",
+                               "avr_static", "classic_stack", "pic_data",
+                               "pic_stack", "records"},
+}
+
+EXPECTED_IDENTITIES = {
+    "RESOURCE_IMAGE": Counter(
+        ("bypass-%s-%s.hex" % (part, variant), part)
+        for part in FLASH for variant in VARIANTS),
+    "RESOURCE_STATIC": Counter((part,) for part in
+                               ("attiny13a", "attiny45", "attiny85", "attiny202")),
+    "RESOURCE_STACK": Counter((part,) for part in
+                              ("attiny13a", "attiny45", "attiny85")),
+    "RESOURCE_STACK_BOUND": Counter((("attiny202",),)),
+    "RESOURCE_DATA": Counter(("pic12f675", variant) for variant in VARIANTS),
+    "RESOURCE_RETURN_STACK": Counter(
+        (part, variant)
+        for part in ("pic10f322", "pic10f320", "pic12f675")
+        for variant in VARIANTS),
+}
+
+
+def record_identity(kind, row):
+    if kind == "RESOURCE_IMAGE":
+        return row["image"], row["part"]
+    if kind in ("RESOURCE_STATIC", "RESOURCE_STACK", "RESOURCE_STACK_BOUND"):
+        return row["part"],
+    return row["part"], row["variant"]
 
 
 def main():
@@ -274,13 +324,24 @@ def main():
         # The published figures, not only their count.  Each record has to carry
         # the measurement this fixture built into the image, so a checker that
         # emitted plausible-looking numbers from anywhere else fails here.
+        records = {}
         for kind, expected in RECORD_COUNTS:
             found = emitted_records(result.stdout, kind)
+            records[kind] = found
             check(len(found) == expected,
                   "a complete candidate emitted %d %s records, expected %d"
                   % (len(found), kind, expected))
+            check(all(set(row) == RECORD_SCHEMAS[kind] for row in found),
+                  "%s did not emit its exact closed field schema" % kind)
+            identities = Counter(record_identity(kind, row) for row in found)
+            check(identities == EXPECTED_IDENTITIES[kind],
+                  "%s did not emit the exact reviewed identity multiset" % kind)
+        results = emitted_records(result.stdout, "RESOURCE_TABLES_RESULT")
+        check(len(results) == 1
+              and set(results[0]) == RECORD_SCHEMAS["RESOURCE_TABLES_RESULT"],
+              "the terminal result did not emit its exact singleton schema")
         ceilings = FLASH_CEILINGS
-        for row in emitted_records(result.stdout, "RESOURCE_IMAGE"):
+        for row in records["RESOURCE_IMAGE"]:
             part, variant = row["part"], row["image"].split("-")[2][:-4]
             used = FLASH[part][VARIANTS.index(variant)]
             check(int(row["used"]) == used,
@@ -295,12 +356,12 @@ def main():
             check(0 < int(row["used"]) <= int(row["ceiling"]) <= int(row["capacity"]),
                   "the %s record does not order use, ceiling and capacity"
                   % row["image"])
-        for row in emitted_records(result.stdout, "RESOURCE_STATIC"):
+        for row in records["RESOURCE_STATIC"]:
             check(int(row["static"]) == STATIC_BYTES and int(row["images"]) == 3,
                   "the %s static record reports %s B from %s images; the "
                   "fixture allocates %d B in each of 3"
                   % (row["part"], row["static"], row["images"], STATIC_BYTES))
-        for row in emitted_records(result.stdout, "RESOURCE_STACK"):
+        for row in records["RESOURCE_STACK"]:
             check(int(row["static"]) + int(row["used"]) + int(row["free"])
                   == int(row["sram"]),
                   "the %s stack record does not account for the whole device "
@@ -311,7 +372,7 @@ def main():
                   % (row["part"], row["free"], min(CLASSIC_MARGINS[row["part"]])))
         # The AVR-XT figure is a compiler bound, not a run measurement, so the
         # record must state the ceiling it checked and claim no high-water use.
-        bound = emitted_records(result.stdout, "RESOURCE_STACK_BOUND")[0]
+        bound = records["RESOURCE_STACK_BOUND"][0]
         check(bound["method"] == "gcc-stack-usage-per-frame"
               and int(bound["ceiling"]) == POLICY["XT_STACK_MAX_FRAME"]
               and "used" not in bound and "peak" not in bound,

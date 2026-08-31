@@ -3833,7 +3833,7 @@ prospective release implementation.
   record. `test-release-qualification`: 167 checks, 0 failures.
   `test-release-provenance`: 73 checks, 0 failures.
 
-- [ ] **BR-RVW-04 -- MEDIUM -- resource records are neither closed schemas nor
+- [x] **BR-RVW-04 -- MEDIUM -- resource records are neither closed schemas nor
   uniquely covered outside image rows (BR-RES-03, `1ad315e`).** Both parsers
   silently overwrite duplicate keys and accept unknown fields
   (`scripts/make-release.sh:1754-1759` and
@@ -3843,6 +3843,18 @@ prospective release implementation.
   count. Reject duplicate and unknown fields, and require the exact reviewed
   identity set for every record kind in producer, independent verifier and
   contract fixtures.
+
+  **Resolved:** Both release parsers now account for every token against an
+  exact per-kind schema before interpreting it, rejecting malformed, duplicate,
+  unknown and missing fields. Each independently constructs the complete
+  reviewed image, static-RAM, Classic stack, AVR-XT frame-bound, PIC12F675 Data
+  and PIC return-stack identity topology and checks it in both directions, so a
+  duplicate or substituted identity cannot preserve validity through the
+  terminal count. The synthetic release fixture now assigns Data space to
+  PIC12F675 and the Python producer contract pins every schema and identity
+  multiset. `test-release-qualification`: 173 checks, 0 failures;
+  `test-release-provenance`: 77 checks, 0 failures; resource-table contract: 133
+  checks, 0 failures.
 
 - [ ] **BR-RVW-05 -- MEDIUM -- reviewed ceiling parsing can disagree with
   effective Make policy (BR-RES-02, `e7c4f68`).** `parse_policy()` counts only

@@ -211,6 +211,12 @@ result_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 canonical_images=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-RELEASE_IMAGES) \
 	|| die "cannot read RELEASE_IMAGES from the Makefile"
+identity_parts_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-RELEASE_IDENTITY_PARTS) \
+	|| die "cannot read RELEASE_IDENTITY_PARTS from the Makefile"
+identity_variants_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-RELEASE_IDENTITY_VARIANTS) \
+	|| die "cannot read RELEASE_IDENTITY_VARIANTS from the Makefile"
 matrix_tool_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-PIC12F675_MATRIX_EVIDENCE) \
 	|| die "cannot read PIC12F675_MATRIX_EVIDENCE from the Makefile"
@@ -219,6 +225,8 @@ fw_base=$(make -s --no-print-directory CC=: -C "$repo_root" print-FW_BASE) \
 pic12f675_tag=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-PIC12F675_TAG) \
 	|| die "cannot read PIC12F675_TAG from the Makefile"
+xt_tag=$(make -s --no-print-directory CC=: -C "$repo_root" print-XT_TAG) \
+	|| die "cannot read XT_TAG from the Makefile"
 pic12f675_variants_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-CLASSIC_VARIANTS_SUPPORTED) \
 	|| die "cannot read CLASSIC_VARIANTS_SUPPORTED from the Makefile"
@@ -232,11 +240,17 @@ read -r -a canonical_soaks <<<"$canonical_soaks_raw"
 read -r -a canonical_evidence <<<"$canonical_evidence_raw"
 read -r -a canonical_roles <<<"$canonical_roles_raw"
 read -r -a result_roles <<<"$result_roles_raw"
+read -r -a identity_parts <<<"$identity_parts_raw"
+read -r -a identity_variants <<<"$identity_variants_raw"
 read -r -a pic12f675_variants <<<"$pic12f675_variants_raw"
 [ "${#canonical_soaks[@]}" -gt 0 ] || die "canonical release soak set is empty"
 [ "${#canonical_evidence[@]}" -gt 0 ] || die "canonical release evidence set is empty"
 [ "${#pic12f675_variants[@]}" -eq 3 ] \
 	|| die "canonical PIC12F675 variant set does not contain exactly three entries"
+[ "${#identity_parts[@]}" -eq 7 ] \
+	|| die "reviewed release identity does not contain exactly seven parts"
+[ "${#identity_variants[@]}" -eq 3 ] \
+	|| die "reviewed release identity does not contain exactly three variants"
 [ "${q[soak_combination_count]}" -eq "${#canonical_soaks[@]}" ] \
 	|| die "soak_combination_count does not match the canonical set"
 
@@ -255,6 +269,19 @@ validate_canonical_names() {
 validate_canonical_names "canonical release soak set" "${canonical_soaks[@]}"
 validate_canonical_names "canonical release evidence set" "${canonical_evidence[@]}"
 validate_canonical_names "evidence result role set" "${result_roles[@]}"
+validate_canonical_names "reviewed release part set" "${identity_parts[@]}"
+validate_canonical_names "reviewed release variant set" "${identity_variants[@]}"
+[ "$(printf '%s\n' "${identity_variants[@]}" | sort)" = \
+	"$(printf '%s\n' "${pic12f675_variants[@]}" | sort)" ] \
+	|| die "reviewed release variants disagree with the PIC12F675 variant set"
+case " ${identity_parts[*]} " in
+	*" $xt_tag "*) ;;
+	*) die "XT_TAG is absent from the reviewed release part set" ;;
+esac
+case " ${identity_parts[*]} " in
+	*" $pic12f675_tag "*) ;;
+	*) die "PIC12F675_TAG is absent from the reviewed release part set" ;;
+esac
 [ "$(printf '%s\n' "${result_roles[@]}" | sort)" = $'build\ntarget-test' ] \
 	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build and target-test"
 
@@ -589,9 +616,18 @@ resource_decimal() {
 	esac
 }
 
-# The decimal fields each record kind must carry. A record missing one is a
-# truncated record, not a record with a default, so the field list is declared
-# rather than discovered from whatever the record happens to contain.
+# Every record kind is a closed schema. Required-field checks alone would still
+# let a duplicate silently overwrite its predecessor or let an invented field
+# ride along unused, so parse and account for every token before interpreting it.
+declare -A resource_schema=(
+	[RESOURCE_IMAGE]="format image part unit used ceiling capacity free method"
+	[RESOURCE_STATIC]="format part unit static ceiling free images method"
+	[RESOURCE_STACK]="format part unit method observations deepest_sp used free static sram floor"
+	[RESOURCE_STACK_BOUND]="format part unit method reports ceiling"
+	[RESOURCE_DATA]="format part variant unit method used ceiling capacity free"
+	[RESOURCE_RETURN_STACK]="format part variant unit method peak reserve spare depth"
+	[RESOURCE_TABLES_RESULT]="format status source_commit images avr_static classic_stack pic_data pic_stack records"
+)
 declare -A resource_required=(
 	[RESOURCE_IMAGE]="used ceiling capacity free"
 	[RESOURCE_STATIC]="static ceiling free images"
@@ -601,37 +637,82 @@ declare -A resource_required=(
 	[RESOURCE_RETURN_STACK]="peak reserve spare depth"
 )
 declare -A resource_cell=()
-declare -A resource_seen=()
+declare -A resource_expected_identity=()
+declare -A resource_seen_identity=()
+for resource_image in $canonical_images; do
+	resource_expected_identity["RESOURCE_IMAGE|$resource_image"]=1
+done
+for resource_part in "${identity_parts[@]}"; do
+	case "$resource_part" in
+		"$xt_tag")
+			resource_expected_identity["RESOURCE_STATIC|$resource_part"]=1
+			resource_expected_identity["RESOURCE_STACK_BOUND|$resource_part"]=1
+			;;
+		pic*)
+			for resource_variant in "${identity_variants[@]}"; do
+				resource_expected_identity["RESOURCE_RETURN_STACK|$resource_part/$resource_variant"]=1
+			done
+			;;
+		*)
+			resource_expected_identity["RESOURCE_STATIC|$resource_part"]=1
+			resource_expected_identity["RESOURCE_STACK|$resource_part"]=1
+			;;
+	esac
+done
+for resource_variant in "${identity_variants[@]}"; do
+	resource_expected_identity["RESOURCE_DATA|$pic12f675_tag/$resource_variant"]=1
+done
+resource_expected_identity["RESOURCE_TABLES_RESULT|singleton"]=1
 resource_rows=()
 resource_summaries=0
-while IFS= read -r resource_line; do
-	resource_kind=${resource_line%% *}
-	case "$resource_kind" in
-		RESOURCE_TABLES_RESULT)
-			resource_summaries=$((resource_summaries + 1)); continue ;;
-	esac
+resource_result_line=""
+while IFS= read -r resource_line || [ -n "$resource_line" ]; do
+	case "$resource_line" in RESOURCE_*) ;; *) continue ;; esac
+	IFS=' ' read -r -a resource_tokens <<<"$resource_line"
+	resource_kind=${resource_tokens[0]}
+	[ "${resource_schema[$resource_kind]+set}" = set ] \
+		|| die "unknown resource record in the resource evidence: $resource_kind"
 	declare -A rf=()
-	for resource_pair in $resource_line; do
-		case "$resource_pair" in
-			*=*) rf[${resource_pair%%=*}]=${resource_pair#*=} ;;
+	for resource_pair in "${resource_tokens[@]:1}"; do
+		[[ "$resource_pair" =~ ^([a-z][a-z0-9_]*)=([A-Za-z0-9._-]+)$ ]] \
+			|| die "a $resource_kind record has malformed field: $resource_pair"
+		resource_key=${BASH_REMATCH[1]}
+		case " ${resource_schema[$resource_kind]} " in
+			*" $resource_key "*) ;;
+			*) die "a $resource_kind record has unknown field: $resource_key" ;;
 		esac
+		[ "${rf[$resource_key]+set}" != set ] \
+			|| die "a $resource_kind record repeats field: $resource_key"
+		rf[$resource_key]=${BASH_REMATCH[2]}
+	done
+	for resource_key in ${resource_schema[$resource_kind]}; do
+		[ "${rf[$resource_key]+set}" = set ] \
+			|| die "a $resource_kind record is missing field: $resource_key"
 	done
 	[ "${rf[format]:-}" = 1 ] \
 		|| die "a $resource_kind record in the resource evidence is not format=1"
+	if [ "$resource_kind" = RESOURCE_TABLES_RESULT ]; then
+		resource_summaries=$((resource_summaries + 1))
+		resource_identity="$resource_kind|singleton"
+		[ "${resource_seen_identity[$resource_identity]+set}" != set ] \
+			|| die "two RESOURCE_TABLES_RESULT records in the resource evidence"
+		resource_seen_identity[$resource_identity]=1
+		resource_result_line=$resource_line
+		continue
+	fi
 	resource_label=$(resource_unit_label "${rf[unit]:-}") \
 		|| die "a $resource_kind record names no known unit"
-	[ "${resource_required[$resource_kind]+set}" = set ] \
-		|| die "unknown resource record in the resource evidence: $resource_kind"
 	for resource_key in ${resource_required[$resource_kind]}; do
 		resource_decimal "${rf[$resource_key]:-}" \
 			|| die "a $resource_kind record has no decimal $resource_key field"
 	done
 	case "$resource_kind" in
 	RESOURCE_IMAGE)
-		[ -n "${rf[image]:-}" ] || die "a RESOURCE_IMAGE record names no image"
-		[ "${resource_seen[${rf[image]}]+set}" != set ] \
-			|| die "two RESOURCE_IMAGE records for ${rf[image]}"
-		resource_seen[${rf[image]}]=1
+		resource_identity=${rf[image]}
+		resource_expected_part=${rf[image]#"$fw_base-"}
+		resource_expected_part=${resource_expected_part%%-*}
+		[ "${rf[part]}" = "$resource_expected_part" ] \
+			|| die "${rf[image]} is attributed to ${rf[part]}, expected $resource_expected_part"
 		[ "${rf[free]}" -eq $(( rf[ceiling] - rf[used] )) ] \
 			|| die "${rf[image]} reports a free margin that is not its ceiling less its use"
 		[ "${rf[used]}" -gt 0 ] && [ "${rf[used]}" -le "${rf[ceiling]}" ] \
@@ -640,6 +721,7 @@ while IFS= read -r resource_line; do
 		resource_cell[${rf[image]}]=$(printf '%s / %s %s (%s free)' \
 			"${rf[used]}" "${rf[ceiling]}" "$resource_label" "${rf[free]}") ;;
 	RESOURCE_STATIC)
+		resource_identity=${rf[part]}
 		[ "${rf[free]}" -eq $(( rf[ceiling] - rf[static] )) ] \
 			|| die "the ${rf[part]:-?} static record's free margin does not close"
 		[ "${rf[static]}" -gt 0 ] && [ "${rf[images]}" -gt 0 ] \
@@ -649,6 +731,7 @@ while IFS= read -r resource_line; do
 			"${rf[ceiling]}" "$resource_label" "${rf[free]}" "$resource_label" \
 			"${rf[images]}")") ;;
 	RESOURCE_STACK)
+		resource_identity=${rf[part]}
 		[ $(( rf[static] + rf[used] + rf[free] )) -eq "${rf[sram]}" ] \
 			|| die "the ${rf[part]:-?} stack record does not account for the whole device SRAM"
 		[ "${rf[free]}" -ge "${rf[floor]}" ] \
@@ -661,18 +744,17 @@ while IFS= read -r resource_line; do
 			"${rf[sram]}" "$resource_label" "${rf[floor]}" "$resource_label" \
 			"${rf[observations]}")") ;;
 	RESOURCE_STACK_BOUND)
+		resource_identity=${rf[part]}
 		[ "${rf[reports]}" -gt 0 ] \
 			|| die "the ${rf[part]:-?} frame-bound record cites no report"
 		# A per-frame compiler bound is not a high-water measurement, and this
 		# row must not read as one: the record carries no use or peak, and the
 		# rendered row states only the ceiling every frame was checked against.
-		[ "${rf[used]+set}" != set ] && [ "${rf[peak]+set}" != set ] \
-			|| die "the ${rf[part]:-?} frame-bound record claims a high-water figure the evidence does not contain"
 		resource_rows+=("$(printf '| `%s` | %s | %s | every frame <= %s %s |' \
 			"${rf[part]:-}" "${rf[method]:-}" "${rf[reports]}" \
 			"${rf[ceiling]}" "$resource_label")") ;;
 	RESOURCE_DATA)
-		[ -n "${rf[variant]:-}" ] || die "a RESOURCE_DATA record names no variant"
+		resource_identity="${rf[part]}/${rf[variant]}"
 		[ "${rf[free]}" -eq $(( rf[ceiling] - rf[used] )) ] \
 			|| die "the ${rf[part]:-?} ${rf[variant]} data record's free margin does not close"
 		[ "${rf[used]}" -gt 0 ] && [ "${rf[used]}" -le "${rf[ceiling]}" ] \
@@ -683,8 +765,7 @@ while IFS= read -r resource_line; do
 			"${rf[ceiling]}" "$resource_label" "${rf[capacity]}" "$resource_label" \
 			"${rf[free]}" "$resource_label")") ;;
 	RESOURCE_RETURN_STACK)
-		[ -n "${rf[variant]:-}" ] \
-			|| die "a RESOURCE_RETURN_STACK record names no variant"
+		resource_identity="${rf[part]}/${rf[variant]}"
 		[ $(( rf[peak] + rf[reserve] + rf[spare] )) -eq "${rf[depth]}" ] \
 			|| die "the ${rf[part]:-?} ${rf[variant]} return-stack record does not account for the whole hardware stack"
 		[ "${rf[peak]}" -gt 0 ] \
@@ -696,7 +777,13 @@ while IFS= read -r resource_line; do
 	# a row here, which would otherwise render nothing and check nothing.
 	*) die "resource record $resource_kind has no rendered row" ;;
 	esac
-done < <(grep '^RESOURCE_[A-Z_]* ' "$resource_log" || true)
+	resource_identity="$resource_kind|$resource_identity"
+	[ "${resource_expected_identity[$resource_identity]+set}" = set ] \
+		|| die "unexpected resource identity: $resource_identity"
+	[ "${resource_seen_identity[$resource_identity]+set}" != set ] \
+		|| die "duplicate resource identity: $resource_identity"
+	resource_seen_identity[$resource_identity]=1
+done < "$resource_log"
 [ "$resource_summaries" -eq 1 ] \
 	|| die "the resource evidence carries $resource_summaries terminal result records, expected 1"
 
@@ -714,12 +801,19 @@ for resource_image in "${!resource_cell[@]}"; do
 	esac
 done
 
+# The image map above gives its own focused diagnostics; this complete topology
+# check covers every other record kind as well. Counts cannot distinguish one
+# valid identity duplicated in place of another.
+for resource_identity in "${!resource_expected_identity[@]}"; do
+	[ "${resource_seen_identity[$resource_identity]+set}" = set ] \
+		|| die "missing resource identity: $resource_identity"
+done
+
 # The terminal record's own count must equal the figures actually present. A
 # truncated log loses records; one that lost records must not still claim to
 # summarize them.
-resource_result="RESOURCE_TABLES_RESULT format=1 status=pass source_commit=${q[source_commit]} images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9 records=$(( ${#resource_cell[@]} + ${#resource_rows[@]} ))"
-mapfile -t resource_results < <(grep '^RESOURCE_TABLES_RESULT ' "$resource_log" || true)
-[ "${resource_results[0]}" = "$resource_result" ] \
+resource_result="RESOURCE_TABLES_RESULT format=1 status=pass source_commit=${q[source_commit]} images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9 records=$(( ${#resource_expected_identity[@]} - 1 ))"
+[ "$resource_result_line" = "$resource_result" ] \
 	|| die "retained resource evidence has no exact source-bound complete result"
 
 # The column order is pinned before any cell is read from it: this block picks
