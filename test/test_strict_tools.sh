@@ -5,7 +5,7 @@ set -euo pipefail
 # Makefile's central STRICT_TOOLS/$(SKIP) mechanism: clean skip (exit 0) by
 # default, hard failure with the ::error:: marker under STRICT_TOOLS=1.
 #
-# INVENTORY SCOPE (merge plan §6.12, §12). This used to cover exactly two
+# INVENTORY SCOPE. This used to cover exactly two
 # recipes -- test-cbmc and analyze-cppcheck -- which meant NEITHER PIC chip had
 # an enforcing regression, and a pic10f320- recipe with a private early `exit 0`
 # would have passed review. It now covers the AVR-XT analyzers and all three PIC

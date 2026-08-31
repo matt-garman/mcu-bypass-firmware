@@ -104,9 +104,9 @@ DELIBERATELY NOT ANCHORED ON THE MAKE WORD, unlike axis C. `print-` with the
 lookbehind below is already unambiguous in this tree -- every non-query form
 (`--no-print-directory`, `-print-file-name`, `--print-data-base`,
 `--print-targets`) has a hyphen immediately before `print`. Requiring `make` on
-the same line would instead LOSE real reads: test_workload_rebuild.sh:255 goes
-through a `run_make` wrapper (no bare `make` token), and ci-local.sh:368 spreads
-eight queries across a backslash continuation. A harvest that silently stops
+the same line would instead LOSE real reads: test_workload_rebuild.sh reads them
+through its `run_make` wrapper (no bare `make` token), and ci-local.sh's
+eight-name `print-%` query spreads across a backslash continuation. A harvest that silently stops
 seeing real sites is the exact failure this item exists to catch.
 
 STRICTER CONTRACT THAN AXIS C: a read must be DEFINED, not merely "defined or

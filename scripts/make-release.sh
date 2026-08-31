@@ -35,7 +35,7 @@
 #      against the CANONICAL set the Makefile declares (RELEASE_IMAGES). This independent
 #      check catches a forgotten build step -- an enumeration derived from the same
 #      variant matrices as the build commands shrinks in lock-step with an
-#      omission and agrees with itself (merge plan §10, §14.8).
+#      omission and agrees with itself.
 #   2. Run `make test-long`, `make attiny202-test`,
 #      `make attiny202-test-target`, `make pic10f322-test`,
 #      `make pic10f322-test-target-variants`, `make pic10f320-test`,
@@ -691,7 +691,7 @@ XT_FUSE[bootend]=$(mkv XT_FUSE_BOOTEND)
 # --- PIC10F320, the constrained release target -------------------------------
 # Read through its OWN variables, never by deriving from the PIC10F322's. The
 # two chips share one XC8 + DFP installation today, but the separate variable
-# pairs exist precisely so one can be re-pinned (merge plan §5.6) -- and a
+# pairs exist precisely so one can be re-pinned -- and a
 # release script that assumed they track would build one chip with the other's
 # toolchain and say nothing.
 PIC10F320_BUILD_DIR=$(mkv PIC10F320_BUILD_DIR)     # build_pic10f320
@@ -807,12 +807,12 @@ export PIC10F320_HOST_CC PIC_SOAK_CXX PIC10F320_SOAK_CXX
 export PIC_SOAK_GPSIM_INC PIC10F320_SOAK_GPSIM_INC XT_DFP
 export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"
 
-# The canonical release product set (merge plan §10). This script ENUMERATES the
+# The canonical release product set. This script ENUMERATES the
 # images it expects to build from the variant matrices below; RELEASE_IMAGES is
 # the independent statement of what a complete release contains, and the two are
 # cross-checked before anything is staged. Enumeration alone cannot catch a
 # missing build step -- it would simply enumerate fewer images and agree with
-# itself, which is the whole failure mode §14.8 describes.
+# itself, which is the whole failure mode this cross-check exists for.
 # The build directories those images come from, so the reproduction instructions
 # this script GENERATES cannot list a stale set of directories.
 RELEASE_IMAGE_DIRS=$(mkv RELEASE_IMAGE_DIRS)
@@ -2004,7 +2004,7 @@ done
 # Three more combos, one per PIC10F320 output stage -- the same full duration as
 # every other release combo, not a shortened smoke. Each drives its own real HEX
 # in libgpsim. PIC10F320_SOAK_VARIANT selects the image; the driver itself is the
-# shared parent one (§4: the parent copy is ahead, carrying SOAK_LIVENESS_DUE).
+# shared parent one (the parent copy is ahead, carrying SOAK_LIVENESS_DUE).
 for v in $PIC10F320_VARIANTS; do
 	name="pic10f320_${v}"; bin="$SOAKDIR/test_soak_pic10f320_${v}"
 	make "$bin" PIC10F320_SOAK_BIN="$bin" PIC10F320_SOAK_VARIANT="$v" \
@@ -2322,8 +2322,8 @@ staged_xt_image_hashes=$(hash_xt_image_set "${STAGED_XT_IMAGES[@]}")
 # would faithfully record whatever happens to be sitting in the staging
 # directory, so a stale image left by an earlier run would be checksummed,
 # committed and published as part of this release. The verifier would then
-# confirm it -- the producer and the verifier sharing one blind spot is the
-# §14.8 hole from the writing side. Every family is byte-bound above before this
+# confirm it -- the producer and the verifier sharing one blind spot is that
+# same hole from the writing side. Every family is byte-bound above before this
 # checksum file can be accepted as release evidence.
 release_basenames=()
 for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done

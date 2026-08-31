@@ -1497,7 +1497,7 @@ Three of twenty-one were runnable. Behind that:
 
 ## BR-FLASH-03 - Retire the flashing-simplicity work journal
 
-**Status:** DONE `<commit>`
+**Status:** DONE `fc11171`
 
 **Depends on:** BR-FLASH-01, BR-FLASH-02 or explicit deferral of BR-FLASH-02
 
@@ -3726,42 +3726,136 @@ obligations ask for.
 
 ## BR-FINAL-01 - Run a complete current-reference audit
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** All document deletion/consolidation tasks
 
-**Found during BR-COMMENT-01:** the largest instance of "stale section-number
-reference" is already enumerated. `docs/pic10f320_merge_plan.md` was deleted by
-BR-PIC-03 (`b8b4af1`); after BR-COMMENT-01 removed eight of them with the
-comment blocks they sat in, 48 citations of its section numbers remain in live
-code and CI -- `Makefile` 24, `scripts/make-release.sh` 6, `scripts/ci-local.sh`
-2, `scripts/verify-release-images.sh` 2, `test/` 10 (`test_pic_rebuild.sh` 4,
-`test_release_images.sh` 2, and one each in `check_stack_depth_pic.sh`,
-`test_strict_tools.sh`, `test_gpsim_wrappers.sh`, `run_mutation_tests.sh`, and
-`formal/test_model_check.c`), and `.github/workflows/` 3. Several are bare
-`§N` with no document named at all. `CHANGELOG.md`'s 8 are historical record and
-correct as they stand; `docs/flashing_simplicity.md`'s 10 leave with the file
-under BR-FLASH-03; the `§` citations in `DESIGN_DOCUMENTATION.adoc` and
-`src/bypass_mcu_avr_classic.c` are datasheet sections and resolve.
+**Seven of the eight searches came back clean.** Each is recorded below with
+what keeps it clean, because a search result is worth only what the next commit
+cannot quietly undo:
+
+- **Deleted document paths.** Nothing in live text names one. The twelve files
+  this branch deleted are mentioned only in `CHANGELOG.md`, which records what
+  a past release said, and in this plan, which BR-FINAL-07 deletes. The
+  `docs/notes.md`, `docs/field_notes.md` and `docs/programming.md` a path scan
+  reports are synthetic fixtures written into temporary trees by the preflight
+  negative controls, not references.
+- **Retired target, variable and image names.** Every live occurrence is one of
+  three intentional kinds: a negative control that exists to REJECT the name
+  (`tmux4053` in `test_release_images.sh` and the matrix harnesses,
+  `verify-rename-identity` in `test_release_provenance.sh`), a published digest
+  of a historical release, or a revisit condition that states what the retired
+  form was and why the current one replaced it.
+- **Current resource measurements outside release evidence.**
+  `DESIGN_DOCUMENTATION.adoc`'s table carries device capacities and the
+  variable that owns each ceiling, not measurements.
+  `docs/relay_coil_fault_correction.md`'s cost table says in its own next
+  sentence that its figures are historical deltas and not current occupancy,
+  and `docs/context_seu_detection.md` ties each figure to the release that
+  measured it. `make test-resource-tables` measures the images themselves.
+- **Duplicated current-release declarations.** Mechanically impossible rather
+  than merely absent: `release_validate_development_state` requires exactly one
+  bounded declaration in exactly one designated document. `README.md`'s
+  authority map points at that declaration instead of restating it.
+- **Multiple current programming procedures.** `FLASHING.md` is the only live
+  document carrying programmer command lines; `README.md` points to it, and
+  the per-release guide is generated.
+- **Markdown/AsciiDoc links and named anchors.** All resolve, after the one
+  repair below.
+- **Immutable release directories.** Excluded from every rewrite and from the
+  new gate, for the reason BR-REL-07 gives: their links were correct against
+  the tree of their own tag, and `test-published-release-immutability` is what
+  holds them.
+
+**The finding: citations that outlived their document.**
+`docs/pic10f320_merge_plan.md` was 3,432 lines and was deleted by BR-PIC-03
+(`b8b4af1`) once its normative content reached `DESIGN_DOCUMENTATION.adoc`. It
+left **43 comment lines carrying 45 section citations** across `Makefile` (22),
+`scripts/make-release.sh` (6), `scripts/verify-release-images.sh` (2),
+`.github/workflows/` (3), `scripts/ci-local.sh` (1) and `test/` (9). Several
+were bare `§N` naming no document at all, and one of those turned out to cite
+`docs/pic12f675_feasibility.md` rather than the merge plan. That document had
+kept its own numbering stable "so that the cross-references to these numbers
+elsewhere in the repository stay valid" -- which is the tell: a reference that
+needs a whole document frozen to stay true is a reference that will outlive it.
+
+Two more of the same shape, found by the line-number half of the same search:
+`test/avr/test_sim.c` cited `bypass_mcu_avr_classic.c lines 180-182` for a
+watchdog sequence that now lives in `hw_wdt_arm()`, and
+`test/test_makefile_name_contract.py` cited `ci-local.sh:368` for a
+`print-%` query that had moved 21 lines. Both now name the construct instead of
+the line. `CHANGELOG.md` carried one live Markdown link to a deleted document,
+which rendered dead on every page view; it is now a code span, matching the
+sibling document already written that way in the same sentence.
+
+**This item's own enumeration was wrong, in three particulars.** It reported 48
+citations; the count is 43 lines and 45 citations. It attributed 24 to the
+`Makefile`, which carries 22. And it named `test/run_mutation_tests.sh` and
+`formal/test_model_check.c`, neither of which has ever carried a `§`. The
+counts here were taken from the tree at BR-COMMENT-01's commit and at HEAD, and
+agree.
+
+**What each repair kept.** In every one of the 43 comment sites the sentence
+already carried its content and the citation was an appended pointer, so the
+repair is the pointer's removal and nothing else. Two needed a clause restated
+rather than dropped -- the naming rule that "supersedes merge-plan §15 D1" now
+supersedes "the earlier decision that kept the bare `pic-` prefix", and the
+CI comment that closed "§8 items 1 and 2" now names the OSCCAL and bandgap
+preservation evidence those items were. No executable line changed.
+
+**One repair this required.** Nothing in the tree could report the class. A
+dangling comment citation cannot fail to compile, and the branch-only-document
+reference gate in `scripts/release-documentation.sh` says so of itself: its
+reference half "necessarily stays name-pattern based", so a reference to a
+document named outside the two branch families "dangles unseen once that
+document is gone". `test/test_reference_contract.py` (`make
+test-reference-contract`, 10 checks) closes that for durable documents with two
+lexical rules and a negative control for each:
+
+- A section citation must name an external document on the same line, or repeat
+  a number the same file has already attributed to one. A section number is
+  stable only where its publisher owns the numbering; inside this repository it
+  is a line count in disguise, and repository documents are cited by name and
+  anchor instead -- which the second rule then checks.
+- Every relative link and fragment anchor in a durable `.md`/`.adoc` must
+  resolve.
+
+`CHANGELOG.md` is exempt from the first rule only: an entry recording what a
+since-deleted document said is a true statement about the past, and each such
+entry names the document, so a reader sees at once what is cited. Its links are
+still checked. Branch-only working documents are exempt from both, by the same
+banner recognizer the release gate uses.
 
 **Work:**
 
-- [ ] Search all current tracked text for deleted document paths.
-- [ ] Search for stale section-number and line-number references.
-- [ ] Search for retired target/variable/image names outside intentional
+- [x] Search all current tracked text for deleted document paths.
+- [x] Search for stale section-number and line-number references.
+- [x] Search for retired target/variable/image names outside intentional
   historical contexts.
-- [ ] Search for current resource measurements outside release evidence.
-- [ ] Search for duplicated current-release declarations.
-- [ ] Search for multiple current programming procedures.
-- [ ] Check all Markdown/AsciiDoc links and named anchors.
-- [ ] Exclude immutable historical release directories from current-policy
+- [x] Search for current resource measurements outside release evidence.
+- [x] Search for duplicated current-release declarations.
+- [x] Search for multiple current programming procedures.
+- [x] Check all Markdown/AsciiDoc links and named anchors.
+- [x] Exclude immutable historical release directories from current-policy
   rewrites while still checking their links under tag-local rules where
   appropriate.
 
 **Acceptance:**
 
-- No dangling current references remain.
+- No dangling current references remain: 43 section citations, 2 line-number
+  citations and 1 dead link repaired, and `make test-reference-contract` fails
+  on the next one.
 - Historical prose is clearly historical and not used as current authority.
+
+**What this does not do:**
+
+- It does not gate the word "section". `HARDWARE_VALIDATION_LOG.md`'s sections
+  1 and 2 and `scripts/make-release.sh`'s numbered phases are cited that way
+  and resolve; the glyph is what became shorthand for a document that is gone.
+- It does not gate line-number citations. Three existed, two were stale, and
+  the two false positives a lexical rule would produce are simulated compiler
+  diagnostics in fixture strings -- the class is too small to justify a rule
+  that has to be taught the difference. It stays a reading of the diff.
 
 ## BR-FINAL-02 - Verify safety and claim boundaries
 
@@ -3931,7 +4025,7 @@ dependencies and acceptance criteria.
 | BR-PIC-05 | Update firmware document references | DONE `f968de7` |
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
 | BR-FLASH-02 | Generate release programming guide | DONE `23eac73` |
-| BR-FLASH-03 | Delete flashing proposal journal | DONE `<commit>` |
+| BR-FLASH-03 | Delete flashing proposal journal | DONE `fc11171` |
 | BR-FLASH-04 | Close PIC10F32x programming authority gaps | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
@@ -3966,7 +4060,7 @@ dependencies and acceptance criteria.
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
-| BR-FINAL-01 | Audit current references | TODO |
+| BR-FINAL-01 | Audit current references | DONE `<commit>` |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
 | BR-FINAL-03 | Verify independent oracles remain | TODO |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |

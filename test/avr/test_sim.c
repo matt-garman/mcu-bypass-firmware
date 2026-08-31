@@ -839,7 +839,8 @@ static void test_init_completes_before_wdt(void) {
 // SHORTEST (~16ms, prescaler 0) timeout until software reconfigures it, and with
 // the WDT oscillator's loose tolerance that window can be as short as ~7ms.
 // init()'s first actions are wdt_reset() then wdt_enable(WDTO_250MS) (see
-// bypass_mcu_avr_classic.c lines 180-182, before any blocking output pulse), so the re-arm
+// hw_wdt_arm() in bypass_mcu_avr_classic.c, called at the top of init() before
+// any blocking output pulse), so the re-arm
 // MUST land comfortably inside that window or a fault that survives reset could
 // re-trigger the WDT before init() widens the timeout -- a tight boot-loop.
 //

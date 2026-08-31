@@ -292,7 +292,7 @@ checks=$((checks + 1))
 
 # Same for the PIC10F320 lane's public target. The wrappers themselves are
 # SHARED -- the PIC10F320 merge folded onto these exact scripts rather than
-# forking them (§4), so every check above already covers both chips. What is NOT
+# forking them, so every check above already covers both chips. What is NOT
 # otherwise covered is the mechanism that makes sharing possible:
 # pic10f320-test-gpsim must override both PIC_GPSIM_PROC and the toggle stimulus,
 # and must still validate its timeout before the optional-tool skip.

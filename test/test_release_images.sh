@@ -442,7 +442,7 @@ cp "$fixture_root/scripts/helper.py" "$fresh/helper.py"
 expect_pass "a stray tool in the fresh build directory is ignored"
 
 # ---------------------------------------------------------------------------
-# The canonical product set (merge plan §10). Everything above compares the
+# The canonical product set. Everything above compares the
 # three OBSERVED sets -- committed directory, SHA256SUMS, fresh build -- against
 # each other. That is the check that cannot catch an omission the observations
 # share. These assert the independent fourth opinion.
@@ -1207,7 +1207,7 @@ for pattern in "${arm_patterns[@]}"; do
 	checks=$((checks + 1))
 done
 
-# No retired variant may return (§1).
+# No retired variant may return.
 [[ "$canonical" != *tmux4053* ]] \
 	|| fail "canonical release set contains a retired tmux4053 image"
 checks=$((checks + 1))

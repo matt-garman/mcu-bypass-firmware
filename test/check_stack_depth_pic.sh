@@ -14,7 +14,7 @@ set -euo pipefail
 #
 # Depth is 8 levels. That is read from the device pack rather than written down
 # here, because a hardcoded budget silently goes stale if a chip is re-pinned --
-# the same failure §5.6 of the merge plan calls out for PIC10F322_FLASH_WORDS.
+# the same failure a hardcoded PIC10F322_FLASH_WORDS would have.
 # All three parts declare it identically and independently:
 #     <DFP>/xc8/pic/dat/ini/{10f320,10f322,12f675}.ini   STACKDEPTH=8
 #     <DFP>/edc/{PIC10F320,PIC10F322,PIC12F675}.PIC      edc:hwstackdepth="8"

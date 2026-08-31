@@ -985,6 +985,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
+        test-reference-contract \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
@@ -1705,8 +1706,8 @@ pic10f322-test: pic10f322-test-config pic10f322-analyze pic10f322-coverage-check
 # per-function estimate is not used as the measurement.
 #
 # The budget is READ FROM THE DEVICE PACK, never written down here: a hardcoded
-# depth is the same silent-staleness hazard as a hardcoded PIC10F322_FLASH_WORDS
-# (merge plan §5.6). All three parts declare STACKDEPTH=8 independently.
+# depth is the same silent-staleness hazard as a hardcoded PIC10F322_FLASH_WORDS.
+# All three parts declare STACKDEPTH=8 independently.
 #
 # The reserve is held back from the budget for two reasons worth stating: an
 # in-circuit debugger consumes a stack level during bench bring-up, and no
@@ -3019,7 +3020,7 @@ clean:
 	@# global patterns.
 	rm -rf build_pic
 	# PIC10F320: one directory holds every build, coverage and test artifact
-	# for this target (merge plan §5.7), so a single rm covers the lot and
+	# for this target, so a single rm covers the lot and
 	# cannot reach the shared top-level coverage/ the parent lanes own.
 	rm -rf $(PIC10F320_BUILD_DIR)
 
@@ -3148,6 +3149,7 @@ TEST_GATES_LATE = \
 		test-lockstep-progress test-soak-timing test-xc8-helpers \
 		test-pic-toolchain-assert \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
+        test-reference-contract \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
@@ -3216,8 +3218,8 @@ clean-tests:
 	      test/avr/test_fuses \
 	      $(AVR_SIM_BINARIES)
 	@# PIC10F320 host test artifacts. Unlike every other target's, these are
-	@# written into the chip's build directory rather than next to their sources
-	@# (§5.7), so the rm above cannot reach them -- and leaving them behind would
+	@# written into the chip's build directory rather than next to their sources,
+	@# so the rm above cannot reach them -- and leaving them behind would
 	@# mean the next run silently reuses binaries built with the previous
 	@# workload sizing, which is the exact failure this target exists to prevent.
 	@# The .hex images are deliberately NOT removed: they are build output, not
@@ -3445,6 +3447,19 @@ test-makefile-name-contract: python-version-valid
 test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
 
+# The third of the same family, and the one whose subject is the whole tree
+# rather than one file. A citation into a repository document -- a section
+# number, a relative link, an anchor -- is checked by nobody: it cannot fail to
+# compile, and the document it names can be edited or deleted without it. The
+# PIC10F320 merge plan left 43 dangling section citations across this file, the
+# release scripts, the CI workflows and the test suite when it was deleted. The
+# rule this enforces is that a section number belongs to an external document,
+# which is renumbered by its publisher rather than by us, and that a repository
+# document is cited by name and anchor so the link half can check it.
+.PHONY: test-reference-contract
+test-reference-contract: python-version-valid test/test_reference_contract.py
+	@python3 test/test_reference_contract.py
+
 # Every reviewed resource ceiling is enforced where it is declared, and this
 # gate measures what the build produced against those declarations: the ceilings
 # are read from this file, which declares them, and the images from the build
@@ -3628,7 +3643,7 @@ test-target-matrix:
 # because every lane exits 0 through $(SKIP) when its tool is absent -- so an
 # aggregate reading only exit status reports a full green sweep having run
 # nothing. pic10f320-test-target shipped in exactly that shape; see the script
-# header. Three PIC targets, one script (§4 FOLD).
+# header. Three PIC targets, one script.
 test-target-lane-markers:
 	./test/test_target_lane_markers.sh pic10f322 pic10f320 pic12f675
 
@@ -4457,16 +4472,16 @@ coverage-clean:
 # NAMING: all three PIC lanes are equally-explicit siblings -- `pic10f322-*`,
 # `pic10f320-*`, and `pic12f675-*` -- and a goal named `pic-*` covers shared PIC
 # mechanism (test-pic-build, test-lockstep-progress,
-# test-stack-bound-pic-regression). This supersedes
-# merge-plan §15 D1, which kept the bare `pic-` prefix for the 322 because it
-# got here first; that made `pic-` read as a qualifier rather than a part and
-# put the two chips one near-name apart. Do NOT add a PIC-shaped variable here
+# test-stack-bound-pic-regression). This supersedes the earlier decision that
+# kept the bare `pic-` prefix for the 322 because it got here first; that made
+# `pic-` read as a qualifier rather than a part and put the two chips one
+# near-name apart. Do NOT add a PIC-shaped variable here
 # without a part-scoped prefix: a mis-scoped chip variable produces no compile
-# error and no failing test, it produces a PASSING one (§14.7 -- e.g. the wrong
+# error and no failing test, it produces a PASSING one (e.g. the wrong
 # flash budget silently gates 256 words against 512).
 #
 # Toolchain is deliberately SHARED with the PIC10F322 lane: both parts are built
-# by the same XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189 (verified equal, plan §6.14).
+# by the same XC8 V3.10 + PIC10-12Fxxx DFP 1.9.189, verified equal.
 PIC10F320_CC          ?= $(PIC_CC)
 PIC10F320_DFP         ?= $(PIC_DFP)
 
@@ -4481,7 +4496,7 @@ PIC10F320_FLASH_WORDS ?= 256
 PIC10F320_SRC         := src/bypass_mcu_pic10f320.c
 PIC10F320_BUILD_DIR   ?= build_pic10f320
 
-# §5.7: PIC10F320 coverage lives UNDER the build directory, never in the shared
+# PIC10F320 coverage lives UNDER the build directory, never in the shared
 # top-level coverage/ that the parent lanes own. One ignore entry covers both,
 # and every destructive recipe below can be scoped to a single root.
 PIC10F320_COVERAGE_DIR := $(PIC10F320_BUILD_DIR)/coverage
@@ -4637,10 +4652,10 @@ pic10f320-test-fault-host: variant-selectors-valid
 # Deliberately NOT converged with the PIC10F322's pic10f322-coverage-check-fw
 # (test/pic/fw_coverage/run_fw_coverage.sh), which is a different mechanism over
 # a different source set (shell + shared pure core + all three output drivers).
-# Merge plan §6.12 flags the two-mechanism outcome; the split is kept because the
-# 320's exact-line property is only meaningful for a single fully-inlined TU,
-# whereas the 322's multi-file set needs the percentage-style harness. Converging
-# them would weaken one or the other, so it is recorded rather than forced.
+# The split is kept because the 320's exact-line property is only meaningful for
+# a single fully-inlined TU, whereas the 322's multi-file set needs the
+# percentage-style harness. Converging them would weaken one or the other, so
+# the two mechanisms are recorded rather than forced together.
 #
 # Runs per variant: the firmware's #ifdef output stages give the three variants
 # 84 / 95 / 100 executable lines, so a single-variant run would leave real
@@ -4699,7 +4714,7 @@ pic10f320-test-host: variant-selectors-valid \
 # variant is one third of the evidence. Uses the same Make-function matrix guard
 # as pic10f320-test-target-variants -- empty, duplicated, unsupported, and incomplete
 # matrices are rejected on stderr before any variant runs, so "all variants
-# passed" always means the complete supported set ran (§6.5). Registered in
+# passed" always means the complete supported set ran. Registered in
 # test/test_target_matrix.sh, which proves the guard by feeding it each bad matrix.
 pic10f320-test-host-variants:
 	@if [ "$(PIC10F320_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
@@ -4723,7 +4738,7 @@ pic10f320-test-host-variants:
 # --- Phase 4: hardened build, flash budget, static analysis ------------------
 # XC8/DFP header locations. Shared installation with the PIC10F322 lane, but
 # kept as separate variables so one chip can be re-pinned without silently
-# moving the other (§5.6: anything not on the shared-tool allowlist is presumed
+# moving the other (anything not on the shared-tool allowlist is presumed
 # chip-specific).
 PIC10F320_XC8_INCLUDE ?= $(PIC_XC8_INCLUDE)
 PIC10F320_DFP_INCLUDE ?= $(PIC10F320_DFP)/pic/include
@@ -4764,7 +4779,7 @@ PIC10F320_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 \
 # Build one variant and gate it against the 256-word budget.
 #
 # Every failure mode here is one the child project hardened against and proved
-# with fake-XC8 regressions (merge plan §6.4, commit ec6fa48), so this is a port
+# with fake-XC8 regressions (commit ec6fa48), so this is a port
 # of tested logic, not a fresh attempt:
 #   - the HEX, assembly, and symbol paths are removed FIRST, and removal is
 #     symlink/directory safe, so stale output cannot be mistaken for fresh;
@@ -5173,7 +5188,7 @@ pic10f320-test-return-stack: pic10f320-variants test-pic10f320-return-stack-orac
 		$(PIC10F320_RETURN_STACK_IMAGES)
 
 # Emitted CONFIG word, from the built HEX. Uses the SHARED checker with a
-# device-accurate label (§4's FOLD/PARAMETERIZE), run over every built image.
+# device-accurate label, run over every built image.
 #
 # The no-image guard mirrors pic10f322-test-config's. Without it this recipe passed an
 # UNEXPANDED glob to the checker when XC8 was absent, which reported "cannot open
@@ -5243,8 +5258,7 @@ pic10f320-test-gpsim: variant-selectors-valid pic10f320 $(PIC10F32X_GPSIM_REGS)
 # host fault, firmware coverage, build+budget, expected-image hashes, CONFIG word,
 # final-HEX return-stack proof, static analysis and the CLI-gpsim register-level
 # test. The PIC10F320 counterpart of `pic10f322-test`, and the single target the CI
-# `pic` job -- which covers all three PIC targets -- invokes for this chip (merge plan
-# §11, D3).
+# `pic` job -- which covers all three PIC targets -- invokes for this chip.
 #
 # It sweeps gpsim across all three variants because each image has a distinct
 # settled LATA pattern. Static analysis is now a complete three-row matrix in one
@@ -5259,7 +5273,7 @@ pic10f320-test-gpsim: variant-selectors-valid pic10f320 $(PIC10F32X_GPSIM_REGS)
 # Make will not start this recipe until it has succeeded. So an empty, duplicated,
 # unsupported, or incomplete PIC10F320_VARIANTS_ALL fails before the loop below is
 # reached, and the guard that protects this target is the one covered by
-# test/test_target_matrix.sh (§6.5). A second copy here would be untested
+# test/test_target_matrix.sh. A second copy here would be untested
 # duplication, since the harness cannot drive a target whose prerequisites
 # themselves do real work.
 #
@@ -5393,7 +5407,7 @@ pic10f320-test-target: variant-selectors-valid
 	@echo "=== PIC10F320 target fault/lock-step/I-O PASS (variant $(PIC10F320_TARGET_VARIANT)) ==="
 
 # ...and for ALL of them. Requires the exact supported set before running, so
-# "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
+# "all variants passed" cannot hide an empty or incomplete matrix.
 pic10f320-test-target-variants:
 	@if [ "$(PIC10F320_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
 		echo "FAIL: PIC10F320_VARIANTS_ALL must not be empty" >&2; exit 2; \
@@ -5415,7 +5429,7 @@ pic10f320-test-target-variants:
 	@echo "=== PIC10F320 target fault/lock-step/I-O validated for all variants ==="
 
 # --- Phase 4: long-duration soak (libgpsim) ----------------------------------
-# Reuses the PARENT's soak driver and timing contract verbatim (§4: the parent
+# Reuses the PARENT's soak driver and timing contract verbatim (the parent
 # copy is ahead -- it carries SOAK_LIVENESS_DUE() and the "liveness deadline must
 # fire at equality" static assert the child lacked). Only the chip, image,
 # processor and per-variant blocking-actuation duration differ.
@@ -5458,7 +5472,7 @@ PIC10F320_SOAK_COMPILE = $(PIC10F320_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cf
 # unique PIC10F320_SOAK_BIN names and then runs all release soak combos
 # concurrently, which it cannot do through the pic10f320-test-soak run target.
 # FORCE -- see the PIC10F322 rule above; the same command-line-variable
-# staleness was measured here first (merge plan §6.12's rebuild-determinism row).
+# staleness was measured here first.
 $(PIC10F320_SOAK_BIN): $(PIC10F320_SOAK_DEPS) FORCE
 	$(PIC10F320_SOAK_COMPILE)
 
@@ -5481,7 +5495,7 @@ pic10f320-test-soak: variant-selectors-valid _pic10f320-build-soak
 # toolchain change.
 
 # --- cleanup -----------------------------------------------------------------
-# §5.7: scoped to PIC10F320 paths ONLY. The imported child recipe did
+# Scoped to PIC10F320 paths ONLY. The imported child recipe did
 # `rm -rf $(COVERAGE_DIR)` on the SHARED top-level coverage/, which would have
 # deleted the parent's coverage report and any concurrent gate working directory.
 # Every destructive path below is under $(PIC10F320_BUILD_DIR).
@@ -6712,7 +6726,7 @@ pic12f675-test-target: pic12f675-target-selector-valid variant-selectors-valid _
 	echo "=== PIC12F675 target fault/lock-step/I-O PASS (variant $(PIC12F675_TARGET_VARIANT)): $$matrix_record ==="
 
 # ...and for ALL of them. Requires the exact supported set before running, so
-# "all variants passed" cannot hide an empty or incomplete matrix (§6.5).
+# "all variants passed" cannot hide an empty or incomplete matrix.
 pic12f675-test-target-variants: pic12f675-target-selector-valid variant-selectors-valid _pic12f675-qualify-matrix
 	@$(pic12f675_require_trusted_make_sh); \
 	if [ "$(CLASSIC_VARIANTS_REQUEST_EMPTY)" -eq 1 ]; then \
@@ -7621,14 +7635,14 @@ origins:
 # THE authoritative answer to "what does a complete release contain?", expressed
 # once, here, and consumed everywhere else through `make -s print-RELEASE_IMAGES`
 # (scripts/make-release.sh, scripts/verify-release-images.sh,
-# test/test_release_images.sh). Merge plan §10.
+# test/test_release_images.sh).
 #
 # WHY THIS EXISTS. Before it, three "independent" checks all derived their idea
 # of the release set by GLOBBING the same kind of directory: make-release.sh
 # built SHA256SUMS from `sha256sum ./*.hex`, and verify-release-images.sh listed
 # `"$dir"/*.hex`. Three sets that agree prove nothing if all three are computed
 # the same wrong way -- omit a whole MCU from the build and every one of them
-# happily agrees on the shortened set. That is §14.8's hole, and adding a second
+# happily agrees on the shortened set. That is the hole, and adding a second
 # PIC part is exactly the change that makes falling into it easy: forget one
 # `make pic10f320-variants` and a "complete, verified, reproduced" release ships
 # with no PIC10F320 firmware at all and nothing says a word.
@@ -8353,6 +8367,7 @@ help:
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
+	@echo "  test-reference-contract  every section citation, link and anchor in the live tree still resolves (included in test)"
 	@echo "  test-resource-tables  resource-document arithmetic/agreement + final-evidence contract regression (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
