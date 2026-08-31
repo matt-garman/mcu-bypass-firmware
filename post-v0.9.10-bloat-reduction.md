@@ -3341,7 +3341,7 @@ that is indistinguishable from restaging, and correctly so, since the two
 produce the same release. And it says nothing about the images a release adds or
 drops; the canonical set and the identity pin own that.
 
-**Correction, `<commit>`:** the row as first committed blocked every future
+**Correction, `57bca4d`:** the row as first committed blocked every future
 release, and the full suite is what found it. `test-release-history` builds a
 synthetic future prerelease and runs this complete gate against it; that release
 inherits images and can declare nothing, so the gate failed. The synthetic one
@@ -3841,23 +3841,23 @@ checks. `test-pic-guard-mutations`: 99 checks, 3.4 s. `test-static-assert-guards
 
 ## BR-SRC-04 - Proof obligations for any user-made firmware refactor
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
-Any firmware refactor proposed during this effort must explicitly discharge:
+Any firmware refactor must explicitly discharge:
 
-- [ ] Complete MCU/output-stage configuration matrix.
-- [ ] Exact selector/driver correspondence.
-- [ ] Byte identity where no code-generation change is intended.
-- [ ] Flash, static data, AVR stack frames, runtime stack high-water where
+- Complete MCU/output-stage configuration matrix.
+- Exact selector/driver correspondence.
+- Byte identity where no code-generation change is intended.
+- Flash, static data, AVR stack frames, runtime stack high-water where
   available, and PIC return-stack limits.
-- [ ] Tick formulas, delay-body cycles, delivered pulse widths, ISR duty, and
+- Tick formulas, delay-body cycles, delivered pulse widths, ISR duty, and
   watchdog pet-to-pet bounds.
-- [ ] Relay emergency de-energization and complete recovery actuation.
-- [ ] Fault injection across target-specific guarded state.
-- [ ] Lock-step/equivalence against `bypass_pure.c`.
-- [ ] Negative compile guards and diagnostics.
-- [ ] MISRA/static analysis under all materially distinct configurations.
-- [ ] Preservation of independent pin/output/release identity oracles.
+- Relay emergency de-energization and complete recovery actuation.
+- Fault injection across target-specific guarded state.
+- Lock-step/equivalence against `bypass_pure.c`.
+- Negative compile guards and diagnostics.
+- MISRA/static analysis under all materially distinct configurations.
+- Preservation of independent pin/output/release identity oracles.
 
 The last obligation has a mechanical floor from BR-SRC-01: any refactor that
 folds one of the registered duplications fails `test-deliberate-duplication`
@@ -3868,6 +3868,75 @@ obligations ask for.
 **Acceptance:**
 
 - No firmware refactor is approved based on reduced line count alone.
+
+**Result:**
+
+The list is now in the tree, as "Proof obligations for a firmware change" in
+`test/README.md`, and it names commands rather than only properties.
+
+Two problems, one of which the other hid. The list existed nowhere but this
+file, and BR-FINAL-07 deletes this file -- the same hazard BR-SRC-01 closed for
+the duplication register, with the same consequence, since a review gate that
+lives only in prose cannot report anything once the prose is gone. Underneath
+that, the list named eleven properties and not one way to establish any of them,
+so "explicitly discharge" was a judgement with nothing attached to it. That is
+not hypothetical: BR-SRC-02 is a real pending set of source edits whose own
+acceptance repeats two of these obligations, and its author would have had to
+reconstruct the evidence for all eleven from the suite.
+
+`test/README.md` is the right home because it already declares itself an
+assurance map -- which layers exist, what property each establishes, and where a
+layer's guarantee stops. The index is that map read backwards: property first,
+then the commands whose evidence discharges it. It sits directly after "Which
+lanes run where: the tool contract, not the part", which is what decides how
+much a green run establishes at all. Eleven rows, 90 commands spelled behind
+the word `make`, over 70 distinct goals.
+
+**Two facts a reader needs, neither visible from the obligation list.** A lane
+needing XC8, a PIC device pack, gpsim/libgpsim, the ATtiny_DFP or the patched
+`yasimavr` venv skips by name and the run still ends `0 failures`, so a bare-host
+run discharges a proper subset and says nothing about which; `STRICT_TOOLS=1`
+converts each skip into a failure and `test-strict-tools` proves it does. And
+three `make test` members named for an oracle check the CHECKER rather than the
+image: `test-attiny202-output-oracle`, `test-attiny202-fault-oracle` and
+`test-attiny202-delay-oracle` drive synthetic input so those checkers stay
+guarded on a host that cannot build the image -- the image is measured by
+`attiny202-sim`, `attiny202-fault` and `attiny202-delay-oracle`, which need the
+fetched inputs. Both facts are already in the Makefile's own comments; neither
+was reachable from a list of properties.
+
+**One obligation has no goal at all.** Byte identity compares two trees rather
+than reading one, so it is written as a procedure -- build and keep the complete
+image set, edit, rebuild, compare -- with `test-avr-build-rebuild`,
+`test-pic-build-rebuild` and `test-workload-rebuild` named as what makes the
+comparison mean anything: an unchanged HEX is a result only where a changed one
+would have been rebuilt.
+
+**The mechanical floor.** Axis B of `test-makefile-name-contract` resolves every
+goal a document names behind the word `make` against Make's own inventory, so an
+obligation pointing at a goal that was renamed or retired fails rather than
+sending its reader to `No rule to make target`. The harvest went from 431 documented commands to 521
+on the first run -- exactly the 90 added -- so all of them resolved. Control on
+a clone of the tree: renaming one row's PIC10F322 fault command to a goal that
+does not exist is reported by file and line. This paragraph cannot spell that
+name behind the make word, because the gate rejected the paragraph when it did
+-- which is the control a second time, from a different document.
+
+**Why every goal in the index is spelled behind the make word.** Axis B reads
+only a fragment that the make word OPENS, and states that ceiling rather than
+hiding it. The same doctoring in the bare-backtick style the surrounding tables
+use -- `test-deliberate-duplication` to `test-deliberate-duplication-was-renamed`
+-- leaves the gate green at 521. So the goal names in the rest of `test/README.md`
+are outside the harvest, and widening it is what that gate deliberately declines
+to do: measured on this tree, 881 distinct tokens follow the word `make` and
+about a dozen are goals. The index steps around the ceiling rather than moving
+it.
+
+**What this does not do:** it does not make the judgement mechanical. Ten of the
+eleven obligations now have named evidence, but only the eleventh has a
+structural witness, and that witness covers structure rather than judgement.
+Nothing here reports a change whose only argument is that it is shorter; the
+acceptance line above remains a rule for a reviewer.
 
 ---
 
@@ -4574,7 +4643,7 @@ dependencies and acceptance criteria.
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
-| BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
+| BR-SRC-04 | Enforce source-refactor proof obligations | DONE `<commit>` |
 | BR-REVIEW-01 | Resolve completed-item review findings | TODO |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
