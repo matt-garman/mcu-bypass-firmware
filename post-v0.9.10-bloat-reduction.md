@@ -3973,13 +3973,19 @@ prospective release implementation.
   `test-release-provenance`: 77 checks, 0 failures; resource-table contract: 133
   checks, 0 failures.
 
-- [ ] **BR-RVW-05 -- MEDIUM -- reviewed ceiling parsing can disagree with
+- [x] **BR-RVW-05 -- MEDIUM -- reviewed ceiling parsing can disagree with
   effective Make policy (BR-RES-02, `e7c4f68`).** `parse_policy()` counts only
   decimal assignments (`test/test_resource_tables.py:173-190`). One decimal
   assignment followed by a computed reassignment therefore looks unique to the
   checker while Make consumes the later value. Count every assignment first,
   then require the sole assignment to have the reviewed constant form; add
   duplicate-constant and constant-plus-computed negative cases.
+
+  **Resolved:** `parse_policy()` now counts every direct GNU Make assignment to
+  each reviewed ceiling, regardless of operator or value form, before accepting
+  the sole assignment as a decimal constant. A duplicate decimal declaration
+  and a decimal declaration followed by a computed `:=` reassignment both fail
+  the isolated contract. Resource-table contract: 135 checks, 0 failures.
 
 - [ ] **BR-RVW-06 -- MEDIUM -- an empty or symlinked `QUALIFICATION` suppresses
   the pre-tag disclosure (BR-STATE-02, `d4675d0`).** Development-state

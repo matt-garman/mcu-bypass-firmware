@@ -93,8 +93,11 @@ historical records and are not retroactively compacted by this policy.
   image against it, and refuses a ceiling wider than the silicon it bounds; the
   release-time evidence checks validate each retained record against its own
   arithmetic and the limit it reports rather than against a remembered figure.
-  Release resource measurement remains fail-closed at 21 of 21 images with
-  complete RAM and stack evidence.
+  Each reviewed ceiling must have exactly one Make assignment and that sole
+  assignment must be a decimal constant, so a later computed reassignment cannot
+  make the effective build policy differ from the value this gate reads. Release
+  resource measurement remains fail-closed at 21 of 21 images with complete RAM
+  and stack evidence.
 
 - **Normal hosted CI now runs the full mutation driver once per applicable
   event.** The fully provisioned PIC job remains the fail-closed mutation gate;

@@ -432,6 +432,23 @@ def main():
               "a missing reviewed ceiling was treated as absent policy")
         write_policy(fixture)
 
+        policy_file = fixture / "Makefile"
+        policy_text = policy_file.read_text(encoding="utf-8")
+        policy_file.write_text(
+            policy_text + "PIC12F675_DATA_LIMIT ?= 49\n", encoding="utf-8")
+        result = run(fixture)
+        check(result.returncode != 0 and "found 2 assignments" in result.stderr,
+              "duplicate decimal ceiling assignments were accepted")
+
+        policy_file.write_text(
+            policy_text
+            + "PIC12F675_DATA_LIMIT := $(PIC12F675_DATA_BYTES)\n",
+            encoding="utf-8")
+        result = run(fixture)
+        check(result.returncode != 0 and "found 2 assignments" in result.stderr,
+              "a computed reassignment overrode the reviewed decimal ceiling")
+        policy_file.write_text(policy_text, encoding="utf-8")
+
         # Retained evidence is checked against its own arithmetic, so an edited
         # figure fails without this file knowing the true one.
         log = evidence / "test-long.log"

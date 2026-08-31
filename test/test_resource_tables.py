@@ -171,16 +171,29 @@ def parse_policy():
         return None
     policy = {}
     for name in POLICY_VARIABLES:
+        # Count assignments before looking at their values. Otherwise one
+        # reviewed constant followed by a computed reassignment appears unique
+        # here even though Make consumes the later value.
+        assignments = re.findall(
+            r"^[ ]*(?:(?:override|export|private)[ \t]+)*%s[ \t]*"
+            r"(?:(?::){0,3}|[?+!])=" % re.escape(name),
+            text, re.MULTILINE)
+        check(len(assignments) == 1,
+              "the Makefile must define %s exactly once as a decimal constant; "
+              "found %d assignments" % (name, len(assignments)))
+        if len(assignments) != 1:
+            continue
         # `NAME ?= n`, `NAME = n` and `override NAME := n` are all definitions;
         # anything else (a computed value, a reference to another variable) is
         # not a reviewed constant this gate can check, and fails rather than
         # being skipped.
         matches = re.findall(
-            r"^(?:override[ \t]+)?%s[ \t]*[:?]?=[ \t]*([0-9]+)[ \t]*$" % name,
+            r"^(?:override[ \t]+)?%s[ \t]*[:?]?=[ \t]*([0-9]+)[ \t]*$"
+            % re.escape(name),
             text, re.MULTILINE)
         check(len(matches) == 1,
-              "the Makefile must define %s exactly once as a decimal constant; "
-              "found %d such definitions" % (name, len(matches)))
+              "the Makefile's sole %s assignment must be a decimal constant"
+              % name)
         if len(matches) != 1:
             continue
         value = int(matches[0])
