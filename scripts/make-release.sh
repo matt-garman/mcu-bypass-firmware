@@ -942,6 +942,12 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 	# release that then reads as qualified hardware.
 	release_validate_hardware_claims "$REPO_ROOT" \
 		|| die "hardware evidence is not correctly classified as field use or controlled qualification"
+	# Every bound the documentation places on its own claims -- what no part has
+	# completed, what PIC10F320 does not check, what reproducing an image proves
+	# -- checked on the live tree, so a release cannot publish prose that claims
+	# more than the evidence it ships.
+	release_validate_claim_boundaries "$REPO_ROOT" \
+		|| die "release documentation states a claim stronger than the evidence retained for it"
 	# The PIC12F675 is not a raw write target, and the release that says so must
 	# also ship the tool that replaces the raw command. Checked here, on the live
 	# tree, so a document that reinstates a raw writer -- or a release that

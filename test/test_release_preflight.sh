@@ -2097,6 +2097,161 @@ release_validate_hardware_claims "$ROOT" >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the hardware evidence contract: $(<"$output")"
 checks=$((checks + 1))
 
+# --- bounded claims ----------------------------------------------------------
+# The contract above keeps field use from being read as qualification. This one
+# keeps everything the project has NOT established from being quietly dropped,
+# and it exists because an audit of the seven claim boundaries this branch was
+# supposed to preserve found three of them enforced by nothing at all: the root
+# README's qualification denial, PIC10F320's two recorded omissions, and what
+# reproducing an image proves. Each was deleted from a scratch clone in turn and
+# the complete suite stayed green, which is the same shape of defect as a
+# document that is the sole home of a policy -- correct today, and silently
+# removable.
+#
+# The fixture root holds COPIES of the four real documents, so each case starts
+# from the shipped text and spoils one property of it.
+boundaries_root="$work/claim-boundaries"
+declare -F release_validate_claim_boundaries >/dev/null \
+	|| fail "bounded-claim validator is missing"
+
+write_boundaries_fixture() {
+	rm -rf "$boundaries_root"
+	mkdir -p "$boundaries_root/release"
+	cp "$ROOT/README.md" "$boundaries_root/README.md"
+	cp "$ROOT/DESIGN_DOCUMENTATION.adoc" "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+	cp "$ROOT/release/README.md" "$boundaries_root/release/README.md"
+	cp "$ROOT/HARDWARE_VALIDATION_LOG.md" "$boundaries_root/HARDWARE_VALIDATION_LOG.md"
+}
+
+# Delete whichever line carries a bounded claim's anchor, which is how a
+# consolidation loses one: not by contradicting it, by not carrying it over.
+drop_claim_line() {
+	local document=$1 anchor=$2 kept="$boundaries_root/.kept"
+	"$REAL_AWK" -v needle="$anchor" 'index($0, needle) { next } { print }' \
+		"$boundaries_root/$document" > "$kept" \
+		|| fail "could not spoil $document"
+	mv "$kept" "$boundaries_root/$document"
+}
+
+assert_boundaries_accepts() {
+	local description=$1
+	release_validate_claim_boundaries "$boundaries_root" >"$output" 2>&1 \
+		|| fail "bounded-claim contract rejected $description: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+assert_boundaries_rejects() {
+	local description=$1 expected=$2
+	if release_validate_claim_boundaries "$boundaries_root" >"$output" 2>&1; then
+		fail "bounded-claim contract accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description was rejected without a documentation diagnostic"
+	grep -Fq "$expected" "$output" \
+		|| fail "$description was rejected for the wrong reason: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+write_boundaries_fixture
+assert_boundaries_accepts 'the shipped documents'
+
+# 1. PRESENCE. Each bounded claim, dropped from the document that owns it.
+#
+# The root README is where a reader arrives, and its denial was the one the log's
+# sentinel did not cover.
+write_boundaries_fixture
+drop_claim_line README.md '**No part has completed'
+assert_boundaries_rejects 'a README that no longer denies controlled qualification' \
+	'README.md no longer states its bounded claim'
+
+# PIC10F320 ships a general defence its 256 words could not hold. Both halves of
+# that record are pinned: what was not ported, and the restatement in the
+# "what this package does not establish" list a reader is pointed to.
+write_boundaries_fixture
+drop_claim_line DESIGN_DOCUMENTATION.adoc 'the general output-**latch** match was'
+assert_boundaries_rejects 'a design document that drops the PIC10F320 latch omission' \
+	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+
+write_boundaries_fixture
+drop_claim_line DESIGN_DOCUMENTATION.adoc 'The general output-latch check is absent'
+assert_boundaries_rejects 'a design document that drops the restated latch omission' \
+	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+
+# The equivalence argument is a behavioural argument. Losing this sentence turns
+# a hand-inlined part's assurance case into a byte-identity claim it never made.
+write_boundaries_fixture
+drop_claim_line DESIGN_DOCUMENTATION.adoc 'The seam remains a seam'
+assert_boundaries_rejects 'a design document that drops the inlining-seam limit' \
+	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+
+# Reproducing an image proves the bytes match the tested source. It does not
+# qualify the firmware, and the sentence that says so is the only thing standing
+# between the two claims for a reader of the release documentation.
+write_boundaries_fixture
+drop_claim_line release/README.md 'attestation that *these binaries are exactly'
+assert_boundaries_rejects 'release documentation that drops what reproduction proves' \
+	'release/README.md no longer states its bounded claim'
+
+# Retaining a known-unsafe image for reproducibility is not endorsing it.
+write_boundaries_fixture
+drop_claim_line release/README.md 'These images are retained only for historical'
+assert_boundaries_rejects 'release documentation that drops the retention limit' \
+	'release/README.md no longer states its bounded claim'
+
+# 2. ABSENCE. The claim the sentinel forbids, in each way it can arrive.
+write_boundaries_fixture
+printf '\nEvery release ships hardware-qualified firmware.\n' \
+	>> "$boundaries_root/README.md"
+assert_boundaries_rejects 'a document attributing qualification to the firmware' \
+	'durable file(s) attribute controlled qualification or hardware validation'
+
+# The banned form is two words, and a wrapped document splits it across the line
+# break a line-oriented scan would read as two innocent lines. This case is the
+# reason the scan flows the document first.
+write_boundaries_fixture
+printf '\nEvery release ships hardware-validated\nfirmware for every board.\n' \
+	>> "$boundaries_root/README.md"
+assert_boundaries_rejects 'an attributed claim split across a line break' \
+	'durable file(s) attribute controlled qualification or hardware validation'
+
+# NAMING the banned wording is not USING it: this file, CHANGELOG.md and the
+# branch working documents all have to write it down in order to retire it.
+write_boundaries_fixture
+printf '\nNever describe a release as `hardware-qualified firmware`.\n' \
+	>> "$boundaries_root/README.md"
+assert_boundaries_accepts 'the banned wording inside a code span'
+
+write_boundaries_fixture
+printf '> **Branch-only working document.**\n\nShips hardware-validated firmware.\n' \
+	> "$boundaries_root/NOTES.md"
+assert_boundaries_accepts 'a root-level branch-only working document'
+
+# The ban is conditional, not permanent. When a part completes controlled
+# qualification the sentinel goes, and the same sentence becomes true and
+# sayable in the commit that records the run. A ban that outlived its premise
+# would make the project unable to state its own first qualification result.
+write_boundaries_fixture
+drop_claim_line HARDWARE_VALIDATION_LOG.md '**No controlled hardware-qualification record exists for any part.**'
+printf '\nThe ATtiny85 is now a hardware-qualified part.\n' \
+	>> "$boundaries_root/README.md"
+assert_boundaries_accepts 'an attributed claim once the sentinel is gone'
+
+write_boundaries_fixture
+rm -f "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'a missing claim-owning document' \
+	'document owning a bounded claim is not a regular nonempty file: DESIGN_DOCUMENTATION.adoc'
+
+boundaries_rc=0
+release_validate_claim_boundaries >"$output" 2>&1 || boundaries_rc=$?
+[ "$boundaries_rc" -eq 2 ] \
+	|| fail "bounded-claim contract accepted a missing repository argument"
+checks=$((checks + 1))
+
+# The live checked-in tree must satisfy the contract.
+release_validate_claim_boundaries "$ROOT" >"$output" 2>&1 \
+	|| fail "the checked-in tree fails the bounded-claim contract: $(<"$output")"
+checks=$((checks + 1))
+
 # ---------------------------------------------------------------------------
 # The PIC12F675 flashing contract.
 #

@@ -3841,7 +3841,7 @@ checks. `test-pic-guard-mutations`: 99 checks, 3.4 s. `test-static-assert-guards
 
 ## BR-SRC-04 - Proof obligations for any user-made firmware refactor
 
-**Status:** DONE `<commit>`
+**Status:** DONE `1b79ed5`
 
 Any firmware refactor must explicitly discharge:
 
@@ -4303,26 +4303,147 @@ banner recognizer the release gate uses.
 
 ## BR-FINAL-02 - Verify safety and claim boundaries
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Work:**
 
-- [ ] Confirm no part is described as hardware-qualified without a controlled
+- [x] Confirm no part is described as hardware-qualified without a controlled
   record.
-- [ ] Confirm field-use reports remain distinct from controlled qualification.
-- [ ] Confirm simulator modeled-pin checks are not described as physical output
+- [x] Confirm field-use reports remain distinct from controlled qualification.
+- [x] Confirm simulator modeled-pin checks are not described as physical output
   evidence.
-- [ ] Confirm PIC12F675 remains not-a-raw-write target.
-- [ ] Confirm helper status remains published, software-tested, and not
+- [x] Confirm PIC12F675 remains not-a-raw-write target.
+- [x] Confirm helper status remains published, software-tested, and not
   hardware-qualified.
-- [ ] Confirm PIC10F320's inlining seam and omitted general latch check remain
+- [x] Confirm PIC10F320's inlining seam and omitted general latch check remain
   explicit.
-- [ ] Confirm release integrity, reproducibility, qualification, and hardware
+- [x] Confirm release integrity, reproducibility, qualification, and hardware
   validation are described as separate claims.
+
+**Audit baseline:** `bbeb96e` against the branch point `13be50a` -- 64
+non-merge commits, 207 files, 32,077 insertions and 18,512 deletions,
+including ten live design documents deleted outright, 12,657 lines between
+them. A bound is the part of a sentence a consolidation drops most easily:
+what survives still reads correctly and asserts more. So each of the seven
+boundaries below was traced from the branch point to the tip, and then tested
+rather than read -- deleted from a scratch clone to see whether anything
+failed.
+
+**All seven hold at the tip. Nothing was weakened.** Every hedge that lived in
+a deleted document arrived somewhere live: PIC10F320's latch omission and
+inlining seam in `DESIGN_DOCUMENTATION.adoc:1958-1984`, the PIC12F675
+preservation gap in `README.md:22`, the coil-mechanics limit in
+`docs/relay_coil_fault_correction.md:225-235`. The one hedge in the deleted
+set with no live counterpart is
+`docs/non-blocking_output_schemes_feasibility.md:1052` -- "withholding the pet
+is a necessary software bound and not a proven hardware-safe bound" -- and it
+bounds a scheme the firmware does not implement, so no shipped claim rests on
+it.
+
+**But three of the seven were enforced by nothing.** The confirmations divide
+sharply once each is tested instead of read:
+
+| boundary | enforced at the branch point by | verdict |
+|---|---|---|
+| No part hardware-qualified without a controlled record | `release_validate_hardware_claims` -- sentinel, record contract, idiom ban, negative controls in `test_release_preflight.sh` | held, in `HARDWARE_VALIDATION_LOG.md` only |
+| Field use distinct from controlled qualification | same validator's structure and vocabulary properties | held and enforced |
+| Simulator lanes are modeled-pin, not physical | `test_release_qualification.sh:2151-2165`, both directions, over the rendered manifest | held and enforced |
+| PIC12F675 is not a raw write target | `_release_pic12f675_raw_writer_scan` plus the heading requirement, controls at `test_release_preflight.sh:2201-2378` | held and enforced |
+| Helper is published, software-tested, not hardware-qualified | the exact sentence required of `README.md`, `FLASHING.md` and `release/README.md` | held and enforced |
+| PIC10F320's inlining seam and omitted general latch check | nothing | held, **unenforced** |
+| Integrity, reproducibility, qualification and hardware validation are separate claims | nothing | held, **unenforced** |
+
+**The measurements.** Each doctoring below was applied to a `git clone` of
+`bbeb96e` in scratch, and the gates that read the doctored file were run
+against it:
+
+- Deleting the whole **"One recorded omission"** paragraph from
+  `DESIGN_DOCUMENTATION.adoc` *and* its restatement in the "what this package
+  does not establish" list -- so the tree no longer says PIC10F320 omits the
+  general output-latch match -- left `test-release-qualification` at 173
+  checks, 0 failures, `test-reference-contract` at 10/0,
+  `test-resource-tables` at 46/0, `test-pinout-alignment` at 31/0 and the
+  hardware-claims contract passing. Identical counts to the undoctored clone.
+- Rewriting `release/README.md` so the historical TMUX images -- the ones
+  under the fail-safe-polarity safety warning -- are "retained as fully
+  qualified, hardware-validated firmware", and so reproduction attests the
+  binaries are qualified rather than "exactly what the tested source compiles
+  to", left `test-release-qualification` at 173/0, `test-reference-contract`
+  at 10/0 and the hardware-claims contract passing.
+- Replacing `README.md`'s **"No part has completed controlled hardware
+  qualification"** with "the release pipeline qualifies every image before
+  publication" left those same three green at the same counts. The log's
+  sentinel was pinned; the sentence a reader actually arrives at was not, and
+  the two could contradict each other with nothing to notice.
+
+That last one is the sharpest. This project's single most consequential claim
+is that no part has been qualified on a bench, and the root README could be
+made to say the opposite while `HARDWARE_VALIDATION_LOG.md` still carried the
+denial.
+
+**What was added.** `release_validate_claim_boundaries()` in
+`scripts/release-documentation.sh`, beside the hardware-claims contract it
+extends, called on the live tree from `test-release-preflight` and from
+`make-release.sh` preflight. Two directions, because a bound can be lost by
+deletion or overwritten by a stronger claim:
+
+- **Presence.** Six sentences required verbatim of the documents that own
+  them, matched against flowed text so rewrapping stays editorial: the root
+  README's qualification denial; PIC10F320's latch omission and its
+  restatement; the seam-is-a-seam limit that keeps a behavioural assurance
+  argument from being read as byte identity; what reproducing an image proves;
+  and what retaining an unsafe image means.
+- **Absence.** No durable document may attribute controlled qualification or
+  hardware validation *to* the firmware, an image, a part or a release while
+  the sentinel says no such record exists.
+
+**Two design decisions worth stating.** The ban is **attributive only** --
+adjective plus noun, "hardware-validated firmware" and its family -- and that
+is a stated ceiling, not an oversight. A predicate can be negated, and every
+true sentence this project writes about qualification *is* the negation ("it
+is not hardware-qualified", "has **not** completed controlled hardware
+qualification"), so banning the predicate in both polarities would ban the
+truth along with the claim. The adjective-plus-noun form has no negated
+spelling, which is what makes it decidable. Prose can still overclaim in words
+this does not enumerate.
+
+The ban is also **conditional on the sentinel**, so it lifts by itself. When a
+part does complete controlled qualification the sentinel goes, and calling
+that part's image hardware-qualified becomes true and sayable in the same
+commit that records the run. A ban that outlived its premise would leave the
+project unable to state its own first qualification result.
+
+**Controls**, in the idiom the file already uses for a documentation contract
+-- "a checker for a documentation contract is exactly the kind of code that
+can pass vacuously and never be noticed". Fifteen checks -- the shipped
+documents accepted, twelve spoiled-fixture cases, an arity guard and the live
+tree: each of the six bounded claims dropped and named in the diagnostic; the
+banned form in a document that owns no required sentence; the banned form
+split across a line break, which a line-oriented scan reads as two innocent
+lines and which is why the scan flows first; the same wording in a code span
+accepted, because naming it in order to retire it is what this file,
+`CHANGELOG.md` and the branch working documents all have to do; a root-level
+branch-only document pruned; the claim accepted once the sentinel is gone; a
+missing claim-owning document; and a missing argument returning 2.
+
+**What this does not do.** It pins six sentences and one form family. It does
+not decide whether a *new* claim is supported by retained evidence -- that
+judgement stays with the writer -- and it cannot see a document that
+overclaims in wording it does not enumerate. What it removes is the specific
+failure this branch kept producing: a boundary that is correct today,
+load-bearing, and silently deletable.
+
+**One finding left to its owner.** `docs/relay_coil_fault_correction.md:50-55`
+still calls logical/physical convergence "guaranteed by the recovery" while
+`:231-235` says whether a relay moves is a bench question. That is BR-RVW-11,
+open and assigned; it is a contradiction inside one document rather than a
+lost bound, and pinning either half here would collide with the repair.
 
 **Acceptance:**
 
 - Simplification does not strengthen any claim beyond retained evidence.
+  *Confirmed for all seven boundaries, and for three of them the confirmation
+  is now mechanical rather than a reading.*
 
 ## BR-FINAL-03 - Verify independent oracles were not centralized away
 
@@ -4655,10 +4776,10 @@ dependencies and acceptance criteria.
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
-| BR-SRC-04 | Enforce source-refactor proof obligations | DONE `<commit>` |
+| BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
 | BR-REVIEW-01 | Resolve completed-item review findings | TODO |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
-| BR-FINAL-02 | Verify safety/claim boundaries | TODO |
+| BR-FINAL-02 | Verify safety/claim boundaries | DONE `<commit>` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |

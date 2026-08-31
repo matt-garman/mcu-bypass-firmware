@@ -669,6 +669,131 @@ release_validate_hardware_claims() {
 
 	return "$rc"
 }
+# Simplification must not strengthen a claim.
+#
+# This branch deleted ten design documents and consolidated what they said into
+# five surviving authorities. Every one of those documents carried bounded
+# claims -- statements of what the project does NOT know -- and a bound is the
+# part of a sentence that a consolidation drops most easily, because dropping it
+# leaves prose that still reads correctly and asserts more.
+#
+# The hardware/field-use split already has its own validator above, and the
+# PIC12F675 raw-write and helper-status boundaries have theirs below. This one
+# covers the boundaries that were left standing in prose alone, where an audit
+# found that deleting them changed no test result:
+#
+#   * The ROOT README's qualification denial. HARDWARE_VALIDATION_LOG.md is
+#     required to carry the sentinel, but README.md is where a reader arrives,
+#     and nothing required README.md to agree with it. Replacing its denial with
+#     "the release pipeline qualifies every image before publication" left the
+#     complete suite green.
+#   * PIC10F320's two recorded omissions. The general output-latch match is not
+#     ported, and the equivalence argument is not a byte-identity claim. Both
+#     are stated in DESIGN_DOCUMENTATION.adoc under headings that exist to state
+#     them; deleting both paragraphs left the complete suite green.
+#   * What reproducing the images proves, and what retaining an unsafe image
+#     means. `release/README.md` bounds the first to "exactly what the tested
+#     source compiles to" and the second to "historical integrity and
+#     reproducibility" -- the two sentences that keep reproducibility from being
+#     read as qualification, and retention from being read as endorsement.
+#
+# Both directions, because a bound can be lost by deletion or overwritten by a
+# stronger claim:
+#
+#   1. PRESENCE. Each bounded claim is required verbatim of the document that
+#      owns it, matched against flowed text so rewrapping stays editorial.
+#   2. ABSENCE. No durable document attributes controlled qualification or
+#      hardware validation TO the firmware, an image, a part or a release --
+#      "hardware-validated firmware" and its family -- while the sentinel says
+#      no such record exists. The ban is deliberately attributive only. A
+#      predicate can be negated, and every true sentence this project writes
+#      about qualification IS the negation ("it is not hardware-qualified",
+#      "has **not** completed controlled hardware qualification"), so banning
+#      the predicate in both polarities would ban the truth along with the
+#      claim. The adjective-plus-noun form has no negated spelling, which is
+#      what makes it decidable. It is a floor, not a proof: prose can still
+#      overclaim in words this does not enumerate.
+#
+# The ban is conditional on the sentinel, so it lifts by itself. When a part
+# does complete controlled qualification the sentinel goes, and calling that
+# part's image hardware-qualified becomes both true and sayable in the same
+# commit that records the run.
+#
+# Scanned on the LIVE tree, like the hardware-claims contract it extends.
+# Published release/vX.Y.Z/ directories are immutable artifacts and are pruned;
+# so are the root-level branch-only working documents, which quote the banned
+# wording in order to describe banning it.
+release_validate_claim_boundaries() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1
+	local log="$repo_root/HARDWARE_VALIDATION_LOG.md"
+	local sentinel='**No controlled hardware-qualification record exists for any part.**'
+	local document label flowed entry required find_pid rc=0
+	local -a claim_offenders=()
+	# Adjective-plus-noun only; see the ABSENCE note above for why.
+	local attributive_claim='hardware[-[:space:]](qualified|validated) (firmware|images?|binaries|parts?|releases?)'
+	# "<document>|<sentence>". No bounded claim contains a pipe.
+	local -a bounded_claims=(
+		"README.md|**No part has completed controlled hardware qualification** — a bench run against a written procedure whose source/image identity, configuration bytes, instrument readings and acceptance result are retained."
+		"DESIGN_DOCUMENTATION.adoc|the general output-**latch** match was not, because in every formulation that preserves its meaning it overruns 256 words on two of the three variants."
+		"DESIGN_DOCUMENTATION.adoc|The general output-latch check is absent, as above."
+		"DESIGN_DOCUMENTATION.adoc|The seam remains a seam: everything above is a behavioural assurance argument, and however thorough it is, it is a different kind of statement from \"the verified code is the shipped code\"."
+		"release/README.md|That check is the public attestation that *these binaries are exactly what the tested source compiles to*"
+		"release/README.md|These images are retained only for historical integrity and reproducibility."
+	)
+
+	for entry in "${bounded_claims[@]}"; do
+		label=${entry%%|*}
+		required=${entry#*|}
+		document="$repo_root/$label"
+		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+			|| { _release_documentation_error "document owning a bounded claim is not a regular nonempty file: $label" || rc=1; continue; }
+		flowed=$(_release_flowed_text "$document") || return
+		case "$flowed" in
+			*"$required"*) ;;
+			*) _release_documentation_error "$label no longer states its bounded claim: $required" || rc=1 ;;
+		esac
+	done
+
+	[ -f "$log" ] && [ -s "$log" ] && [ ! -L "$log" ] \
+		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md is not a regular nonempty file" || return
+
+	# No sentinel means a controlled record now exists, and the attributive
+	# claim it licenses is somebody's to make. The presence rules above still
+	# apply; only this ban lifts.
+	if ! grep -Fq -- "$sentinel" "$log"; then
+		return "$rc"
+	fi
+
+	while IFS= read -r -d '' document; do
+		label=${document#$repo_root/}
+		if _release_is_branch_only_document "$document" "$label"; then
+			continue
+		fi
+		# Flowed BEFORE matching, not line by line: the form this bans is two
+		# words, and a wrapped document splits it across the line break that a
+		# line-oriented grep would then read as two innocent lines. Code and
+		# quoted spans are blanked first, so naming the banned wording in order
+		# to retire it stays possible -- the same NAMING-is-not-USING rule the
+		# hardware-claims scan above applies to its own idiom.
+		flowed=$(_release_unquoted_prose "$document" | tr '\n\t' '  ' | tr -s ' ') \
+			|| { _release_documentation_error "could not read durable document: $label" || rc=1; continue; }
+		if grep -Eqi -- "$attributive_claim" <<<"$flowed"; then
+			claim_offenders+=("$label")
+		fi
+	done < <(find "$repo_root" \
+		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
+		-type f \( -name '*.md' -o -name '*.adoc' -o -name 'Makefile' \) -print0)
+	find_pid=$!
+	# A failed scan is a policy failure, not an empty result set.
+	wait "$find_pid" \
+		|| _release_documentation_error "could not scan durable documentation for attributed qualification claims" || return
+
+	[ "${#claim_offenders[@]}" -eq 0 ] \
+		|| _release_documentation_error "durable file(s) attribute controlled qualification or hardware validation to the firmware while HARDWARE_VALIDATION_LOG.md says no such record exists: ${claim_offenders[*]}" || rc=1
+
+	return "$rc"
+}
 
 # Every PUBLISHED PIC12F675 finalization command must carry the complete identity
 # of the transaction it recovers.
