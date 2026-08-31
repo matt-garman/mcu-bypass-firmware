@@ -137,11 +137,32 @@ STACK_WITNESSES = (
      "IMAGE.hex", ("generated.s",)),
 )
 
+# The production release identity, and what each pinned definition is allowed to
+# read. The pin exists to be a SECOND opinion about which images a release
+# contains, so its whole value is that it is spelled in literal words: the
+# Makefile block says so itself ("a pin computed from FW_BASE would agree with
+# the very thing it exists to check"). An empty allowance means the definition
+# may reference nothing at all. `foreach` is Make's own function name rather
+# than a variable, and `m`/`v` are that function's loop variables.
+RELEASE_IDENTITY_PINS = (
+    ("RELEASE_IDENTITY_PINNED", frozenset()),
+    ("RELEASE_IDENTITY_PARTS", frozenset()),
+    ("RELEASE_IDENTITY_SOAK_PARTS", frozenset()),
+    ("RELEASE_IDENTITY_VARIANTS", frozenset()),
+    ("RELEASE_IDENTITY_IMAGES", frozenset({
+        "foreach", "m", "v",
+        "RELEASE_IDENTITY_PARTS", "RELEASE_IDENTITY_VARIANTS"})),
+    ("RELEASE_IDENTITY_SOAKS", frozenset({
+        "foreach", "m", "v",
+        "RELEASE_IDENTITY_SOAK_PARTS", "RELEASE_IDENTITY_VARIANTS"})),
+)
+
 C_FAMILY = (".c", ".cc", ".cpp", ".h", ".hpp")
 
 INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*(["<])([^">]+)[">]', re.MULTILINE)
 MAIN_RE = re.compile(r"\bmain[ \t]*\([ \t]*void[ \t]*\)")
 ISR_RE = re.compile(r"^[ \t]*ISR[ \t]*\([ \t]*([A-Za-z0-9_]+)[ \t]*\)", re.MULTILINE)
+MAKE_REFERENCE = re.compile(r"\$[({]([A-Za-z_][A-Za-z0-9_]*)")
 
 REGISTER = []
 FAILURES = []
@@ -179,6 +200,27 @@ def code(path):
 def quoted_includes(source):
     return [Path(name).name for delimiter, name in INCLUDE_RE.findall(source)
             if delimiter == '"']
+
+
+def make_definition(makefile, name):
+    """Return the right-hand side of `override <name> :=`, continuations joined.
+
+    None when the Makefile does not define the name that way at all, which is
+    itself a finding: a pin that stopped being an `override` is a pin a caller
+    can move.
+    """
+    match = re.search(r"^override[ \t]+%s[ \t]*:=" % re.escape(name),
+                      makefile, re.MULTILINE)
+    if match is None:
+        return None
+    value = []
+    for line in makefile[match.end():].split("\n"):
+        if line.endswith("\\"):
+            value.append(line[:-1])
+            continue
+        value.append(line)
+        break
+    return " ".join(part.strip() for part in value).strip()
 
 
 def defines(source, name):
@@ -478,6 +520,50 @@ def every_verification_layer_is_still_wired():
     for target, sharing in sorted(targets.items()):
         counted(len(sharing) == 1, identifier,
                 "%s now serves %s" % (target, " and ".join(sharing)))
+
+
+@row("release-identity-pin-is-literal",
+     "which images a release contains is decided twice: once by the live build "
+     "variables that compose RELEASE_IMAGES, and once by a table of reviewed "
+     "literals no channel can reach. The pin is a second opinion only while it "
+     "stays literal. Composed instead from FW_BASE, the per-part MCU tags or "
+     "the supported-variant sets, it would move with the thing it exists to "
+     "check: the two sets would agree by construction, every comparison would "
+     "still pass, and a release built under a moved name would stage and "
+     "publish a complete, self-consistent set of images nobody had reviewed")
+def the_release_identity_pin_is_still_literal():
+    identifier = "release-identity-pin-is-literal"
+    makefile = MAKEFILE.read_text(encoding="utf-8") if MAKEFILE.is_file() else ""
+    if not counted(bool(makefile), identifier, "the Makefile is gone"):
+        return
+
+    # That no CHANNEL can move the pin is held by test_release_images.sh, which
+    # re-reads each name under a command-line and an environment override. This
+    # is the other way to lose it: an edit, in the file itself, that leaves
+    # every one of those checks passing.
+    for name, allowed in RELEASE_IDENTITY_PINS:
+        definition = make_definition(makefile, name)
+        if not counted(definition is not None, identifier,
+                       "the Makefile no longer defines %s as an `override`; the "
+                       "pin the live release identity is compared against is "
+                       "gone or reachable" % name):
+            continue
+        borrowed = sorted(set(MAKE_REFERENCE.findall(definition)) - allowed)
+        counted(not borrowed, identifier,
+                "%s is now composed from %s. A pin that reads a build variable "
+                "moves with it and agrees with the identity it exists to check"
+                % (name, ", ".join(borrowed)))
+
+    # The other half of the pair. The selected side must keep reading the LIVE
+    # value of each pinned name; two literal tables cannot disagree, and the
+    # build the comparison exists to police would go unchecked.
+    selected = make_definition(makefile, "RELEASE_IDENTITY_SELECTED")
+    if counted(selected is not None, identifier,
+               "the Makefile no longer defines RELEASE_IDENTITY_SELECTED, the "
+               "live half of the comparison"):
+        counted("$($(n))" in selected, identifier,
+                "RELEASE_IDENTITY_SELECTED no longer reads each pinned name out "
+                "of the live Makefile, so the pin is compared against itself")
 
 
 def main():

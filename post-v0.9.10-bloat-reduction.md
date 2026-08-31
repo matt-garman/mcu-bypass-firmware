@@ -3972,7 +3972,7 @@ review.
 
 ## BR-FINAL-01 - Run a complete current-reference audit
 
-**Status:** DONE `<commit>`
+**Status:** DONE `880d28b`
 
 **Depends on:** All document deletion/consolidation tasks
 
@@ -4128,28 +4128,179 @@ banner recognizer the release gate uses.
 
 ## BR-FINAL-03 - Verify independent oracles were not centralized away
 
-**Status:** TODO
+**Status:** DONE `<commit>`
+
+**Audit baseline:** `227d824` against the branch point `13be50a` -- 55 non-merge
+commits, 207 files, 31,184 insertions and 18,514 deletions.
+
+**No gate was retired.** The set of goals the Makefile defines at the branch
+point is a strict subset of the set at the tip: none was removed and eight were
+added (`test-analysis-matrix`, `test-attiny202-guard-mutations`,
+`test-deliberate-duplication`, `test-pic-guard-mutations`,
+`test-pic-toolchain-assert`, `test-published-release-immutability`,
+`test-reference-contract`, `test-xc8-helpers`). Two files left `test/` and
+`scripts/`, and seven commits are net-negative across the Makefile, the scripts,
+the tests and the workflows. Those, the ten deleted documents, and the
+consolidation commits named in the bullets below are the corpus this item had to
+classify. Each is settled by evidence read at the tip rather than by the commit
+message that claimed it.
+
+**Every removal was redundant authority, and the evidence for each:**
+
+- **`test/test_fault_wdt_note_contract.sh`** (`cee6bab`) was five lines ending
+  in `exec python3 "$ROOT/test/test_fault_wdt_note_contract.py"`. The Python
+  gate survives and still owns `test-fault-wdt-note-contract`. Redundant
+  indirection, never an opinion.
+
+- **`scripts/verify-rename-identity.sh`** (`893d647`, the largest single
+  removal at 972 net lines) was a one-shot that named its own successor and its
+  own retirement condition in its header: "the standing form of this check is
+  per-release, and already exists (`test/pic10f320/expected_images.sha256`,
+  `make test-release-images`)" and "when that table stops naming the current
+  release, this check is already inert; delete it then". The signed v0.9.8
+  report and mapping remain published under `release/v0.9.8/`. The retirement
+  also added an opinion rather than only removing one:
+  `test_release_provenance.sh:473` now fails if active release production still
+  carries retired rename-identity state.
+
+- **Four line-oriented workflow checks** (`7aab253`) left
+  `test_release_history.sh` and `test_release_provenance.sh`. Every fact they
+  asserted is asserted at the tip, exactly once, in `test_workflow_syntax.sh`:
+  `fetch-depth`, the `RELEASE_OBJECT` routing, the binding of qualification to
+  tag history, the remote tag recheck, the twice-verified detached signature,
+  and the ordering dominance. Two greps of one file with one method are one
+  opinion spelled twice, not two oracles. What replaced them is stronger: it
+  tokenizes the publication shell, pins the exact command inventory, and
+  requires publication to be the very next command after the second inventory
+  verification rather than merely a larger line number.
+
+- **Four resource-figure restatements** (`e7c4f68`, 568 lines out of the
+  checker) are the one case where independence measurably increased. The
+  removed check compared five hand-maintained transcriptions with each other,
+  three of which were already several changes stale when it was written. What
+  replaced it measures the images the tree has actually built -- all 21 of them
+  under `--require-all-images` -- against ceilings parsed from the Makefile, and
+  cross-checks those ceilings against datasheet capacities the test itself owns.
+  Documentation stopped being an input to the resource oracle.
+
+- **Duplicate CI execution** (`b86a5a7`, `b9cbd36`, `bc5f11d`) removed repeated
+  runs rather than opinions, and the arithmetic is pinned rather than asserted
+  in prose. `test_workflow_syntax.sh` requires exactly one direct
+  `test-mutation` invocation per hosted event and no other mutation-bearing job;
+  `test_workload_rebuild.sh` requires `test-long` to be the stress inventory
+  plus exactly one mutation gate, requires stress to keep the mutation-driver
+  sandbox regression, and walks Make's own prerequisite graph to prove no target
+  other than `test-long` reaches full mutation. The resource policy pins stayed
+  per-surface: `16`, `32` and `48` are stated once each in `ci.yml`,
+  `ci-local.sh`, `release.yml` and `make-release.sh`, and the Makefile keeps its
+  own `?=` production defaults. Five independent statements, not one.
+
+- **Declaration consolidation in Make** (`d3ea121`, `4fa470b`, `746ddcf`) moved
+  where facts are written without moving who decides them. The tests kept
+  literal test-owned canonical sets -- `TM_CANONICAL_VARIANTS` in
+  `test_target_matrix.sh` carries that reason on the line above it -- and gained
+  literal fake-compiler argument contracts for every producer.
+  `CLASSIC_VARIANTS_SUPPORTED`, `XT_VARIANTS_SUPPORTED` and
+  `PIC10F320_VARIANTS_SUPPORTED` remain three separate declarations that can
+  still diverge; the PIC10F322 and PIC12F675 target sets alias the classic one
+  deliberately, because those parts are classic-family.
+
+- **Ten deleted documents** carried their evidence with them. The hardest case
+  is `docs/pic10f320_validation.md`, a 570-line validation record: its
+  measurement date (2026-06-26), its pinned free-tier XC8 and device pack, its
+  356/386/381-word builds and the 47-word and 12-word prices of the two rejected
+  reductions are in `DESIGN_DOCUMENTATION.adoc` verbatim, and each of its
+  historical one-shot results -- the two return-stack gates, the rebuild-trigger
+  regression, byte identity, mutation topology -- has a live standing gate that
+  re-derives it on every run instead of a paragraph recording that it once
+  passed.
+
+**The finding: the release-identity pin is literal only by convention.**
+
+The release identity is the strongest independent oracle on this branch and the
+one this item names by hand. `RELEASE_IMAGES` is composed from `FW_BASE`, the
+per-part MCU tags and the supported-variant sets, every one of which a command
+line or an inherited environment can move. `RELEASE_IDENTITY_IMAGES` is the
+`override` pin built from literal words that it is checked against, and Make
+refuses at parse time if the two sets differ (`Makefile:8082`).
+`test_release_images.sh` pins the count at a literal 21 and the soak set at 18,
+requires the two sets to be equal in both directions, and re-reads every pinned
+name under a command-line and an environment override to prove no channel
+reaches it.
+
+Nothing checked the property all of that rests on. The Makefile states it in
+prose -- "a pin computed from `FW_BASE` would agree with the very thing it
+exists to check ... they are both literals, so they cannot disagree at run
+time" -- and no gate could tell a literal pin from a derived one. Rewriting
+`RELEASE_IDENTITY_PARTS` to read the per-part tag variables is a plausible
+tidying edit, it is not an override, and it survives every check listed above.
+
+Measured rather than argued. On a doctored copy of the tree with
+`RELEASE_IDENTITY_PINNED`, `RELEASE_IDENTITY_PARTS` and
+`RELEASE_IDENTITY_SOAK_PARTS` reading `$(PIC12F675_TAG)` -- a `?=` variable that
+an exported environment value wins -- exporting `PIC12F675_TAG=pic12f629` takes
+the tree from reporting `PIC12F675_TAG=pic12f629 RELEASE_IMAGES` drift to
+reporting only `RELEASE_SOAK_NAMES`. The field-by-field comparison and the
+21-image comparison both fall silent, and three of the pinned image names have
+been renamed inside the pin itself. Every override-channel check still passes,
+because those hijack the pin's own name rather than the variable it now reads.
+The one residual is an accident of asymmetry rather than a defense:
+`RELEASE_SOAK_NAMES` is literal on the live side too, so it did not move with
+the pin.
+
+**The repair: a ninth row in the register that already exists for this.**
+
+`test-deliberate-duplication` is the gate for exactly this defect class -- "fold
+a pair into one shared definition and the survivor still agrees with itself,
+every existing test still passes, and half the evidence is gone". The new row,
+`release-identity-pin-is-literal`, reads the `override` definitions of the six
+pinned names out of the Makefile and requires each to reference nothing outside
+its own closure: the four reviewed lists may reference nothing at all, and the
+two composed names may reference only the other pins and `foreach`'s own loop
+variables. It also holds the other half of the pair, requiring
+`RELEASE_IDENTITY_SELECTED` to keep reading each pinned name's live value
+through `$($(n))` -- two literal tables cannot disagree either, and a pin
+compared against itself polices nothing.
+
+That no *channel* can move the pin stays where it is, in
+`test_release_images.sh`. This row is the other way to lose it: an edit, in the
+file itself, that leaves all of those passing.
+
+**Verification:** the register goes from 335 checks over 8 duplications to 350
+over 9, still lexical and still needing no toolchain. Five negative controls
+against doctored trees via `DUPLICATION_ROOT`, each rejected with the intended
+message: the parts list composed from the build's tag variables, the image names
+taking `$(FW_BASE)`, the pinned field table reading a variable, a pin that lost
+its `override`, and the selected side made literal so the comparison compares
+the pin with itself. The pristine copy passes.
 
 **Work:**
 
-- [ ] Review every removed duplicate and classify it as redundant authority or
+- [x] Review every removed duplicate and classify it as redundant authority or
   independent oracle.
-- [ ] Confirm release identity still has an independent literal pin.
-- [ ] Confirm expected pin/output facts are not generated from firmware maps.
-- [ ] Confirm supported sets can legitimately diverge by target.
-- [ ] Confirm both PIC stack witnesses remain where applicable.
-- [ ] Confirm formal and simulation substrates remain distinct.
-- [ ] Confirm build constants and firmware guards can still disagree and fail.
+- [x] Confirm release identity still has an independent literal pin.
+- [x] Confirm expected pin/output facts are not generated from firmware maps.
+- [x] Confirm supported sets can legitimately diverge by target.
+- [x] Confirm both PIC stack witnesses remain where applicable.
+- [x] Confirm formal and simulation substrates remain distinct.
+- [x] Confirm build constants and firmware guards can still disagree and fail.
 
-`make test-deliberate-duplication` (BR-SRC-01) now decides five of these
-mechanically on every run: the pin/output facts the PIC harnesses expect are
-literal rather than taken from the firmware map, the supported sets diverge by
-part because each part states its own pin ordinals and watchdog terms, both PIC
-stack witnesses remain and still read different artifacts, the formal and
-simulation substrates remain distinct subjects under distinct targets, and no
-file in `src/` supplies the clock its guards check. The remaining two -- the
-classification of each removed duplicate, and the release-identity literal --
-stay a reading of the diff.
+`make test-deliberate-duplication` (BR-SRC-01) decides six of these mechanically
+on every run, one more than when this item was written: the pin/output facts the
+PIC harnesses expect are literal rather than taken from the firmware map, the
+supported sets diverge by part because each part states its own pin ordinals and
+watchdog terms, both PIC stack witnesses remain and still read different
+artifacts, the formal and simulation substrates remain distinct subjects under
+distinct targets, no file in `src/` supplies the clock its guards check, and --
+as of this item -- the release-identity pin is still spelled in literals. The
+classification of each removed duplicate remains a reading of the diff, which is
+what the record above is.
+
+**What this does not do:** it does not check that either half of any pair is
+*correct*, which is what the formal, simulation, oracle and hardware layers are
+for; and it does not gate the classification itself. A future deduplication is
+still a judgement, and the register only fails the nine folds someone has
+already thought about.
 
 **Acceptance:**
 
@@ -4308,9 +4459,9 @@ dependencies and acceptance criteria.
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
 | BR-REVIEW-01 | Resolve completed-item review findings | TODO |
-| BR-FINAL-01 | Audit current references | DONE `<commit>` |
+| BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
-| BR-FINAL-03 | Verify independent oracles remain | TODO |
+| BR-FINAL-03 | Verify independent oracles remain | DONE `<commit>` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |
 | BR-FINAL-06 | Measure outcome | TODO |
