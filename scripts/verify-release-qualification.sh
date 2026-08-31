@@ -97,10 +97,11 @@ done
 # format=4 brought the provenance files inside SHA256SUMS, so one signature
 # verification reaches where the firmware came from. format=5 adds
 # toolchain_sha256: the MANIFEST toolchain table stopped being authored prose
-# and is now rendered from bound evidence. format=6 adds evidence_index_sha256,
-# and with it the thirteen retained logs -- every build log and every target-test
-# log, 62% of the evidence tree by bytes -- that until now were checked for their
-# name and their non-emptiness and for nothing else at all. Releases through
+# and is now rendered from bound evidence. format=6 added evidence_index_sha256
+# and length-attributed the thirteen retained build and target-test logs. Format
+# 7 closes the remaining same-shape substitution gap: each operation seals its
+# exact transcript payload by SHA-256 before appending its terminal result, which
+# the index commits through the existing qualification root. Releases through
 # v0.9.11 declare format=3 or format=1 or nothing at all and signed the firmware
 # only.
 #
@@ -109,7 +110,7 @@ done
 # a compatibility branch would be unreachable code claiming a capability
 # nothing exercises. verify-release-images.sh, which IS run against published
 # directories, carries the era policy instead.
-[ "${q[format]}" = 6 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 7 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -253,6 +254,9 @@ validate_canonical_names() {
 }
 validate_canonical_names "canonical release soak set" "${canonical_soaks[@]}"
 validate_canonical_names "canonical release evidence set" "${canonical_evidence[@]}"
+validate_canonical_names "evidence result role set" "${result_roles[@]}"
+[ "$(printf '%s\n' "${result_roles[@]}" | sort)" = $'build\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build and target-test"
 
 # The declared role of every retained file. Read from the Makefile rather than
 # from the index being checked: an index that supplied its own role vocabulary
@@ -446,11 +450,10 @@ rendered_rows=$(sed -n '/^## Toolchain$/,/^## /p' "$manifest" \
 
 # --- the evidence index, and the thirteen logs it made checkable --------------
 # Until format=6 the qualification verifier established, for every build log and
-# every target-test log, that a file of that name existed and was not empty.
-# Nothing read a byte of it. Thirteen files and 62% of the evidence tree sat
-# behind that check, and test/published_release_digests.txt then froze whatever
-# had been staged -- so a log from an earlier run, or from the wrong part, became
-# a permanent part of the qualification record instead of failing anything.
+# every target-test log, only that a file of that name existed and was not empty.
+# Format 6 added source/name/role/length attribution but still accepted a payload
+# substitution preserving size and line count. Format 7 rehashes the exact bytes
+# preceding each operation-sealed result, independently of the producer.
 #
 # The index is checked against the Makefile's declared role map and against the
 # files themselves, never against its own claims. Three ways to get this wrong
@@ -462,9 +465,9 @@ index_digest=$(sha256sum -- "$index_log") \
 [ "${index_digest%% *}" = "${q[evidence_index_sha256]}" ] \
 	|| die "retained evidence index digest does not match QUALIFICATION"
 
-grep -Fxq "EVIDENCE_INDEX format=1 source_commit=${q[source_commit]}" "$index_log" \
+grep -Fxq "EVIDENCE_INDEX format=2 source_commit=${q[source_commit]}" "$index_log" \
 	|| die "evidence index has no source-bound header record"
-index_result="EVIDENCE_INDEX_RESULT format=1 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"
+index_result="EVIDENCE_INDEX_RESULT format=2 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"
 mapfile -t index_results < <(grep '^EVIDENCE_INDEX_RESULT ' "$index_log" || true)
 [ "${#index_results[@]}" -eq 1 ] && [ "${index_results[0]}" = "$index_result" ] \
 	|| die "evidence index has no exact source-bound complete result"
@@ -474,13 +477,17 @@ mapfile -t index_results < <(grep '^EVIDENCE_INDEX_RESULT ' "$index_log" || true
 # Makefile with no rule here must stop the release rather than be reported as
 # having concluded nothing.
 expected_terminal_record() {
-	local role=$1 path=$2 name=$3 pattern matches lines
+	local role=$1 path=$2 name=$3 pattern matches total_lines payload_lines digest
 	case "$role" in
 		build|target-test)
-			lines=$(wc -l < "$path") || return 1
-			[ "$lines" -ge 1 ] || return 1
-			printf 'EVIDENCE_RESULT format=1 status=pass role=%s evidence=%s lines=%d source_commit=%s\n' \
-				"$role" "$name" "$((lines - 1))" "${q[source_commit]}"
+			[ -z "$(tail -c 1 "$path")" ] || return 1
+			total_lines=$(wc -l < "$path") || return 1
+			[ "$total_lines" -ge 2 ] || return 1
+			payload_lines=$((total_lines - 1))
+			digest=$(head -n "$payload_lines" "$path" | sha256sum) || return 1
+			digest=${digest%% *}
+			printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+				"$role" "$name" "$payload_lines" "$digest" "${q[source_commit]}"
 			return 0 ;;
 		soak)                 pattern='^SOAK_RESULT ' ;;
 		test-long)            pattern='^TEST_LONG_RESULT ' ;;
@@ -515,22 +522,28 @@ while IFS=$'\t' read -r index_name index_role index_size index_record; do
 		|| die "could not size retained evidence: $index_name"
 	[ "$index_size" = "$member_size" ] \
 		|| die "evidence index records $index_name as $index_size bytes; it is $member_size"
-	expected_record=$(expected_terminal_record "$index_role" "$member" "$index_name") \
-		|| die "no single terminal record for $index_name (role $index_role)"
-	[ "$index_record" = "$expected_record" ] \
-		|| die "evidence index misreports the terminal record of $index_name"
-	# For the thirteen, the record above was DERIVED rather than read, so it has
-	# still not been shown to be in the file. This is that check, and it is what
-	# binds the log to this commit and to its own length.
+	# For the thirteen, validate the member before the index row. A same-size,
+	# same-line-count payload substitution leaves member and index agreeing with
+	# each other about the OLD digest; independent rehashing must be what fails.
 	case "$index_role" in
 		build|target-test)
 			mapfile -t member_results < <(grep '^EVIDENCE_RESULT ' "$member" || true)
 			[ "${#member_results[@]}" -eq 1 ] \
 				|| die "$index_name carries ${#member_results[@]} EVIDENCE_RESULT records, expected 1"
-			[ "${member_results[0]}" = "$expected_record" ] \
-				|| die "$index_name has no exact source-bound terminal record"
+			[ "$(tail -n 1 "$member")" = "${member_results[0]}" ] \
+				|| die "$index_name EVIDENCE_RESULT is not the final line"
 			;;
 	esac
+	expected_record=$(expected_terminal_record "$index_role" "$member" "$index_name") \
+		|| die "no single terminal record for $index_name (role $index_role)"
+	case "$index_role" in
+		build|target-test)
+			[ "${member_results[0]}" = "$expected_record" ] \
+				|| die "$index_name payload digest or result metadata does not match its transcript"
+			;;
+	esac
+	[ "$index_record" = "$expected_record" ] \
+		|| die "evidence index misreports the terminal record of $index_name"
 	index_rows=$((index_rows + 1))
 done < "$index_log"
 [ "$index_rows" -eq "${#indexed_names[@]}" ] \

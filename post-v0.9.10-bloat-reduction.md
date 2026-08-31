@@ -3100,16 +3100,19 @@ that rounds to zero. Declined on the measurement, not on effort.
 
 ### The index half: already built, by BR-REL-07
 
-`test/published_release_digests.txt` records every published evidence file by
-digest -- 306 of them -- and `test_published_release_immutability.py` enforces,
-together with each release's own `SHA256SUMS`, a partition covering every
-published file exactly once. Its header states the charter directly: "Every
-published file a release does not sign for itself." A per-member digest in a
-new `evidence/INDEX` would have been a second record of the same fact with no
-rule about which wins when they disagree.
+`test/published_release_digests.txt` records every final published evidence file
+by digest -- 306 of them -- and `test_published_release_immutability.py`
+enforces, together with each release's own `SHA256SUMS`, a partition covering
+every published file exactly once. Its header states the charter directly:
+"Every published file a release does not sign for itself." A full-file digest
+column in `evidence/INDEX` would have been a second record of the same fact with
+no rule about which wins when they disagree.
 
-So `evidence/INDEX` carries **no digest column**. It records what was missing:
-what each retained file is for, and what it concluded.
+So `evidence/INDEX` carries **no digest column**. The build/target terminal
+record it commits now contains the one digest of the different object that
+matters to qualification: the exact operation payload before that record was
+appended. The index records what each retained file is for and what concluded
+it; the publication registry freezes the resulting final file.
 
 ### What the measurement actually found
 
@@ -3137,9 +3140,10 @@ covers only the 18 named combinations.
   its name, so the index cannot be its own authority for what a member is.
 - [x] Write `evidence/INDEX`: one row per member with role, size and terminal
   record, plus a source-bound header and result record.
-- [x] Bind it as `evidence_index_sha256` from `QUALIFICATION` at `format=6`.
+- [x] Bind it as `evidence_index_sha256` from `QUALIFICATION` at `format=7`.
 - [x] Emit an `EVIDENCE_RESULT` record into each of the 13 unbound logs, binding
-  each to the released commit, to its own name, and to its own length.
+  each at operation closure to the released commit, declared role, own name,
+  payload line count and exact payload SHA-256.
 - [x] Verify the index against the Makefile and against the files, both
   directions: no member unlisted, no row unmatched.
 - [x] Retain raw logs where forensic detail is useful -- unchanged, and now the
@@ -3158,12 +3162,13 @@ covers only the 18 named combinations.
   evidence.~~ Withdrawn with it, and satisfied absolutely: there is no
   compression step.
 
-**What this does not do.** The `EVIDENCE_RESULT` records add no verdict. By the
-time they are written, each command has already exited zero and `make-release.sh`
-has already acted on that. What they add is attribution: a log from a different
-run, a log substituted for its neighbour, a truncated log and a padded log all
-stop matching. That is the difference between evidence that is present and
-evidence that is accounted for.
+**What this does not do.** The `EVIDENCE_RESULT` records add no verdict. Each is
+written immediately after its command exits zero, before staging can bless a
+stale or substituted transcript. What they add is payload identity and
+attribution: a log from a different run, a same-shape substitution, a log
+substituted for its neighbour, a truncation and padding all stop matching. That
+is the difference between evidence that is present and evidence that is
+accounted for.
 
 ## BR-REL-03 - Clarify full test-long log retention
 
@@ -3804,7 +3809,7 @@ prospective release implementation.
   basename in a trailing shell comment; qualification rejects it at the operand
   check. `test-release-qualification`: 164 checks, 0 failures.
 
-- [ ] **BR-RVW-03 -- HIGH -- the thirteen newly attributed logs are not
+- [x] **BR-RVW-03 -- HIGH -- the thirteen newly attributed logs are not
   content-bound (BR-REL-02, `f401507`).** `EVIDENCE_RESULT` is appended after
   execution and carries role, name, line count and source commit
   (`scripts/make-release.sh:2444-2468`). The signed index deliberately carries
@@ -3817,6 +3822,16 @@ prospective release implementation.
   to the qualification root or replace it with the minimum structured result
   the release claim actually needs; do not create a second conflicting digest
   authority.
+
+  **Resolved:** Each producing operation now closes by hashing its exact log
+  payload and appending one `EVIDENCE_RESULT format=2`; staging validates and
+  copies that existing record rather than regenerating it. Index format 2
+  commits the record through `evidence_index_sha256` and `QUALIFICATION` format
+  7, so no parallel digest list was added. The independent verifier hashes the
+  byte prefix itself and rejects same-size/same-line-count substitution, a false
+  digest copied into both log and index, a format downgrade, and a nonterminal
+  record. `test-release-qualification`: 167 checks, 0 failures.
+  `test-release-provenance`: 73 checks, 0 failures.
 
 - [ ] **BR-RVW-04 -- MEDIUM -- resource records are neither closed schemas nor
   uniquely covered outside image rows (BR-RES-03, `1ad315e`).** Both parsers

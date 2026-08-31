@@ -7858,8 +7858,8 @@ override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 #
 # The `bound` roles below carry their own exact source-bound terminal record
 # that the verifier matches. `build` and `target-test` did not, and that is what
-# EVIDENCE_RESULT records now cover -- 13 files and 62% of the evidence bytes
-# whose only previous check was that the name was present and the file non-empty.
+# operation-sealed EVIDENCE_RESULT records now cover -- 13 files and 62% of the
+# evidence bytes whose only previous check was name and non-emptiness.
 override RELEASE_EVIDENCE_ROLES := \
 	build-avr-classic.log=build build-avr-xt.log=build \
 	build-pic10f322.log=build build-pic10f320.log=build \
@@ -7876,10 +7876,10 @@ override RELEASE_EVIDENCE_ROLES := \
 	test-long.summary.txt=test-long \
 	$(foreach n,$(RELEASE_SOAK_NAMES),soak-$(n).log=soak)
 
-# The roles whose members carry an EVIDENCE_RESULT record written at staging
-# time. The other roles are bound by an authority that predates this one and is
-# stronger: a digest named in QUALIFICATION, or a terminal record the verifier
-# already matched exactly. Nothing is bound twice.
+# The roles whose members carry an EVIDENCE_RESULT record written immediately
+# after their final producer closes. The other roles are bound by an authority
+# that predates this one and is stronger: a digest named in QUALIFICATION, or a
+# terminal record the verifier already matched exactly. Nothing is bound twice.
 override RELEASE_EVIDENCE_RESULT_ROLES := build target-test
 
 # --- the immutable production release identity -------------------------------

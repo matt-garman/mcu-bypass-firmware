@@ -794,7 +794,7 @@ required_format=$(grep -oP '^\[ "\$\{q\[format\]\}" = \K[0-9]+' "$QUALIFY")
 [ "$produced_format" = "$required_format" ] \
 	|| fail "make-release.sh writes QUALIFICATION format=$produced_format but verify-release-qualification.sh requires format=$required_format"
 
-# The same hazard, for the records format=6 introduced. The qualification
+# The same hazard, for the records format=7 completes. The qualification
 # fixture writes its OWN index rather than calling the release script's writer,
 # which is what lets it catch the two of them disagreeing -- but only if the
 # shapes are pinned here, because the fixture is written against the verifier
@@ -813,18 +813,49 @@ required_evidence_record=$(grep -oP "^\s*printf 'EVIDENCE_RESULT \K[^\\\\]*" "$Q
 	|| fail "make-release.sh writes EVIDENCE_RESULT '$produced_evidence_record' but the verifier derives '$required_evidence_record'"
 checks=$((checks + 1))
 
-produced_index_header=$(grep -cF "printf 'EVIDENCE_INDEX format=1 source_commit=%s" "$RELEASE")
+produced_index_header=$(grep -cF "printf 'EVIDENCE_INDEX format=2 source_commit=%s" "$RELEASE")
 [ "$produced_index_header" = 1 ] \
 	|| fail "make-release.sh does not write exactly one EVIDENCE_INDEX header record"
-grep -qF 'grep -Fxq "EVIDENCE_INDEX format=1 source_commit=${q[source_commit]}"' "$QUALIFY" \
+grep -qF 'grep -Fxq "EVIDENCE_INDEX format=2 source_commit=${q[source_commit]}"' "$QUALIFY" \
 	|| fail "verify-release-qualification.sh does not bind the EVIDENCE_INDEX header to source_commit"
 checks=$((checks + 1))
 
 produced_index_result=$(grep -oP "printf 'EVIDENCE_INDEX_RESULT \K[^\\\\]*" "$RELEASE" | head -1)
-[ "$produced_index_result" = 'format=1 status=pass members=%d source_commit=%s' ] \
+[ "$produced_index_result" = 'format=2 status=pass members=%d source_commit=%s' ] \
 	|| fail "make-release.sh writes an unexpected EVIDENCE_INDEX_RESULT shape: $produced_index_result"
-grep -qF 'index_result="EVIDENCE_INDEX_RESULT format=1 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"' "$QUALIFY" \
+grep -qF 'index_result="EVIDENCE_INDEX_RESULT format=2 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"' "$QUALIFY" \
 	|| fail "verify-release-qualification.sh does not require the EVIDENCE_INDEX_RESULT shape make-release.sh writes"
+checks=$((checks + 1))
+
+# Each payload digest must be sealed where the operation ends, not synthesized
+# during staging around whichever transcript survived until then. Every declared
+# build/target-test member has exactly one seal after its last command-side
+# reference and before the generic evidence copy begins.
+sealed_evidence=(
+	build-avr-classic.log build-avr-xt.log
+	build-pic10f322.log build-pic10f320.log build-pic12f675.log
+	attiny202-test.log attiny202-test-target.log
+	pic10f322-test.log pic10f322-test-target-variants.log
+	pic10f320-test.log pic10f320-test-target-variants.log
+	soak-build.log final-image-build.log
+)
+copy_evidence_line=$(grep -nF '# Copy evidence.' "$RELEASE" | cut -d: -f1)
+[[ "$copy_evidence_line" =~ ^[0-9]+$ ]] \
+	|| fail "could not locate release evidence staging"
+for sealed_name in "${sealed_evidence[@]}"; do
+	mapfile -t seal_lines < <(grep -nF \
+		"seal_evidence_result \"\$EVID/$sealed_name\"" "$RELEASE")
+	[ "${#seal_lines[@]}" -eq 1 ] \
+		|| fail "$sealed_name has ${#seal_lines[@]} operation-closure seals, expected 1"
+	seal_line=${seal_lines[0]%%:*}
+	last_operation_line=$(grep -nF "\$EVID/$sealed_name" "$RELEASE" \
+		| grep -v 'seal_evidence_result' | cut -d: -f1 | sort -n | tail -1)
+	[[ "$last_operation_line" =~ ^[0-9]+$ ]] \
+		|| fail "could not locate the final operation reference for $sealed_name"
+	[ "$seal_line" -gt "$last_operation_line" ] \
+		&& [ "$seal_line" -lt "$copy_evidence_line" ] \
+		|| fail "$sealed_name is not sealed after its operation and before staging"
+done
 checks=$((checks + 1))
 
 # The manifest bullet is authored by the producer and matched literally by the

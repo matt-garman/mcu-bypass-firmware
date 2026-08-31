@@ -141,17 +141,17 @@ historical records and are not retroactively compacted by this policy.
   then froze whatever had been staged, so a log kept from an earlier run became
   a permanent part of the qualification record instead of failing anything: it
   is an immutability gate, and this was the qualification gate it cannot be.
-  Each now carries an `EVIDENCE_RESULT format=1` record binding the log to the
-  released commit, to its own name and to its own length, so a log from another
-  run, a log substituted for its neighbour, a truncated log and a padded log all
-  stop matching. A new `evidence/INDEX` lists every retained file by role, size
-  and terminal record, bound from `QUALIFICATION` as `evidence_index_sha256`
-  (`format=6`). Roles are declared in the Makefile and never inferred from
-  filenames, so the index cannot be its own authority for what a member is, and
-  the verifier checks it against that declaration in both directions. The index
-  deliberately carries **no digest column**: `published_release_digests.txt`
-  already records every published evidence file by digest, and a second record
-  of the same fact would have no rule about which one wins.
+  Each operation now closes by appending an `EVIDENCE_RESULT format=2` record
+  whose `payload_sha256` binds every preceding transcript byte, along with the
+  released commit, declared role, own name and payload line count. A same-size,
+  same-line-count substitution therefore fails independently of the record and
+  index continuing to agree with each other. `evidence/INDEX` lists every
+  retained file by role, size and terminal record, bound from `QUALIFICATION` as
+  `evidence_index_sha256` (`format=7`; index format 2). Roles are declared in the
+  Makefile and never inferred from filenames. The index deliberately carries no
+  separate digest column: the operation result is the one payload-digest
+  authority, while `published_release_digests.txt` records the different final
+  published file for historical immutability.
 
 - **The manifest's toolchain table is evidence now, not prose.** Fifteen rows
   of compiler, simulator and analyzer versions were printed into `MANIFEST.md`
