@@ -385,6 +385,27 @@ scan cannot be fooled by a commented-out or conditionally compiled proof. Risk
 if deferred: Low -- the literal is correct as of this writing and a future
 mismatch fails loudly and names the count, exactly as it did this time.
 
+### T25-program-argv - Cross-check published commands against executed argv
+
+A release now pins its published PIC10F322 command to `PIC10F322_PROG_CMD` byte
+for byte, and every published command's fuse bytes to the manifest's own image
+table. The AVR side is still two independent constructions: the Makefile writes
+fuses and flash as separate `avrdude` invocations while the release renders one
+combined invocation, so the two can disagree in everything but the fuse values
+and part name they share.
+
+Put fake `avrdude`, `pk2cmd` and `ipecmd` executables on `PATH`, run the real
+program goals against them, capture the actual argument vectors and compare
+them with the published commands. `make -n` is not the oracle: the goals carry
+build prerequisites, recursive Make output and several programmer invocations,
+and dry-run text also depends on which artifacts already exist.
+`test/test_avr_program_order.sh` already drives fake programmers this way and
+is where the comparison belongs. Settling the canonical AVR operation shape --
+two ordered invocations or one -- is part of the work.
+
+Dependencies: none. Effort: about 2-3 hours. Risk: Low; it compares two
+existing surfaces and adds no hardware instruction.
+
 ---
 
 ## Tier 3 - platinum-grade hardening and silicon validation
@@ -594,6 +615,50 @@ surface merely for symmetry.
 Dependencies: programmer and PIC10F320 hardware. Effort: about 1 hour plus bench
 time. Risk: Low; the documented direct command already provides the function.
 
+### T3-programming-guide - Publish a flash-first release landing page
+
+`MANIFEST.md` is the GitHub Release body (`notes="$dir/MANIFEST.md"` in
+`.github/workflows/release.yml`), so someone who opens a release to flash a
+chip lands on a provenance document and reads past source commits, digests and
+soak evidence to reach the commands. The commands themselves are generated,
+pasteable and gated; their placement is not.
+
+Render a flash-first page into `release/vX.Y.Z/`, publish it as an asset and as
+the release body, and keep `MANIFEST.md` as the provenance asset with
+reciprocal links. It should open with the supported scope and the PIC12F675
+stop condition, then reach an image from the reader's MCU and switching circuit
+rather than from a list of 21 basenames, then give the profile command.
+Generate the image matrix from `RELEASE_IMAGES`, and gate the MCU and
+output-stage keys of any description table for exact equality with the
+supported sets. Keep the renderer and its rendered-output tests at HEAD; do not
+commit a second mutable copy that can drift from the released one.
+
+Dependencies: none. Effort: about 3-4 hours including gates. Risk: Low; it
+moves already-gated generated content and adds no hardware instruction.
+
+### T3-release-bundle - Make a downloaded release verifiable on its own
+
+Three gaps face someone who downloads rather than clones. `SHA256SUMS` covers
+every published file, so `sha256sum -c SHA256SUMS` reports the rest missing for
+anyone who took the one image they need. The pinned public key is not a
+published asset, so `gpg --verify` needs an out-of-band fetch, and neither
+macOS nor Windows necessarily provides GNU `sha256sum`. The per-release
+`README.md` is published as an asset but still links `../README.md`, which no
+download contains.
+
+A deterministic ZIP carrying the images, the guide, the signed checksum
+material and the public key answers all three at once and makes a whole-list
+check meaningful. Keep the raw assets for auditors. Define the archive's
+authentication boundary explicitly -- either its contents are covered by the
+signed inventory with an exact-content check, or the archive itself carries a
+detached signature -- and keep saying that the pinned fingerprint needs a
+separately trusted source, because a key shipped beside the signature it
+verifies is not an independent trust path.
+
+Dependencies: none. Effort: about 4-6 hours including reproducibility and
+exact-content gates. Risk: Low-Medium; it enlarges the signed payload boundary,
+which is the part to gate first.
+
 ---
 
 ## Tier 4 - outside firmware scope but actionable
@@ -685,6 +750,29 @@ more likely to detect a maintenance regression.
 Per-variant tests already assert the relevant LED behavior directly. VCDs remain
 available for diagnosis but add documentation output rather than a new gate.
 
+### Publish a static flashing command block in the top-level README
+
+It cannot be per-release accurate and nothing would gate it. The `v0.9.8`
+rename invalidated every image name and most goal names in a single release,
+and a static block would have survived that silently. `FLASHING.md` carries the
+current-tree procedure and each release generates its own exact commands from
+the Makefile it was built with. Reconsider only if such a block can be bound by
+a gate to both the Makefile and the canonical image set.
+
+### Ship a general-purpose interactive flashing helper
+
+Deferred rather than forbidden. A helper that discovers programmers and ports
+takes on downloaded-code trust, Bash/PowerShell portability, a dependency
+burden and an ambiguous-device problem that a printed command does not have,
+and it must never silently select the first serial device it finds.
+`scripts/flash-pic12f675.py` is not a precedent for one: it detects nothing,
+serves one part, and exists because that part's write is a hazard rather than
+because a command was hard to paste. Screenshot-level GUI guidance for MPLAB
+IPE, Microchip Studio or avrdudess is deferred on separate grounds -- the
+audience already has a programmer CLI installed -- and can be added later
+without blocking the CLI path. Reconsider if the generated per-profile commands
+measurably fail the paste-one-command goal.
+
 ---
 
 ## Priority summary
@@ -714,6 +802,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
+| T25-program-argv | Published commands vs executed programmer argv | 2.5 | 2-3 h | Medium |
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
@@ -721,5 +810,7 @@ The stable ID in each row matches exactly one open section above.
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |
 | T3-pic320-program | `make pic10f320-program` target <!-- name-contract: exempt (documents an absent goal) --> | 3 | 1 h + bench | Low |
+| T3-programming-guide | Flash-first release landing page | 3 | 3-4 h | Medium - first-run experience |
+| T3-release-bundle | Self-verifiable downloaded release | 3 | 4-6 h | Medium |
 | T4-manufacturing-scope | Name manufacturing deliverables as out of scope | 4 | Small | Completeness |
 | T4-spice | Footswitch-network SPICE modeling | 4 | 2 h | High for board design |

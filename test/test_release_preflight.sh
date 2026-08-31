@@ -81,8 +81,6 @@ declare -F release_validate_hardware_claims >/dev/null \
 	|| { printf 'FAIL: hardware evidence classifier is missing\n' >&2; exit 1; }
 declare -F release_validate_pic12f675_flashing_helper >/dev/null \
 	|| { printf 'FAIL: PIC12F675 flashing-helper contract is missing\n' >&2; exit 1; }
-declare -F release_validate_flashing_simplicity_status >/dev/null \
-	|| { printf 'FAIL: flashing-simplicity status contract is missing\n' >&2; exit 1; }
 declare -F release_require_main_branch >/dev/null \
 	|| { printf 'FAIL: release main-branch validator is missing\n' >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
@@ -479,6 +477,15 @@ run_preflight() {
 tree_snapshot() {
 	local rel mode digest target
 	while IFS= read -r -d '' rel; do
+		# A tracked path is legitimately absent while its deletion is still
+		# unstaged -- `git ls-files -c` lists what the index holds, not what
+		# the disk does. Record the absence rather than failing the snapshot:
+		# the entry still appears on both sides, so a file this preflight run
+		# deletes is still caught by the comparison.
+		if [ ! -e "$ROOT/$rel" ] && [ ! -L "$ROOT/$rel" ]; then
+			printf 'X %q\n' "$rel"
+			continue
+		fi
 		mode=$(stat -c '%a' "$ROOT/$rel") || return 1
 		if [ -L "$ROOT/$rel" ]; then
 			target=$(readlink "$ROOT/$rel") || return 1
@@ -2300,9 +2307,9 @@ printf '\n\nThere is not yet a no-compiler path for this part.\n' \
 assert_flashing_rejects 'a publisher that contradicts the other three' \
 	'release/README.md still publishes the superseded PIC12F675 state'
 
-# Recording HOW that state was retired is not restating it. The analysis in
-# docs/flashing_simplicity.md does exactly this in the past tense, so a pattern
-# wide enough to catch it would make the retirement undocumentable.
+# Recording HOW that state was retired is not restating it: a document that
+# says so in the past tense has to keep passing, or a pattern wide enough to
+# catch the live claim would make the retirement undocumentable.
 write_flashing_fixture
 {
 	printf '# Notes\n\n'
@@ -2398,110 +2405,6 @@ checks=$((checks + 1))
 # The live checked-in tree must satisfy the contract.
 release_validate_pic12f675_flashing_helper "$ROOT" v1.2.3 >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the PIC12F675 flashing contract: $(<"$output")"
-checks=$((checks + 1))
-
-# ---------------------------------------------------------------------------
-# B6: a preserved design discussion whose proposals have shipped.
-#
-# docs/flashing_simplicity.md is deliberately frozen in the present tense of the
-# branch it was argued on, and two of its proposals were then built. It opened
-# with "Nothing here is implemented" for the whole of the v0.9.10 candidate
-# while its own body carried the update paragraphs recording what had been --
-# including a paragraph describing an AVR fuse-before-build hazard that had been
-# repaired. The banner is the line a reader stops at, so the banner and the two
-# build-before-hardware statements are held to the body.
-# ---------------------------------------------------------------------------
-simplicity_root="$work/flashing-simplicity"
-declare -F release_validate_flashing_simplicity_status >/dev/null \
-	|| fail "flashing-simplicity status contract is missing"
-
-write_simplicity_fixture() {
-	rm -rf "$simplicity_root"
-	mkdir -p "$simplicity_root/docs"
-	cp "$ROOT/docs/flashing_simplicity.md" "$simplicity_root/docs/flashing_simplicity.md"
-}
-
-assert_simplicity_rejects() {
-	local description=$1 expected=$2
-	if release_validate_flashing_simplicity_status "$simplicity_root" \
-			>"$output" 2>&1; then
-		fail "flashing-simplicity contract accepted $description"
-	fi
-	grep -Fq "$expected" "$output" \
-		|| fail "$description was rejected for the wrong reason: $(<"$output")"
-	checks=$((checks + 1))
-}
-
-write_simplicity_fixture
-release_validate_flashing_simplicity_status "$simplicity_root" >"$output" 2>&1 \
-	|| fail "flashing-simplicity contract rejected the shipped document: $(<"$output")"
-checks=$((checks + 1))
-
-write_simplicity_fixture
-"$REAL_AWK" '{ sub(/^\*\*Status:\*\* .*$/, "**Status:** analysis and proposal. **Nothing here is implemented.** This"); print }' \
-	"$ROOT/docs/flashing_simplicity.md" > "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'a banner denying implementation the body records' \
-	'still says nothing here is implemented'
-
-# The version, not merely the word "implemented": a banner that says something
-# shipped without saying which release leaves the reader unable to date it.
-write_simplicity_fixture
-"$REAL_AWK" '
-	/^\*\*Status:\*\*/ { inbanner = 1 }
-	inbanner && /^[[:space:]]*$/ { inbanner = 0 }
-	inbanner { gsub(/v[0-9]+\.[0-9]+\.[0-9]+/, "a later release") }
-	{ print }
-' "$ROOT/docs/flashing_simplicity.md" > "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'a banner that names no shipped version' \
-	'implementation updates its status banner does not name'
-
-# The two build-before-hardware statements. Unmarked, each reads as an open
-# hardware-safety defect: a failed build leaving changed AVR fuses behind.
-write_simplicity_fixture
-"$REAL_AWK" '
-	/before either hardware side effect/ { skip = NR }
-	skip && NR > skip && NR <= skip + 12 { gsub(/v[0-9]+\.[0-9]+\.[0-9]+/, "some release") }
-	{ print }
-' "$ROOT/docs/flashing_simplicity.md" > "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'an unacknowledged build-before-hardware defect' \
-	'without acknowledging the release that repaired it'
-
-write_simplicity_fixture
-"$REAL_AWK" '
-	/\*\*Repair build-before-hardware semantics\.\*\*/ { skip = NR }
-	skip && NR >= skip && NR <= skip + 8 { gsub(/v[0-9]+\.[0-9]+\.[0-9]+/, "some release") }
-	{ print }
-' "$ROOT/docs/flashing_simplicity.md" > "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'an unacknowledged repair proposal' \
-	'without acknowledging the release that did'
-
-# The anchors themselves must exist: deleting the statement is not a way to
-# satisfy a contract that the statement be qualified.
-write_simplicity_fixture
-"$REAL_AWK" '!/before either hardware side effect/ { print }' \
-	"$ROOT/docs/flashing_simplicity.md" > "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'a deleted build-before-hardware statement' \
-	'no longer states the build-before-hardware defect'
-
-write_simplicity_fixture
-"$REAL_AWK" '!/\*\*Repair build-before-hardware semantics\.\*\*/ { print }' \
-	"$ROOT/docs/flashing_simplicity.md" > "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'a deleted sequencing step' \
-	'no longer carries the build-before-hardware sequencing step'
-
-write_simplicity_fixture
-rm "$simplicity_root/docs/flashing_simplicity.md"
-assert_simplicity_rejects 'a missing document' \
-	'is not a regular nonempty file'
-
-simplicity_rc=0
-release_validate_flashing_simplicity_status >"$output" 2>&1 || simplicity_rc=$?
-[ "$simplicity_rc" -eq 2 ] \
-	|| fail "flashing-simplicity contract accepted a missing repository-root argument"
-checks=$((checks + 1))
-
-release_validate_flashing_simplicity_status "$ROOT" >"$output" 2>&1 \
-	|| fail "the checked-in tree fails the flashing-simplicity status contract: $(<"$output")"
 checks=$((checks + 1))
 
 # Run the real preflight against a shadow documentation root. A stale bounded

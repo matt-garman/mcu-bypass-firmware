@@ -1405,7 +1405,7 @@ procedure. BR-FINAL-01 should decide it.
 
 ## BR-FLASH-02 - Generate exact per-release programming guidance
 
-**Status:** DONE `<commit>`
+**Status:** DONE `23eac73`
 
 **Depends on:** BR-FLASH-01, BR-REL-01
 
@@ -1489,32 +1489,78 @@ Three of twenty-one were runnable. Behind that:
 
 **What this does not do:**
 
-- No separate `PROGRAMMING.md` landing page, ZIP bundle, or GitHub release body
-  (`flashing_simplicity.md` sections 4.3 and 4.4). The guidance stays in `MANIFEST.md`,
-  which is already signed and already published.
+- No separate `PROGRAMMING.md` landing page, ZIP bundle, or GitHub release body.
+  The guidance stays in `MANIFEST.md`, which is already signed and already
+  published. BR-FLASH-03 carried both forward as `TODO.md`
+  `T3-programming-guide` and `T3-release-bundle`.
 - No `ipecmd` command line. See BR-FLASH-04.
 
 ## BR-FLASH-03 - Retire the flashing-simplicity work journal
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-FLASH-01, BR-FLASH-02 or explicit deferral of BR-FLASH-02
 
 **Source:** `docs/flashing_simplicity.md`, 678 lines
 
+**What the document was.** A design discussion argued on `v0.9.9-polish` and
+preserved in that branch's present tense, with italic update paragraphs added
+where a later release built what a section proposed. Its own banner told the
+reader how to read it: *"Read an un-updated section as a proposal, not as a
+description of the tree."* Five of its sections carried an update; the other
+thirty did not, and each of those was a claim about a tree two releases old.
+Nothing linked to it. No live document, Makefile goal, or CI job named it --
+only the gate that existed to keep its banner honest.
+
 **Work:**
 
-- [ ] Preserve shipped decisions in their live authorities.
-- [ ] Preserve any still-open generated-guidance work as concise TODO tasks.
-- [ ] Remove branch-era current-state/proposal interleaving.
-- [ ] Delete `docs/flashing_simplicity.md`.
-- [ ] Remove release preflight tests that exist only to keep its status banner
+- [x] Preserve shipped decisions in their live authorities. Both are already
+  stated where they are enforced rather than where they were argued: the AVR
+  build-before-hardware repair by `test/test_avr_program_order.sh`, whose header
+  states the defect class more precisely than the journal did, and the
+  PIC12F675 no-compiler path by `scripts/flash-pic12f675.py`, `FLASHING.md` and
+  `release_validate_pic12f675_flashing_helper`. The refusal to publish a raw
+  PIC12F675 writer command is enforced by the raw-writer sweep. Nothing had to
+  be moved.
+- [x] Preserve any still-open generated-guidance work as concise TODO tasks.
+  Three open items -- `T3-programming-guide` (§4.3, §7.4, G1, G2),
+  `T3-release-bundle` (§4.4, §7.5, G5) and `T25-program-argv` (§4.2, §4.5, and
+  §7.2's residual choice of AVR operation shape) -- and two declined entries,
+  the static README command block (§4.6) and the general-purpose interactive
+  helper (§4.6, §8). `T3-pic320-program` already carried §7.6.
+- [x] Remove branch-era current-state/proposal interleaving. It leaves with the
+  file; the 10 unresolvable `§N` citations counted under BR-FINAL-01 leave with
+  it too.
+- [x] Delete `docs/flashing_simplicity.md`.
+- [x] Remove release preflight tests that exist only to keep its status banner
   synchronized with implementation updates.
+  `release_validate_flashing_simplicity_status` (96 lines), its two call sites
+  in `scripts/make-release.sh`, its two renderer pins, and its eight preflight
+  cases are gone. The comment in the raw-writer sweep that cited this document
+  as the reason for exact-sentence matching now states the reason without
+  naming it, because the reason is general.
+
+**One repair this required.** `test_release_preflight.sh`'s worktree tripwire
+snapshots every tracked and untracked-nonignored path, and `git ls-files -c`
+lists what the index holds rather than what the disk does -- so a tracked file
+deleted but not yet staged made `stat` fail and the whole gate report "could not
+snapshot the working tree". Any commit that deletes a tracked file hits this
+before it can be staged. The snapshot now records an absent tracked path as an
+explicit entry instead of failing, which leaves the comparison exactly as
+strong: the entry still appears on both sides, so a file the preflight run
+itself deletes is still caught.
 
 **Acceptance:**
 
 - No current safety procedure depends on reading a partly implemented proposal.
 - Remaining work is visible in TODO without preserving the entire discussion.
+
+**What this does not do:**
+
+- It does not decide any of the work it filed. `T3-programming-guide` and
+  `T3-release-bundle` change what a downloaded release contains, and
+  `T25-program-argv` may change the canonical AVR programming shape; all three
+  are open items, not deferred implementations.
 
 ## BR-FLASH-04 - Close the two PIC10F32x programming-authority gaps
 
@@ -3884,8 +3930,8 @@ dependencies and acceptance criteria.
 | BR-PIC-04 | Consolidate PIC12F675 feasibility | DONE `f968de7` |
 | BR-PIC-05 | Update firmware document references | DONE `f968de7` |
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
-| BR-FLASH-02 | Generate release programming guide | DONE `<commit>` |
-| BR-FLASH-03 | Delete flashing proposal journal | TODO |
+| BR-FLASH-02 | Generate release programming guide | DONE `23eac73` |
+| BR-FLASH-03 | Delete flashing proposal journal | DONE `<commit>` |
 | BR-FLASH-04 | Close PIC10F32x programming authority gaps | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |

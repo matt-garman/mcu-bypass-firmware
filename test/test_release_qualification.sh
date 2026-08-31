@@ -39,7 +39,6 @@ for function in release_validate_current_documentation \
 		release_validate_staged_documentation \
 		release_validate_hardware_claims \
 		release_validate_pic12f675_flashing_helper \
-		release_validate_flashing_simplicity_status \
 		release_render_scope release_render_validation \
 		release_render_toolchain_table release_render_pic12f675_flashing \
 		release_render_flashing \
