@@ -7865,13 +7865,16 @@ override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 # rather than producing an index that quietly omits it.
 #
 # The `bound` roles below carry their own exact source-bound terminal record
-# that the verifier matches. `build` and `target-test` did not, and that is what
+# that the verifier matches. The operation roles did not, and that is what
 # operation-sealed EVIDENCE_RESULT records now cover -- 13 files and 62% of the
-# evidence bytes whose only previous check was name and non-emptiness.
+# evidence bytes whose only previous check was name and non-emptiness. The
+# Classic AVR phases are intentionally distinct: initial-image-build is the
+# clean source-to-ELF/HEX build, while final-image-build is the post-soak,
+# HEX-only materialization from unchanged validated ELFs.
 override RELEASE_EVIDENCE_ROLES := \
-	build-avr-classic.log=build build-avr-xt.log=build \
+	build-avr-classic.log=initial-image-build build-avr-xt.log=build \
 	build-pic10f322.log=build build-pic10f320.log=build \
-	build-pic12f675.log=build final-image-build.log=build \
+	build-pic12f675.log=build final-image-build.log=final-image-build \
 	soak-build.log=build \
 	attiny202-test.log=target-test attiny202-test-target.log=target-test \
 	pic10f322-test.log=target-test \
@@ -7888,7 +7891,8 @@ override RELEASE_EVIDENCE_ROLES := \
 # after their final producer closes. The other roles are bound by an authority
 # that predates this one and is stronger: a digest named in QUALIFICATION, or a
 # terminal record the verifier already matched exactly. Nothing is bound twice.
-override RELEASE_EVIDENCE_RESULT_ROLES := build target-test
+override RELEASE_EVIDENCE_RESULT_ROLES := \
+	build final-image-build initial-image-build target-test
 
 # --- the immutable production release identity -------------------------------
 # WHAT A RELEASE IS, written as literal text that no caller can move.

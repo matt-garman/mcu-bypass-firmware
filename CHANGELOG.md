@@ -74,7 +74,8 @@ historical records and are not retroactively compacted by this policy.
   produced.** Build and target-test logs bind their payload, source commit, role
   and identity through the qualification index. Manifest toolchain rows are
   rendered from qualification-bound toolchain evidence rather than parallel
-  prose.
+  prose. Classic AVR clean-build and post-soak final-image phases now carry
+  distinct roles rather than two generic build claims.
 
 - **Release-state documentation now fails closed between releases.** A declared
   release must carry the pre-tag transition disclosure until a nonempty regular,

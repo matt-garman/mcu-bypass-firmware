@@ -142,6 +142,14 @@ validation suite — backs these binaries, through two mechanisms:
    gate independently; its hosted job log is subject to platform retention and
    is not a release asset or a dependency of the qualification claim.
 
+   Classic AVR evidence distinguishes two necessary image phases. The
+   `initial-image-build` role records the clean source-to-ELF/HEX build that
+   fails fast before qualification. The `final-image-build` role records the
+   post-soak HEX-only materialization from the unchanged validated ELFs that
+   supplies the staged candidate bytes. The evidence index and qualification
+   verifier enforce those roles separately; the first phase is not represented
+   as an independent witness for the final HEX bytes.
+
    `v0.9.10` is tagged but was never published, and no GitHub release exists for
    it. Its tag CI reproduced every image bit-for-bit and then failed re-running
    the gates on the clean runner; [`CHANGELOG.md`](../CHANGELOG.md) records the

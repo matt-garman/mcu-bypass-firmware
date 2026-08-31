@@ -829,7 +829,7 @@ checks=$((checks + 1))
 
 # Each payload digest must be sealed where the operation ends, not synthesized
 # during staging around whichever transcript survived until then. Every declared
-# build/target-test member has exactly one seal after its last command-side
+# operation-role member has exactly one seal after its last command-side
 # reference and before the generic evidence copy begins.
 sealed_evidence=(
 	build-avr-classic.log build-avr-xt.log

@@ -3528,7 +3528,7 @@ but checking it against the signing key needs GnuPG and a trust decision
 
 ## BR-REL-08 - Collapse duplicate release phase logs
 
-**Status:** TODO
+**Status:** DONE
 
 **Depends on:** BR-REL-02
 
@@ -3540,15 +3540,39 @@ undefined task.
 
 **Work:**
 
-- [ ] Decide whether the initial and final build phases remain independently
+- [x] Decide whether the initial and final build phases remain independently
   useful operations or are duplicate execution.
-- [ ] If both operations remain, emit phase-specific structured records that
+- [x] If both operations remain, emit phase-specific structured records that
   establish the distinct claim made by each.
-- [ ] If one operation is redundant, remove it and update the retained evidence
+- [x] If one operation is redundant, remove it and update the retained evidence
   role map, index, qualification verifier, release documentation, and fixtures
-  atomically.
-- [ ] Preserve the final-candidate image identity and post-soak rebuild checks;
+  atomically. Not applicable: both operations remain for the distinct reasons
+  recorded below.
+- [x] Preserve the final-candidate image identity and post-soak rebuild checks;
   do not collapse two genuinely independent image witnesses into one.
+
+**Result:** The byte-identical historical payloads were an output coincidence,
+not duplicate execution. The initial Classic AVR phase performs a clean
+source-to-ELF/HEX build and catches build or inventory failure before expensive
+qualification. Validation later rebuilds the ELFs and invalidates their paired
+HEX files. After soak, the final phase removes only those HEX files and
+materializes them from the unchanged validated ELFs; those are the bytes hashed,
+remeasured and staged. The initial HEX files are therefore not an independent
+witness for the final candidate.
+
+Both operations and filenames remain. Their operation-sealed records now carry
+distinct `initial-image-build` and `final-image-build` roles from the Makefile's
+independent role map. The producer and qualification verifier require the exact
+expanded role set, derive each terminal record with its declared role, and reject
+a final-phase log carrying the initial-phase role. Release documentation states
+where each claim stops. Evidence membership, index cardinality, qualification
+format, historical releases, validated-ELF hashes, post-soak comparisons, final
+image hashing and byte-bound staging are unchanged.
+
+Shell syntax and `git diff --check` passed. The focused
+`test-release-qualification` run did not reach a verdict within 180 seconds on
+this host while repeatedly encountering the absent AVR compiler; the external
+full-toolchain run remains the validation authority for that regression.
 
 **Acceptance:**
 
@@ -4731,7 +4755,7 @@ dependencies and acceptance criteria.
 | BR-REL-05 | Keep releases self-contained | DONE `a636400` |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
-| BR-REL-08 | Collapse duplicate release phase logs | TODO |
+| BR-REL-08 | Collapse duplicate release phase logs | DONE |
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
