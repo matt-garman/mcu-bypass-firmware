@@ -70,7 +70,8 @@ evidence_dir="$release_dir/evidence"
 declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
 	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
-	pic12f675_matrix_sha256 resource_tables_sha256 toolchain_sha256)
+	pic12f675_matrix_sha256 resource_tables_sha256 toolchain_sha256 \
+	evidence_index_sha256)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -96,15 +97,19 @@ done
 # format=4 brought the provenance files inside SHA256SUMS, so one signature
 # verification reaches where the firmware came from. format=5 adds
 # toolchain_sha256: the MANIFEST toolchain table stopped being authored prose
-# and is now rendered from bound evidence. Releases through v0.9.11 declare
-# format=3 or format=1 or nothing at all and signed the firmware only.
+# and is now rendered from bound evidence. format=6 adds evidence_index_sha256,
+# and with it the thirteen retained logs -- every build log and every target-test
+# log, 62% of the evidence tree by bytes -- that until now were checked for their
+# name and their non-emptiness and for nothing else at all. Releases through
+# v0.9.11 declare format=3 or format=1 or nothing at all and signed the firmware
+# only.
 #
 # Exactly one format is accepted here. This verifier runs on a freshly staged
 # directory and on the tag CI is publishing, never on a historical release, so
 # a compatibility branch would be unreachable code claiming a capability
 # nothing exercises. verify-release-images.sh, which IS run against published
 # directories, carries the era policy instead.
-[ "${q[format]}" = 5 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 6 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -113,6 +118,8 @@ done
 	|| die "QUALIFICATION pic12f675_matrix_sha256 is not a lowercase SHA-256"
 [[ "${q[resource_tables_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION resource_tables_sha256 is not a lowercase SHA-256"
+[[ "${q[evidence_index_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
+	|| die "QUALIFICATION evidence_index_sha256 is not a lowercase SHA-256"
 [[ "${q[toolchain_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION toolchain_sha256 is not a lowercase SHA-256"
 
@@ -194,6 +201,12 @@ canonical_soaks_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 canonical_evidence_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-RELEASE_EVIDENCE_FILES) \
 	|| die "cannot read RELEASE_EVIDENCE_FILES from the Makefile"
+canonical_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-RELEASE_EVIDENCE_ROLES) \
+	|| die "cannot read RELEASE_EVIDENCE_ROLES from the Makefile"
+result_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+	print-RELEASE_EVIDENCE_RESULT_ROLES) \
+	|| die "cannot read RELEASE_EVIDENCE_RESULT_ROLES from the Makefile"
 matrix_tool_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
 	print-PIC12F675_MATRIX_EVIDENCE) \
 	|| die "cannot read PIC12F675_MATRIX_EVIDENCE from the Makefile"
@@ -213,6 +226,8 @@ esac
 	|| die "PIC12F675 matrix evidence verifier is missing, empty, or not regular"
 read -r -a canonical_soaks <<<"$canonical_soaks_raw"
 read -r -a canonical_evidence <<<"$canonical_evidence_raw"
+read -r -a canonical_roles <<<"$canonical_roles_raw"
+read -r -a result_roles <<<"$result_roles_raw"
 read -r -a pic12f675_variants <<<"$pic12f675_variants_raw"
 [ "${#canonical_soaks[@]}" -gt 0 ] || die "canonical release soak set is empty"
 [ "${#canonical_evidence[@]}" -gt 0 ] || die "canonical release evidence set is empty"
@@ -235,6 +250,36 @@ validate_canonical_names() {
 }
 validate_canonical_names "canonical release soak set" "${canonical_soaks[@]}"
 validate_canonical_names "canonical release evidence set" "${canonical_evidence[@]}"
+
+# The declared role of every retained file. Read from the Makefile rather than
+# from the index being checked: an index that supplied its own role vocabulary
+# would agree with itself about a mislabelled member. The map must be the
+# evidence set with INDEX removed -- exactly, both directions -- so a retained
+# file that nobody classified cannot slip out of the index unremarked.
+declare -A evidence_role=()
+for role_entry in "${canonical_roles[@]}"; do
+	role_base=${role_entry%%=*}
+	role_name=${role_entry#*=}
+	[ -n "$role_base" ] && [ -n "$role_name" ] && [ "$role_base" != "$role_entry" ] \
+		|| die "malformed RELEASE_EVIDENCE_ROLES entry: $role_entry"
+	[[ "$role_name" =~ ^[a-z][a-z-]*$ ]] || die "invalid evidence role: $role_name"
+	[ "${evidence_role[$role_base]+set}" != set ] \
+		|| die "duplicate evidence name in the role map: $role_base"
+	evidence_role[$role_base]=$role_name
+done
+[ "${evidence_role[INDEX]+set}" != set ] \
+	|| die "the evidence role map must not describe INDEX, which cannot describe itself"
+indexed_names=()
+for name in "${canonical_evidence[@]}"; do
+	[ "$name" = INDEX ] && continue
+	[ "${evidence_role[$name]+set}" = set ] \
+		|| die "retained evidence file has no declared role: $name"
+	indexed_names+=("$name")
+done
+[ "${#indexed_names[@]}" -eq "${#evidence_role[@]}" ] \
+	|| die "the evidence role map does not cover exactly the retained evidence set"
+[ "${#indexed_names[@]}" -lt "${#canonical_evidence[@]}" ] \
+	|| die "RELEASE_EVIDENCE_FILES does not retain INDEX"
 validate_canonical_names "canonical PIC12F675 variant set" "${pic12f675_variants[@]}"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/release-qualification.XXXXXX")
@@ -396,6 +441,105 @@ rendered_rows=$(sed -n '/^## Toolchain$/,/^## /p' "$manifest" \
 # The header row `| tool | version |` matches that shape too.
 [ "$rendered_rows" -eq $((toolchain_rows + 1)) ] \
 	|| die "MANIFEST.md toolchain table has $rendered_rows rows for $toolchain_rows recorded tools"
+
+# --- the evidence index, and the thirteen logs it made checkable --------------
+# Until format=6 the qualification verifier established, for every build log and
+# every target-test log, that a file of that name existed and was not empty.
+# Nothing read a byte of it. Thirteen files and 62% of the evidence tree sat
+# behind that check, and test/published_release_digests.txt then froze whatever
+# had been staged -- so a log from an earlier run, or from the wrong part, became
+# a permanent part of the qualification record instead of failing anything.
+#
+# The index is checked against the Makefile's declared role map and against the
+# files themselves, never against its own claims. Three ways to get this wrong
+# are all closed: a row whose role disagrees with the declaration, a row whose
+# size or record disagrees with the file, and a member with no row at all.
+index_log="$evidence_dir/INDEX"
+index_digest=$(sha256sum -- "$index_log") \
+	|| die "could not hash the retained evidence index"
+[ "${index_digest%% *}" = "${q[evidence_index_sha256]}" ] \
+	|| die "retained evidence index digest does not match QUALIFICATION"
+
+grep -Fxq "EVIDENCE_INDEX format=1 source_commit=${q[source_commit]}" "$index_log" \
+	|| die "evidence index has no source-bound header record"
+index_result="EVIDENCE_INDEX_RESULT format=1 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"
+mapfile -t index_results < <(grep '^EVIDENCE_INDEX_RESULT ' "$index_log" || true)
+[ "${#index_results[@]}" -eq 1 ] && [ "${index_results[0]}" = "$index_result" ] \
+	|| die "evidence index has no exact source-bound complete result"
+
+# The expected terminal record for one member, derived the same way the release
+# derived it. The default arm is a hard failure, not a `-`: a role added to the
+# Makefile with no rule here must stop the release rather than be reported as
+# having concluded nothing.
+expected_terminal_record() {
+	local role=$1 path=$2 name=$3 pattern matches lines
+	case "$role" in
+		build|target-test)
+			lines=$(wc -l < "$path") || return 1
+			[ "$lines" -ge 1 ] || return 1
+			printf 'EVIDENCE_RESULT format=1 status=pass role=%s evidence=%s lines=%d source_commit=%s\n' \
+				"$role" "$name" "$((lines - 1))" "${q[source_commit]}"
+			return 0 ;;
+		soak)                 pattern='^SOAK_RESULT ' ;;
+		test-long)            pattern='^TEST_LONG_RESULT ' ;;
+		resource)             pattern='^RESOURCE_TABLES_RESULT ' ;;
+		toolchain)            pattern='^TOOLCHAIN_RESULT ' ;;
+		qualification|matrix) printf '%s\n' '-'; return 0 ;;
+		*) return 1 ;;
+	esac
+	mapfile -t matches < <(grep "$pattern" "$path" || true)
+	[ "${#matches[@]}" -eq 1 ] || return 1
+	printf '%s\n' "${matches[0]}"
+}
+
+declare -A index_seen=()
+index_rows=0
+while IFS=$'\t' read -r index_name index_role index_size index_record; do
+	case "$index_name" in
+		EVIDENCE_INDEX\ *|EVIDENCE_INDEX_RESULT\ *) continue ;;
+	esac
+	[ -n "$index_name" ] && [ -n "$index_role" ] && [ -n "$index_size" ] \
+		&& [ -n "$index_record" ] \
+		|| die "malformed evidence index row: $index_name"
+	[ "${index_seen[$index_name]+set}" != set ] \
+		|| die "evidence index lists $index_name twice"
+	index_seen[$index_name]=1
+	[ "${evidence_role[$index_name]+set}" = set ] \
+		|| die "evidence index lists $index_name, which is not retained evidence"
+	[ "$index_role" = "${evidence_role[$index_name]}" ] \
+		|| die "evidence index calls $index_name a $index_role; the Makefile declares ${evidence_role[$index_name]}"
+	member="$evidence_dir/$index_name"
+	member_size=$(stat -c%s "$member") \
+		|| die "could not size retained evidence: $index_name"
+	[ "$index_size" = "$member_size" ] \
+		|| die "evidence index records $index_name as $index_size bytes; it is $member_size"
+	expected_record=$(expected_terminal_record "$index_role" "$member" "$index_name") \
+		|| die "no single terminal record for $index_name (role $index_role)"
+	[ "$index_record" = "$expected_record" ] \
+		|| die "evidence index misreports the terminal record of $index_name"
+	# For the thirteen, the record above was DERIVED rather than read, so it has
+	# still not been shown to be in the file. This is that check, and it is what
+	# binds the log to this commit and to its own length.
+	case "$index_role" in
+		build|target-test)
+			mapfile -t member_results < <(grep '^EVIDENCE_RESULT ' "$member" || true)
+			[ "${#member_results[@]}" -eq 1 ] \
+				|| die "$index_name carries ${#member_results[@]} EVIDENCE_RESULT records, expected 1"
+			[ "${member_results[0]}" = "$expected_record" ] \
+				|| die "$index_name has no exact source-bound terminal record"
+			;;
+	esac
+	index_rows=$((index_rows + 1))
+done < "$index_log"
+[ "$index_rows" -eq "${#indexed_names[@]}" ] \
+	|| die "evidence index lists $index_rows members, expected ${#indexed_names[@]}"
+for name in "${indexed_names[@]}"; do
+	[ "${index_seen[$name]+set}" = set ] \
+		|| die "evidence index omits retained evidence: $name"
+done
+
+grep -Fxq -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_index_sha256]}\`), ${#indexed_names[@]} retained files by role and terminal record" "$manifest" \
+	|| die "MANIFEST.md evidence index digest does not match QUALIFICATION"
 
 # --- the provenance files are inside the signature ---------------------------
 # verify-release-images.sh proves SHA256SUMS LISTS exactly the declared

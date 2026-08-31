@@ -792,6 +792,48 @@ required_format=$(grep -oP '^\[ "\$\{q\[format\]\}" = \K[0-9]+' "$QUALIFY")
 	|| fail "could not read the QUALIFICATION format verify-release-qualification.sh requires"
 [ "$produced_format" = "$required_format" ] \
 	|| fail "make-release.sh writes QUALIFICATION format=$produced_format but verify-release-qualification.sh requires format=$required_format"
+
+# The same hazard, for the records format=6 introduced. The qualification
+# fixture writes its OWN index rather than calling the release script's writer,
+# which is what lets it catch the two of them disagreeing -- but only if the
+# shapes are pinned here, because the fixture is written against the verifier
+# and would happily agree with it while make-release.sh emitted something else.
+# A mismatch would otherwise surface for the first time at the end of a real
+# 24-hour run, which is the failure this whole block exists to prevent.
+produced_evidence_record=$(grep -oP "^\s*printf 'EVIDENCE_RESULT \K[^\\\\]*" "$RELEASE" \
+	| head -1)
+required_evidence_record=$(grep -oP "^\s*printf 'EVIDENCE_RESULT \K[^\\\\]*" "$QUALIFY" \
+	| head -1)
+[ -n "$produced_evidence_record" ] \
+	|| fail "could not read the EVIDENCE_RESULT record make-release.sh writes"
+[ -n "$required_evidence_record" ] \
+	|| fail "could not read the EVIDENCE_RESULT record verify-release-qualification.sh derives"
+[ "$produced_evidence_record" = "$required_evidence_record" ] \
+	|| fail "make-release.sh writes EVIDENCE_RESULT '$produced_evidence_record' but the verifier derives '$required_evidence_record'"
+checks=$((checks + 1))
+
+produced_index_header=$(grep -cF "printf 'EVIDENCE_INDEX format=1 source_commit=%s" "$RELEASE")
+[ "$produced_index_header" = 1 ] \
+	|| fail "make-release.sh does not write exactly one EVIDENCE_INDEX header record"
+grep -qF 'grep -Fxq "EVIDENCE_INDEX format=1 source_commit=${q[source_commit]}"' "$QUALIFY" \
+	|| fail "verify-release-qualification.sh does not bind the EVIDENCE_INDEX header to source_commit"
+checks=$((checks + 1))
+
+produced_index_result=$(grep -oP "printf 'EVIDENCE_INDEX_RESULT \K[^\\\\]*" "$RELEASE" | head -1)
+[ "$produced_index_result" = 'format=1 status=pass members=%d source_commit=%s' ] \
+	|| fail "make-release.sh writes an unexpected EVIDENCE_INDEX_RESULT shape: $produced_index_result"
+grep -qF 'index_result="EVIDENCE_INDEX_RESULT format=1 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"' "$QUALIFY" \
+	|| fail "verify-release-qualification.sh does not require the EVIDENCE_INDEX_RESULT shape make-release.sh writes"
+checks=$((checks + 1))
+
+# The manifest bullet is authored by the producer and matched literally by the
+# verifier, so the two strings have to be one string. This is the coupling that
+# the toolchain table got wrong before it was rendered from evidence.
+grep -qF -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`%s\`), %d retained files by role and terminal record" "$RELEASE" \
+	|| fail "make-release.sh does not write the evidence index bullet the verifier matches"
+grep -qF -- '- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_index_sha256]}\`), ${#indexed_names[@]} retained files by role and terminal record' "$QUALIFY" \
+	|| fail "verify-release-qualification.sh does not match the evidence index bullet make-release.sh writes"
+checks=$((checks + 1))
 checks=$((checks + 1))
 [ "${#xc8_322_lines[@]}" -eq 1 ] \
 	&& [ "${#xc8_320_lines[@]}" -eq 1 ] \

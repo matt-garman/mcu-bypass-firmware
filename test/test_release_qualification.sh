@@ -14,6 +14,9 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
 matrix_build="$work/pic12f675-matrix"
 sha=0123456789abcdef0123456789abcdef01234567
+# A well-formed commit that is not the one being released, for the controls
+# that test evidence retained from a different run.
+other_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 version=v99.0.0
 checks=0
 trap 'rm -rf "$work"' EXIT
@@ -160,7 +163,7 @@ for required in \
 done
 for required in \
 		'`pic10f320-test-stack-bound`, `pic12f675-test-stack-bound`' \
-		'exact canonical 36-file evidence set' \
+		'exact canonical 37-file evidence set' \
 		'each of 18 release soak combinations' \
 		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
 		'48 PIC10F322, 102 PIC10F320, and 168 PIC12F675 checks' \
@@ -255,6 +258,12 @@ read -r -a soak_names \
 	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_SOAK_NAMES)"
 read -r -a evidence_names \
 	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_EVIDENCE_FILES)"
+read -r -a evidence_role_entries \
+	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_EVIDENCE_ROLES)"
+declare -A fixture_role=()
+for role_entry in "${evidence_role_entries[@]}"; do
+	fixture_role[${role_entry%%=*}]=${role_entry#*=}
+done
 fw_base=$(make -s --no-print-directory -C "$ROOT" CC=: print-FW_BASE)
 pic12f675_tag=$(make -s --no-print-directory -C "$ROOT" CC=: print-PIC12F675_TAG)
 read -r -a pic12f675_variants \
@@ -266,7 +275,7 @@ reset_fixture() {
 	local liveness=${3:-60000}
 	local dirty=${4:-0}
 	local expected_checks=$((duration / liveness)) name file variant stem
-	local matrix_record matrix_digest resource_digest
+	local matrix_record matrix_digest resource_digest index_digest
 	rm -rf "$release" "$matrix_build"
 	mkdir -p "$release/evidence" "$matrix_build/simcal"
 	for file in "${evidence_names[@]}"; do
@@ -337,8 +346,13 @@ SOAK PASS: $duration ms (fixture) simulated.
 SOAK_RESULT format=1 status=pass combination=$name duration_ms=$duration liveness_interval_ms=$liveness checks=$expected_checks failures=0 watchdog_failures=0 liveness_failures=0
 EOF
 	done
+	# Every retained file is final at this point, so the index can describe them
+	# all; QUALIFICATION cites its digest on the very next line.
+	write_evidence_index
+	index_digest=$(sha256sum -- "$release/evidence/INDEX")
+	index_digest=${index_digest%% *}
 	cat > "$release/QUALIFICATION" <<EOF
-format=5
+format=6
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -349,6 +363,7 @@ soak_combination_count=${#soak_names[@]}
 pic12f675_matrix_sha256=$matrix_digest
 resource_tables_sha256=$resource_digest
 toolchain_sha256=$toolchain_digest
+evidence_index_sha256=$index_digest
 EOF
 	{
 		printf '# Firmware release %s\n\n' "$version"
@@ -364,6 +379,8 @@ EOF
 			"$matrix_digest"
 		printf -- '- **Final resource evidence:** `evidence/resource-tables.log` (SHA-256 `%s`)\n' \
 			"$resource_digest"
+		printf -- '- **Evidence index:** `evidence/INDEX` (SHA-256 `%s`), %d retained files by role and terminal record\n' \
+			"$index_digest" "${#fixture_role[@]}"
 		printf '\n## Toolchain\n\n'
 		printf -- '| tool | version |\n|---|---|\n'
 		for tool_index in $(seq 1 15); do
@@ -379,6 +396,92 @@ EOF
 			|| printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.\n\n'
 		printf 'Prebuilt firmware for %s. See **MANIFEST.md** for provenance.\n' "$version"
 	} > "$release/README.md"
+	reseal_provenance
+}
+
+# The fixture's own index producer, deliberately written to mirror the shape
+# make-release.sh emits rather than to import it: a fixture that called the
+# release script's own writer could not catch the two of them disagreeing, which
+# is the failure that reached a commit last time this pattern was extended.
+#
+# Appends the terminal record to every build/target-test log first, because that
+# changes their size and the index records sizes.
+write_evidence_index() {
+	local name role size record lines
+	for name in "${!fixture_role[@]}"; do
+		role=${fixture_role[$name]}
+		case "$role" in build|target-test) ;; *) continue ;; esac
+		grep -q '^EVIDENCE_RESULT ' "$release/evidence/$name" && continue
+		lines=$(wc -l < "$release/evidence/$name")
+		printf 'EVIDENCE_RESULT format=1 status=pass role=%s evidence=%s lines=%d source_commit=%s\n' \
+			"$role" "$name" "$lines" "$sha" >> "$release/evidence/$name"
+	done
+	{
+		printf 'EVIDENCE_INDEX format=1 source_commit=%s\n' "$sha"
+		while IFS= read -r name; do
+			role=${fixture_role[$name]}
+			size=$(stat -c%s "$release/evidence/$name")
+			case "$role" in
+				build|target-test)
+					record=$(grep -m1 '^EVIDENCE_RESULT ' "$release/evidence/$name") ;;
+				soak)
+					record=$(grep -m1 '^SOAK_RESULT ' "$release/evidence/$name") ;;
+				test-long)
+					record=$(grep -m1 '^TEST_LONG_RESULT ' "$release/evidence/$name") ;;
+				resource)
+					record=$(grep -m1 '^RESOURCE_TABLES_RESULT ' "$release/evidence/$name") ;;
+				toolchain)
+					record=$(grep -m1 '^TOOLCHAIN_RESULT ' "$release/evidence/$name") ;;
+				*) record='-' ;;
+			esac
+			printf '%s\t%s\t%s\t%s\n' "$name" "$role" "$size" "$record"
+		done < <(printf '%s\n' "${!fixture_role[@]}" | sort)
+		printf 'EVIDENCE_INDEX_RESULT format=1 status=pass members=%d source_commit=%s\n' \
+			"${#fixture_role[@]}" "$sha"
+	} > "$release/evidence/INDEX"
+}
+
+# Re-pin the index digest WITHOUT re-rendering the index. Controls that corrupt
+# the index itself need this: refresh_evidence_index would regenerate the file
+# and quietly undo the very edit under test, leaving a control that passes
+# because it tests nothing.
+reseal_evidence_index() {
+	local old_digest new_digest
+	old_digest=$(awk -F= '$1 == "evidence_index_sha256" { print $2 }' \
+		"$release/QUALIFICATION")
+	new_digest=$(sha256sum -- "$release/evidence/INDEX")
+	new_digest=${new_digest%% *}
+	sed -i "s/$old_digest/$new_digest/g" \
+		"$release/QUALIFICATION" "$release/MANIFEST.md"
+	reseal_provenance
+}
+
+# Bring one index row back into step with a log a control has just edited, using
+# exactly the derivation the verifier uses, so the control proves what it is
+# about instead of tripping the size or record check on the way there.
+restate_index_row() {
+	local name=$1 role size lines record
+	role=${fixture_role[$name]}
+	size=$(stat -c%s "$release/evidence/$name")
+	lines=$(wc -l < "$release/evidence/$name")
+	record="EVIDENCE_RESULT format=1 status=pass role=$role evidence=$name lines=$((lines - 1)) source_commit=$sha"
+	sed -i "s|^${name//./\\.}\t.*|$name\t$role\t$size\t$record|" \
+		"$release/evidence/INDEX"
+	reseal_evidence_index
+}
+
+# The index binds every member's size and terminal record, so a control that
+# legitimately rewrites evidence to reach a LATER check has to re-render it --
+# exactly as the toolchain and resource digests have to be re-pinned.
+refresh_evidence_index() {
+	local old_digest new_digest
+	old_digest=$(awk -F= '$1 == "evidence_index_sha256" { print $2 }' \
+		"$release/QUALIFICATION")
+	write_evidence_index
+	new_digest=$(sha256sum -- "$release/evidence/INDEX")
+	new_digest=${new_digest%% *}
+	sed -i "s/$old_digest/$new_digest/g" \
+		"$release/QUALIFICATION" "$release/MANIFEST.md"
 	reseal_provenance
 }
 
@@ -406,7 +509,7 @@ refresh_matrix_digest() {
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" \
 		"$release/QUALIFICATION" "$release/MANIFEST.md"
-	reseal_provenance
+	refresh_evidence_index
 }
 
 # The toolchain digest is bound from QUALIFICATION, so a control that mutates
@@ -419,7 +522,7 @@ refresh_toolchain_digest() {
 	new_digest=$(sha256sum -- "$release/evidence/toolchain.txt")
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" "$release/QUALIFICATION"
-	reseal_provenance
+	refresh_evidence_index
 }
 
 refresh_resource_digest() {
@@ -430,7 +533,7 @@ refresh_resource_digest() {
 	new_digest=${new_digest%% *}
 	sed -i "s/$old_digest/$new_digest/g" \
 		"$release/QUALIFICATION" "$release/MANIFEST.md"
-	reseal_provenance
+	refresh_evidence_index
 }
 
 expect_pass() {
@@ -506,20 +609,20 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=5\n' >> "$release/QUALIFICATION"
+printf 'format=6\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
-# format=3 is every release through v0.9.11: the contract in which SHA256SUMS
+# format=3 is every release v0.9.10-v0.9.11: the contract in which SHA256SUMS
 # covered the images and the helper and left QUALIFICATION, MANIFEST.md and
 # README.md outside the signature. It is rejected rather than accepted as a
 # legacy mode, because this verifier only ever runs on a directory being staged
 # or a tag being published -- both of which must sign their own provenance.
 reset_fixture
-sed -i 's/^format=5$/format=3/' "$release/QUALIFICATION"
+sed -i 's/^format=6$/format=3/' "$release/QUALIFICATION"
 expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
-sed -i 's/^format=5$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=6$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
@@ -685,6 +788,162 @@ printf 'a-tool-with-no-version\n' >> "$release/evidence/toolchain.txt"
 refresh_toolchain_digest
 expect_fail "toolchain record without a version" \
 	"malformed toolchain evidence record"
+
+# --- the evidence index, and the logs it made checkable -----------------------
+# Thirteen retained files -- every build log, every target-test log, 62% of the
+# evidence tree by bytes -- were checked for their name and their non-emptiness
+# and nothing else until format=6. These controls hold the index to the Makefile
+# and to the files, in both directions, and hold each of the thirteen to its own
+# record. A missing INDEX is caught by the canonical evidence-set comparison,
+# which runs first and is the right authority for an absent evidence file.
+#
+# The controls below corrupt the index and re-pin its digest WITHOUT
+# re-rendering it. Regenerating would rewrite the edit away and leave a control
+# that passes because it no longer tests anything.
+reset_fixture
+printf 'appended after recording\n' >> "$release/evidence/INDEX"
+expect_fail "evidence index edited after recording" \
+	"evidence index digest does not match QUALIFICATION"
+
+reset_fixture
+sed -i "s/^EVIDENCE_INDEX format=1 source_commit=$sha$/EVIDENCE_INDEX format=1 source_commit=$other_sha/" \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index bound to another commit" \
+	"evidence index has no source-bound header record"
+
+reset_fixture
+sed -i 's/^EVIDENCE_INDEX_RESULT format=1 status=pass members=36 /EVIDENCE_INDEX_RESULT format=1 status=pass members=35 /' \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index miscounting its own members" \
+	"evidence index has no exact source-bound complete result"
+
+# The index calls a member something the Makefile does not. This is why the role
+# map is read from the Makefile and not from the index: an index trusted for its
+# own vocabulary would agree with itself here.
+reset_fixture
+sed -i 's/^build-avr-xt\.log\tbuild\t/build-avr-xt.log\tsoak\t/' \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index mislabels a member's role" \
+	"the Makefile declares build"
+
+reset_fixture
+sed -i 's/^\(build-avr-xt\.log\tbuild\t\)[0-9]*\t/\19999\t/' \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index misreports a member's size" \
+	"evidence index records build-avr-xt.log as 9999 bytes"
+
+reset_fixture
+grep -v "^build-avr-xt\.log$(printf '\t')" "$release/evidence/INDEX" \
+	> "$release/evidence/INDEX.tmp"
+mv "$release/evidence/INDEX.tmp" "$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index omits a retained file" \
+	"evidence index lists 35 members, expected 36"
+
+reset_fixture
+sed -i 's/^build-avr-xt\.log\t/not-retained.log\t/' "$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index lists a file the release does not retain" \
+	"which is not retained evidence"
+
+reset_fixture
+grep "^build-avr-xt\.log$(printf '\t')" "$release/evidence/INDEX" \
+	> "$release/evidence/INDEX.row"
+cat "$release/evidence/INDEX.row" >> "$release/evidence/INDEX"
+rm -f "$release/evidence/INDEX.row"
+reseal_evidence_index
+expect_fail "evidence index lists a member twice" \
+	"evidence index lists build-avr-xt.log twice"
+
+# The index reports a verdict the file does not carry. The member's own bytes are
+# untouched, so nothing but this cross-check catches it.
+reset_fixture
+sed -i 's/^\(build-avr-xt\.log\tbuild\t[0-9]*\t\)EVIDENCE_RESULT format=1 status=pass/\1EVIDENCE_RESULT format=1 status=fail/' \
+	"$release/evidence/INDEX"
+reseal_evidence_index
+expect_fail "evidence index misreports a member's terminal record" \
+	"evidence index misreports the terminal record of build-avr-xt.log"
+
+# --- the thirteen logs, each bound to this commit and to its own length -------
+# These corrupt the LOG. restate_index_row puts the row back in step first, using
+# the verifier's own derivation, so what fires is the member check under test
+# rather than the size or record mismatch on the way to it.
+reset_fixture
+grep -v '^EVIDENCE_RESULT ' "$release/evidence/build-avr-xt.log" \
+	> "$release/evidence/build-avr-xt.log.tmp"
+mv "$release/evidence/build-avr-xt.log.tmp" "$release/evidence/build-avr-xt.log"
+restate_index_row build-avr-xt.log
+expect_fail "retained build log with no terminal record" \
+	"build-avr-xt.log carries 0 EVIDENCE_RESULT records"
+
+reset_fixture
+grep '^EVIDENCE_RESULT ' "$release/evidence/build-avr-xt.log" \
+	> "$release/evidence/build-avr-xt.record"
+cat "$release/evidence/build-avr-xt.record" \
+	>> "$release/evidence/build-avr-xt.log"
+rm -f "$release/evidence/build-avr-xt.record"
+restate_index_row build-avr-xt.log
+expect_fail "retained build log with two terminal records" \
+	"build-avr-xt.log carries 2 EVIDENCE_RESULT records"
+
+# A log kept from an earlier run: the record is well formed and names the right
+# file, but it was written against a different commit. Forty hex characters
+# replace forty, so the file's size is unchanged and the index still agrees --
+# only the commit binding catches this.
+reset_fixture
+sed -i "s/^\(EVIDENCE_RESULT .*\)source_commit=$sha$/\1source_commit=$other_sha/" \
+	"$release/evidence/build-avr-xt.log"
+expect_fail "retained build log bound to another commit" \
+	"build-avr-xt.log has no exact source-bound terminal record"
+
+# A failing run's log retained as if it had passed. Same length again.
+reset_fixture
+sed -i 's/^\(EVIDENCE_RESULT format=1 status=\)pass/\1fail/' \
+	"$release/evidence/build-avr-xt.log"
+expect_fail "retained build log recording a failure" \
+	"build-avr-xt.log has no exact source-bound terminal record"
+
+# One log substituted for its neighbour. Both are build logs bound to this same
+# commit and this same run, so only the `evidence` field tells them apart.
+reset_fixture
+sed -i 's/evidence=build-avr-xt\.log/evidence=build-avr-classic.log/' \
+	"$release/evidence/build-avr-xt.log"
+restate_index_row build-avr-xt.log
+expect_fail "retained build log carrying another file's record" \
+	"build-avr-xt.log has no exact source-bound terminal record"
+
+# Content appended after the record was written. The line count in the record no
+# longer describes the file, which is the whole reason it is recorded.
+reset_fixture
+printf 'smuggled in after the record\n' >> "$release/evidence/build-avr-xt.log"
+restate_index_row build-avr-xt.log
+expect_fail "retained build log extended after recording" \
+	"build-avr-xt.log has no exact source-bound terminal record"
+
+# --- the index digest reaches the manifest and the schema ---------------------
+reset_fixture
+sed -i '/^evidence_index_sha256=/d' "$release/QUALIFICATION"
+reseal_provenance
+expect_fail "qualification without an evidence index digest" \
+	"missing QUALIFICATION key: evidence_index_sha256"
+
+reset_fixture
+sed -i 's/^evidence_index_sha256=.*/evidence_index_sha256=not-a-digest/' \
+	"$release/QUALIFICATION"
+reseal_provenance
+expect_fail "malformed evidence index digest" \
+	"evidence_index_sha256 is not a lowercase SHA-256"
+
+reset_fixture
+sed -i 's/^- \*\*Evidence index:\*\*.*/- **Evidence index:** `evidence\/INDEX` (SHA-256 `0000000000000000000000000000000000000000000000000000000000000000`), 36 retained files by role and terminal record/' \
+	"$release/MANIFEST.md"
+reseal_provenance
+expect_fail "manifest disagrees about the evidence index" \
+	"MANIFEST.md evidence index digest does not match QUALIFICATION"
 
 # --- the signature has to reach the provenance --------------------------------
 # Every release through v0.9.11 signed its images and left QUALIFICATION,
@@ -935,8 +1194,8 @@ for required in attiny85_cd4053_simple attiny45_cd4053_simple \
 done
 checks=$((checks + 1))
 
-[ "${#evidence_names[@]}" -eq 36 ] \
-	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 36"
+[ "${#evidence_names[@]}" -eq 37 ] \
+	|| fail "canonical release evidence set has ${#evidence_names[@]} entries, expected 37"
 for required in pic12f675-qualification.log pic12f675-qualified-matrix.json \
 		toolchain.txt; do
 	[[ " ${evidence_names[*]} " == *" $required "* ]] \

@@ -7826,6 +7826,7 @@ override RELEASE_SOAK_NAMES := \
 	pic12f675_cd4053_simple pic12f675_cd4053_with_mute pic12f675_tq2_l2_5v_relay
 
 override RELEASE_FIXED_EVIDENCE_FILES := \
+	INDEX \
 	build-avr-classic.log build-avr-xt.log \
 	build-pic10f322.log build-pic10f320.log build-pic12f675.log \
 	final-image-build.log resource-tables.log toolchain.txt \
@@ -7838,6 +7839,47 @@ override RELEASE_FIXED_EVIDENCE_FILES := \
 # full transcript is intentionally transient and absent from the release set.
 override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 	$(addprefix soak-,$(addsuffix .log,$(RELEASE_SOAK_NAMES)))
+
+# What each retained file IS, as a declaration rather than an inference.
+#
+# evidence/INDEX renders this map for a reader, and the qualification verifier
+# reads it from here to check that rendering. Deriving the role from the name
+# instead -- `build-*.log` is a build, `*-test*.log` is a target test -- would
+# make the index its own authority: a mislabelled member would agree with the
+# pattern that produced the label, and both would be wrong together. This is the
+# same reason the image and provenance sets are named and never globbed.
+#
+# INDEX is deliberately absent. It cannot describe itself, so it is the one
+# member of RELEASE_EVIDENCE_FILES this map does not cover; the verifier
+# requires the map to equal that set with INDEX removed, exactly, in both
+# directions, so adding a retained file without classifying it fails the release
+# rather than producing an index that quietly omits it.
+#
+# The `bound` roles below carry their own exact source-bound terminal record
+# that the verifier matches. `build` and `target-test` did not, and that is what
+# EVIDENCE_RESULT records now cover -- 13 files and 62% of the evidence bytes
+# whose only previous check was that the name was present and the file non-empty.
+override RELEASE_EVIDENCE_ROLES := \
+	build-avr-classic.log=build build-avr-xt.log=build \
+	build-pic10f322.log=build build-pic10f320.log=build \
+	build-pic12f675.log=build final-image-build.log=build \
+	soak-build.log=build \
+	attiny202-test.log=target-test attiny202-test-target.log=target-test \
+	pic10f322-test.log=target-test \
+	pic10f322-test-target-variants.log=target-test \
+	pic10f320-test.log=target-test \
+	pic10f320-test-target-variants.log=target-test \
+	pic12f675-qualification.log=qualification \
+	pic12f675-qualified-matrix.json=matrix \
+	resource-tables.log=resource toolchain.txt=toolchain \
+	test-long.summary.txt=test-long \
+	$(foreach n,$(RELEASE_SOAK_NAMES),soak-$(n).log=soak)
+
+# The roles whose members carry an EVIDENCE_RESULT record written at staging
+# time. The other roles are bound by an authority that predates this one and is
+# stronger: a digest named in QUALIFICATION, or a terminal record the verifier
+# already matched exactly. Nothing is bound twice.
+override RELEASE_EVIDENCE_RESULT_ROLES := build target-test
 
 # --- the immutable production release identity -------------------------------
 # WHAT A RELEASE IS, written as literal text that no caller can move.

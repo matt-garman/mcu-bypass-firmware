@@ -1717,7 +1717,7 @@ of ordinary test changes and can turn prose formatting into a tested interface.
   The producer/table/adapter oracles are untouched.
 - Exact figures retained deliberately, because `test-release-qualification`
   requires this document to publish current release scope and independently
-  verifies the same values against real evidence: the 36-file evidence set, the
+  verifies the same values against real evidence: the 37-file evidence set, the
   18 release soak combinations, the historical 28-file/15-soak boundary, and the
   48/102/168 build-profile final-check contracts. The published host compiler
   floor is retained for the same reason (`test-release-preflight`).
@@ -2591,7 +2591,7 @@ branches may not be covered under `--max-configs=1` without explicit selectors.
 
 ## BR-REL-01 - Define one canonical signed release index
 
-**Status:** DONE `bb5ba13` + `<commit>`
+**Status:** DONE `bb5ba13` + `b5704f7`
 
 **Risk:** High. This changes provenance representation and must be independently
 reviewed before old mechanisms are retired.
@@ -2823,37 +2823,111 @@ fuse identity, and both are now inside the signature. A third representation
 would be the parallel authority this item opens by warning against, so the
 remaining candidate fields are left to whoever has a consumer that needs them.
 
-## BR-REL-02 - Package future release evidence as one deterministic archive
+## BR-REL-02 - Index retained evidence and bind the logs nothing was checking
 
-**Status:** TODO
+**Status:** DONE `<commit>` (archive half DECLINED, see below)
 
 **Depends on:** BR-REL-01
 
-**Observation:** Recent releases add roughly 35-60 tracked files and around 400
-KiB of mostly unique evidence. The v0.9.9 evidence is roughly 481 KiB unpacked
-but about 63 KiB as a compressed archive. Images are tiny and heavily
+**Original observation:** Recent releases add roughly 35-60 tracked files and
+around 400 KiB of mostly unique evidence. The v0.9.9 evidence is roughly 481 KiB
+unpacked but about 63 KiB as a compressed archive. Images are tiny and heavily
 deduplicated; loose evidence is the primary growth source.
+
+**Both halves of this item were wrong, in opposite directions.** The archive
+half compared the wrong two numbers, and the index half asked for something
+BR-REL-07 had already built. What the measurement found instead was a
+qualification gap neither half named.
+
+### The archive half: DECLINED, because it measures worse than doing nothing
+
+The 481 KiB -> 63 KiB comparison is unpacked worktree bytes against a compressed
+archive. It omits that Git already compresses and deduplicates every blob it
+stores. Measured against the object store rather than the worktree:
+
+| | bytes |
+|---|---|
+| All release evidence, worktree | 2,370,942 |
+| The same evidence in the Git object store | **268,663** (11.3%) |
+| As 12 per-release gzip archives | 304,131 (**13% worse than today**) |
+| As 12 per-release xz archives | 153,720 |
+
+An xz archive per release saves 114,943 bytes: 0.5% of a 21 MB `.git`. Against
+that, 68 of the 306 evidence files are cross-release duplicates that cost
+nothing today because Git stores 238 unique blobs, and archiving would make each
+one unique and incompressible across releases. `test/` is the largest category
+in HEAD at 579,563 bytes, more than double all evidence.
+
+An archive would also make evidence reachable only through a decompressor,
+which the item's own acceptance criteria warn against, in exchange for a saving
+that rounds to zero. Declined on the measurement, not on effort.
+
+### The index half: already built, by BR-REL-07
+
+`test/published_release_digests.txt` records every published evidence file by
+digest -- 306 of them -- and `test_published_release_immutability.py` enforces,
+together with each release's own `SHA256SUMS`, a partition covering every
+published file exactly once. Its header states the charter directly: "Every
+published file a release does not sign for itself." A per-member digest in a
+new `evidence/INDEX` would have been a second record of the same fact with no
+rule about which wins when they disagree.
+
+So `evidence/INDEX` carries **no digest column**. It records what was missing:
+what each retained file is for, and what it concluded.
+
+### What the measurement actually found
+
+`published_release_digests.txt` is an immutability gate, not a qualification
+one. `print_record` is "computed from the tree" -- a directory scan run by a
+person after publication -- so it records whatever was staged. It cannot catch a
+release staged with the wrong evidence; it freezes it.
+
+And at staging time, **13 of the 36 retained files had no content authority of
+any kind**: seven build logs (`soak-build.log` among them) and six PIC/ATtiny202
+target-test logs. The verifier confirmed the name was present and the file
+non-empty, and read no further. That is 137,642 bytes, **62% of the evidence
+tree**. Of the 19 result-bearing logs, only 8% of their bytes sit inside a line
+any gate matches.
+
+`soak-build.log` was the one that nearly escaped this count: it matches
+`soak-*.log`, but it carries no `SOAK_RESULT format=1` record and the loop
+covers only the 18 named combinations.
 
 **Work:**
 
-- [ ] Define deterministic archive ordering, ownership, permissions, and archive
-  timestamps.
-- [ ] Include an internal index with each member's role, size, digest, and
-  terminal result.
-- [ ] Retain raw logs where forensic detail is useful.
+- [x] Decline the archive, recording the object-store measurement as the reason.
+- [x] Decline the per-member digest column, because BR-REL-07 already holds it.
+- [x] Declare every retained file's role in the Makefile, never inferred from
+  its name, so the index cannot be its own authority for what a member is.
+- [x] Write `evidence/INDEX`: one row per member with role, size and terminal
+  record, plus a source-bound header and result record.
+- [x] Bind it as `evidence_index_sha256` from `QUALIFICATION` at `format=6`.
+- [x] Emit an `EVIDENCE_RESULT` record into each of the 13 unbound logs, binding
+  each to the released commit, to its own name, and to its own length.
+- [x] Verify the index against the Makefile and against the files, both
+  directions: no member unlisted, no row unmatched.
+- [x] Retain raw logs where forensic detail is useful -- unchanged, and now the
+  reason the archive was declined.
 - [ ] Replace duplicate initial/final output-only logs with structured phase
-  records when they establish the same thing more strongly.
-- [ ] Decide compression format based on long-term tool availability and
-  deterministic support.
-- [ ] Bind the archive digest from the canonical signed release index.
-- [ ] Publish the archive as a release asset and, until the retention policy is
-  proven, consider retaining it in the tag/artifact commit as well.
+  records. NOT DONE: `build-avr-classic.log` and `final-image-build.log` are
+  byte-identical in v0.9.11, and collapsing them is a separate change to what
+  the release *runs*, not to how it is recorded. Left as BR-REL-08.
 
 **Acceptance:**
 
 - Evidence remains complete, indexed, authenticated, and offline-inspectable.
-- Publication handles one archive rather than dozens of loose logs.
-- Compression does not become the only undocumented way to recover evidence.
+- ~~Publication handles one archive rather than dozens of loose logs.~~
+  Withdrawn: the archive is declined.
+- ~~Compression does not become the only undocumented way to recover
+  evidence.~~ Withdrawn with it, and satisfied absolutely: there is no
+  compression step.
+
+**What this does not do.** The `EVIDENCE_RESULT` records add no verdict. By the
+time they are written, each command has already exited zero and `make-release.sh`
+has already acted on that. What they add is attribution: a log from a different
+run, a log substituted for its neighbour, a truncated log and a padded log all
+stop matching. That is the difference between evidence that is present and
+evidence that is accounted for.
 
 ## BR-REL-03 - Clarify full test-long log retention
 
@@ -2887,7 +2961,15 @@ hosted log is not a release asset or a dependency of the qualification claim.
 
 **Status:** TODO
 
-**Depends on:** BR-REL-01, BR-REL-02
+**Depends on:** BR-REL-01, BR-REL-02 (partially satisfied -- see below)
+
+**What BR-REL-02 settled, and what it did not.** The signed-hash requirement
+below is already met, by BR-REL-07 rather than by this item: every published
+evidence file is recorded by digest in `test/published_release_digests.txt`, so
+hashes stay in Git whatever happens to the payloads. The **offline archive**
+requirement is NOT met and no longer has a planned mechanism, because BR-REL-02
+declined the archive on measurement. If evidence is ever removed from `main`,
+this item has to name its own durable mirror; it can no longer inherit one.
 
 **Caveat:** The initial review was performed offline and could not inspect hosted
 release assets or repository tag-protection settings. Verify actual hosted state
@@ -2939,6 +3021,12 @@ releases are safer than deltas or links to prior assets.
 **Status:** TODO
 
 **Depends on:** BR-REL-01, BR-REL-02, BR-REL-04
+
+**What BR-REL-02 settled.** The "compact signed index" this proposal wants an
+artifact-only commit to carry now exists: `evidence/INDEX`, bound by
+`evidence_index_sha256` from a signed `QUALIFICATION`. The evidence archive
+listed beside it was already hedged as "possibly", and is declined, so the third
+question below is answered: there is no archive to retain in the tagged commit.
 
 **Proposed end state:**
 
@@ -3626,8 +3714,8 @@ dependencies and acceptance criteria.
 | BR-TEST-08 | Generate recipes from variant maps | DONE `d3ea121` |
 | BR-TEST-09 | Consolidate dependencies/parsers | DONE `4fa470b` |
 | BR-QUALITY-01 | Define complete analysis matrix | DONE `edd9696` |
-| BR-REL-01 | Define canonical signed release index | DONE `bb5ba13` + `<commit>` |
-| BR-REL-02 | Package deterministic evidence archive | TODO |
+| BR-REL-01 | Define canonical signed release index | DONE `bb5ba13` + `b5704f7` |
+| BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `<commit>` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
 | BR-REL-05 | Keep releases self-contained | TODO |

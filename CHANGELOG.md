@@ -76,6 +76,26 @@ historical records and are not retroactively compacted by this policy.
 
 ### Fixed
 
+- **The retained logs nothing was reading are now bound to the run that
+  produced them.** Thirteen of the thirty-six retained evidence files -- seven
+  build logs and six PIC/ATtiny202 target-test logs, 62% of the evidence tree by
+  bytes -- were checked only for having the right name and being non-empty. No
+  gate read a byte of their content, and `test/published_release_digests.txt`
+  then froze whatever had been staged, so a log kept from an earlier run became
+  a permanent part of the qualification record instead of failing anything: it
+  is an immutability gate, and this was the qualification gate it cannot be.
+  Each now carries an `EVIDENCE_RESULT format=1` record binding the log to the
+  released commit, to its own name and to its own length, so a log from another
+  run, a log substituted for its neighbour, a truncated log and a padded log all
+  stop matching. A new `evidence/INDEX` lists every retained file by role, size
+  and terminal record, bound from `QUALIFICATION` as `evidence_index_sha256`
+  (`format=6`). Roles are declared in the Makefile and never inferred from
+  filenames, so the index cannot be its own authority for what a member is, and
+  the verifier checks it against that declaration in both directions. The index
+  deliberately carries **no digest column**: `published_release_digests.txt`
+  already records every published evidence file by digest, and a second record
+  of the same fact would have no rule about which one wins.
+
 - **The manifest's toolchain table is evidence now, not prose.** Fifteen rows
   of compiler, simulator and analyzer versions were printed into `MANIFEST.md`
   from shell captures, with no machine authority behind them and nothing

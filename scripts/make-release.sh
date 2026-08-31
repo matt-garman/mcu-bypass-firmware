@@ -826,6 +826,49 @@ for helper_entry in $RELEASE_HELPER_MAP; do
 	RELEASE_HELPER_NAMES+=("$helper_base")
 done
 
+# What each retained evidence file is, and which roles carry an EVIDENCE_RESULT
+# record. Read here, with the sets above, so a role map that has drifted from
+# RELEASE_EVIDENCE_FILES fails in the first minute rather than after the soak,
+# at the point where the index is written and there is a whole run to lose.
+RELEASE_EVIDENCE_ROLES=$(mkv RELEASE_EVIDENCE_ROLES)
+[ -n "${RELEASE_EVIDENCE_ROLES// /}" ] \
+	|| die "Makefile RELEASE_EVIDENCE_ROLES is empty; retained evidence must declare what each file is"
+RELEASE_EVIDENCE_RESULT_ROLES=$(mkv RELEASE_EVIDENCE_RESULT_ROLES)
+[ -n "${RELEASE_EVIDENCE_RESULT_ROLES// /}" ] \
+	|| die "Makefile RELEASE_EVIDENCE_RESULT_ROLES is empty"
+declare -A RELEASE_EVIDENCE_ROLE=()
+for role_entry in $RELEASE_EVIDENCE_ROLES; do
+	role_base=${role_entry%%=*}
+	role_name=${role_entry#*=}
+	[ -n "$role_base" ] && [ -n "$role_name" ] && [ "$role_base" != "$role_entry" ] \
+		|| die "malformed RELEASE_EVIDENCE_ROLES entry: $role_entry"
+	case "$role_base" in
+		*/*|.*) die "invalid evidence name in the role map: $role_base" ;;
+	esac
+	[[ "$role_name" =~ ^[a-z][a-z-]*$ ]] \
+		|| die "invalid evidence role: $role_name"
+	[ -z "${RELEASE_EVIDENCE_ROLE[$role_base]+set}" ] \
+		|| die "duplicate evidence name in the role map: $role_base"
+	RELEASE_EVIDENCE_ROLE[$role_base]=$role_name
+done
+# The map must be the evidence set with INDEX removed, exactly. Checking only
+# one direction would let the map cover a file the release does not retain, or
+# -- the one that matters -- let a newly retained file fall out of the index
+# with nothing to say it had gone.
+for evidence_base in $RELEASE_EVIDENCE_FILES; do
+	[ "$evidence_base" = INDEX ] && continue
+	[ -n "${RELEASE_EVIDENCE_ROLE[$evidence_base]+set}" ] \
+		|| die "retained evidence file has no declared role: $evidence_base"
+done
+case " $RELEASE_EVIDENCE_FILES " in
+	*" INDEX "*) ;;
+	*) die "RELEASE_EVIDENCE_FILES does not retain INDEX" ;;
+esac
+[ -z "${RELEASE_EVIDENCE_ROLE[INDEX]+set}" ] \
+	|| die "the evidence role map must not describe INDEX, which cannot describe itself"
+[ "${#RELEASE_EVIDENCE_ROLE[@]}" -eq "$(( $(printf '%s\n' $RELEASE_EVIDENCE_FILES | wc -l) - 1 ))" ] \
+	|| die "the evidence role map does not cover exactly the retained evidence set"
+
 # The provenance files this release will sign. Read and validated here, beside
 # the helper set and long before the soak, so a misdeclared list fails in the
 # first minute rather than after 24 hours. These have no tracked source: they
@@ -2137,11 +2180,131 @@ staged_resource_tables_sha256=${staged_resource_tables_sha256%% *}
 [ "$staged_resource_tables_sha256" = "$resource_tables_sha256" ] \
 	|| die "staged resource evidence differs from final-candidate measurement"
 
+# --- the retained logs that nothing was checking -----------------------------
+# Thirteen of the thirty-six retained files -- seven build logs (soak-build.log
+# among them) and six PIC/ATtiny202 target-test logs -- had no content authority
+# whatsoever. The qualification verifier confirmed the name was present and the
+# file non-empty, and stopped there. That is 62% of the evidence tree by bytes.
+#
+# The other twenty-three are bound: the soak logs, the resource log, the
+# toolchain record and the test-long summary each carry an exact source-bound
+# terminal record the verifier matches, and the PIC12F675 pair is bound by
+# pic12f675_matrix_sha256 and its matrix verifier. These thirteen were not, so a
+# log kept from an earlier run, truncated, or extended after the fact satisfied
+# every gate. test/published_release_digests.txt then freezes exactly what was
+# staged, which makes a wrong log permanent rather than catching it: that record
+# is an immutability gate, and this is the qualification one it cannot be.
+#
+# ONE record shape for all thirteen rather than a per-role BUILD_RESULT and
+# TARGET_TEST_RESULT: the role is a field, so the verifier is one loop instead
+# of two parsers and a fourteenth log is a Makefile entry rather than a branch.
+#
+# WHAT THIS DOES NOT DO. It adds no verdict. Reaching this line means each of
+# these commands already exited zero and this script already acted on that. What
+# the record adds is ATTRIBUTION: `evidence` names the file the record belongs
+# to and `lines` counts what precedes it, so a log from a different run, a log
+# substituted for its neighbour, a truncated log and a padded log all stop
+# matching, and `source_commit` ties all thirteen to the commit being released.
+evidence_result_roles=" $RELEASE_EVIDENCE_RESULT_ROLES "
+evidence_bound=0
+for evidence_base in $RELEASE_EVIDENCE_FILES; do
+	[ "$evidence_base" = INDEX ] && continue
+	evidence_role=${RELEASE_EVIDENCE_ROLE[$evidence_base]}
+	case "$evidence_result_roles" in
+		*" $evidence_role "*) ;;
+		*) continue ;;
+	esac
+	staged_evidence="$OUTPUT_DIR/evidence/$evidence_base"
+	[ -f "$staged_evidence" ] && [ ! -L "$staged_evidence" ] && [ -s "$staged_evidence" ] \
+		|| die "retained evidence is missing or not a regular file: $evidence_base"
+	if grep -q '^EVIDENCE_RESULT ' "$staged_evidence"; then
+		die "retained evidence already carries an EVIDENCE_RESULT record: $evidence_base"
+	fi
+	# wc -l counts newlines, so a log with no final newline would both miscount
+	# and have the record concatenated onto its last line.
+	[ -z "$(tail -c 1 "$staged_evidence")" ] \
+		|| die "retained evidence does not end with a newline: $evidence_base"
+	evidence_lines=$(wc -l < "$staged_evidence") \
+		|| die "could not measure retained evidence: $evidence_base"
+	printf 'EVIDENCE_RESULT format=1 status=pass role=%s evidence=%s lines=%d source_commit=%s\n' \
+		"$evidence_role" "$evidence_base" "$evidence_lines" "$GIT_SHA" \
+		>> "$staged_evidence" \
+		|| die "could not record the terminal result for $evidence_base"
+	evidence_bound=$((evidence_bound + 1))
+done
+[ "$evidence_bound" -gt 0 ] \
+	|| die "no retained evidence carries an EVIDENCE_RESULT record"
+ok "bound $evidence_bound retained logs to $GIT_SHORT with a terminal record."
+
+# --- evidence/INDEX: what each retained file is, and what it concluded --------
+# The table of contents the evidence directory never had. Thirty-six rows of
+# name, role, size and terminal record, rendered from the Makefile's declared
+# role map rather than from the directory, so a member that went missing is a
+# row the verifier cannot satisfy instead of a row that was never written.
+#
+# It carries NO digest column, deliberately. test/published_release_digests.txt
+# already records every published evidence file by digest and enforces, with
+# each release's own SHA256SUMS, a partition covering every published file
+# exactly once. A digest here would be a second record of the same fact with no
+# rule about which one wins when they disagree. What was missing is what this
+# supplies: what each file is for, and what it concluded.
+#
+# INDEX cannot list itself. Its own authority is evidence_index_sha256 in
+# QUALIFICATION, which SHA256SUMS covers and the release signature signs.
+release_terminal_record() {
+	local role=$1 path=$2 pattern matches
+	case "$role" in
+		build|target-test)    pattern='^EVIDENCE_RESULT ' ;;
+		soak)                 pattern='^SOAK_RESULT ' ;;
+		test-long)            pattern='^TEST_LONG_RESULT ' ;;
+		resource)             pattern='^RESOURCE_TABLES_RESULT ' ;;
+		toolchain)            pattern='^TOOLCHAIN_RESULT ' ;;
+		# Bound by pic12f675_matrix_sha256 and the matrix verifier, which read
+		# the pair together; neither carries a single-line record of its own.
+		qualification|matrix) printf '%s\n' '-'; return 0 ;;
+		# No silent default. A role added to the Makefile without a rule here
+		# fails the release rather than being indexed as having concluded
+		# nothing, which is what an `*) printf -` arm would have made it.
+		*) return 1 ;;
+	esac
+	mapfile -t matches < <(grep "$pattern" "$path" || true)
+	[ "${#matches[@]}" -eq 1 ] || return 1
+	case "${matches[0]}" in *$'\t'*) return 1 ;; esac
+	printf '%s\n' "${matches[0]}"
+}
+evidence_members=0
+{
+	printf 'EVIDENCE_INDEX format=1 source_commit=%s\n' "$GIT_SHA"
+	for evidence_base in $(printf '%s\n' $RELEASE_EVIDENCE_FILES \
+			| grep -v '^INDEX$' | sort); do
+		evidence_role=${RELEASE_EVIDENCE_ROLE[$evidence_base]}
+		staged_evidence="$OUTPUT_DIR/evidence/$evidence_base"
+		evidence_size=$(stat -c%s "$staged_evidence") \
+			|| die "could not size retained evidence: $evidence_base"
+		evidence_record=$(release_terminal_record "$evidence_role" "$staged_evidence") \
+			|| die "no single terminal record for $evidence_base (role $evidence_role)"
+		printf '%s\t%s\t%s\t%s\n' \
+			"$evidence_base" "$evidence_role" "$evidence_size" "$evidence_record"
+		evidence_members=$((evidence_members + 1))
+	done
+	printf 'EVIDENCE_INDEX_RESULT format=1 status=pass members=%d source_commit=%s\n' \
+		"$evidence_members" "$GIT_SHA"
+} > "$OUTPUT_DIR/evidence/INDEX" \
+	|| die "could not write the evidence index"
+indexed_rows=$(grep -c $'\t' "$OUTPUT_DIR/evidence/INDEX") \
+	|| die "could not count evidence index rows"
+[ "$indexed_rows" -eq "$(( $(printf '%s\n' $RELEASE_EVIDENCE_FILES | wc -l) - 1 ))" ] \
+	|| die "evidence index lists $indexed_rows members, not the retained set"
+evidence_index_sha256=$(sha256sum -- "$OUTPUT_DIR/evidence/INDEX") \
+	|| die "could not hash the evidence index"
+evidence_index_sha256=${evidence_index_sha256%% *}
+ok "evidence index lists $indexed_rows retained files by role and terminal record."
+
 # Compact machine-readable attestation. The verifier parses this as data (never
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=5\n'
+	printf 'format=6\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -2152,6 +2315,7 @@ staged_resource_tables_sha256=${staged_resource_tables_sha256%% *}
 	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
 	printf 'resource_tables_sha256=%s\n' "$resource_tables_sha256"
 	printf 'toolchain_sha256=%s\n' "$toolchain_sha256"
+	printf 'evidence_index_sha256=%s\n' "$evidence_index_sha256"
 } > "$OUTPUT_DIR/QUALIFICATION"
 
 # --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
@@ -2314,6 +2478,8 @@ REL_BANNER=""
 		"$pic12f675_matrix_sha256"
 	printf -- '- **Final resource evidence:** `evidence/resource-tables.log` (SHA-256 `%s`)\n' \
 		"$resource_tables_sha256"
+	printf -- '- **Evidence index:** `evidence/INDEX` (SHA-256 `%s`), %d retained files by role and terminal record\n' \
+		"$evidence_index_sha256" "$indexed_rows"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"
