@@ -859,8 +859,8 @@ RELEASE_EVIDENCE_RESULT_ROLES=$(mkv RELEASE_EVIDENCE_RESULT_ROLES)
 [ -n "${RELEASE_EVIDENCE_RESULT_ROLES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_RESULT_ROLES is empty"
 [ "$(printf '%s\n' $RELEASE_EVIDENCE_RESULT_ROLES | LC_ALL=C sort)" \
-	= $'build\ntarget-test' ] \
-	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build and target-test"
+	= $'build\nfinal-image-build\ninitial-image-build\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, and target-test"
 declare -A RELEASE_EVIDENCE_ROLE=()
 for role_entry in $RELEASE_EVIDENCE_ROLES; do
 	role_base=${role_entry%%=*}
@@ -2587,7 +2587,8 @@ ok "verified $evidence_bound operation-sealed logs against their payload digests
 release_terminal_record() {
 	local role=$1 path=$2 pattern matches
 	case "$role" in
-		build|target-test)    pattern='^EVIDENCE_RESULT ' ;;
+		build|final-image-build|initial-image-build|target-test)
+			pattern='^EVIDENCE_RESULT ' ;;
 		soak)                 pattern='^SOAK_RESULT ' ;;
 		test-long)            pattern='^TEST_LONG_RESULT ' ;;
 		resource)             pattern='^RESOURCE_TABLES_RESULT ' ;;

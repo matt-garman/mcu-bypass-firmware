@@ -72,8 +72,8 @@ int fw_fault_run(fw_inject_t inj);
 //
 // This host lane proves the FIRST half of that contract -- escalation, and
 // de-energization ahead of the spin -- against the shipping source. It does not
-// and cannot prove the second half (a complete resynchronizing RESET-coil
-// actuation after the watchdog reset), because the mock elides __delay_ms() and
+// and cannot prove the second half (the recovery RESET-coil command after the
+// watchdog reset), because the mock elides __delay_ms() and
 // aborts the spin on a timer rather than modelling a reset. The libgpsim fault
 // lane (test/pic10f320/gpsim/test_fault_pic.cc) measures that pulse on the real
 // image; simulation still proves nothing about relay MECHANICS.

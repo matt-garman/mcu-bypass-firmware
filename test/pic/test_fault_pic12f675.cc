@@ -52,8 +52,9 @@
 //
 // The relay variant adds the second half of the F1 contract on top of that
 // shared response: the escalation path must de-energize both coils before the
-// spin, and the watchdog recovery must drive a complete RESET-coil actuation
-// back to BYPASS. Both the shadow (intent) and modeled-GPIO (physical) coil
+// spin, and the watchdog recovery must command a minimum-qualified RESET-coil
+// pulse while firmware settles to BYPASS. Both the shadow (intent) and
+// modeled-GPIO (pin) coil
 // views are injected, because on this part they fail independently: a shadow
 // coil bit trips shadow-vs-expected without the pin ever being energized, while
 // a GPIO coil bit energizes the pin with the shadow still clean and trips

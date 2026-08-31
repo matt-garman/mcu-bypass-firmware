@@ -1194,10 +1194,25 @@ assert_development_state_rejected() {
 # no disclosure and the declaration stands on its own.
 write_documentation_fixture v1.2.3 21 18 six four
 mkdir -p "$documentation_root/release/v1.2.3"
-: > "$documentation_root/release/v1.2.3/QUALIFICATION"
+printf '%s\n' 'format=7' > "$documentation_root/release/v1.2.3/QUALIFICATION"
 release_validate_development_state "$documentation_root" 21 18 \
 	|| fail "development-state gate rejected a released tree"
 checks=$((checks + 1))
+
+# Empty and symlinked placeholders are not retained release evidence. In both
+# cases the tree remains pre-tag and owes the transition disclosure.
+write_documentation_fixture v1.2.3 21 18 six four
+mkdir -p "$documentation_root/release/v1.2.3"
+: > "$documentation_root/release/v1.2.3/QUALIFICATION"
+assert_development_state_rejected 'an empty retained record read as a published release' \
+	'must carry the exact pre-tag transition line'
+
+write_documentation_fixture v1.2.3 21 18 six four
+mkdir -p "$documentation_root/release/v1.2.3"
+printf '%s\n' 'format=7' > "$documentation_root/real-qualification"
+ln -s ../../real-qualification "$documentation_root/release/v1.2.3/QUALIFICATION"
+assert_development_state_rejected 'a symlinked retained record read as a published release' \
+	'must carry the exact pre-tag transition line'
 
 # Pre-tag: source finalization has declared v1.2.3 and the artifact commit that
 # creates release/v1.2.3/ has not happened yet. Undisclosed, that is a tree

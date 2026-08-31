@@ -13,11 +13,12 @@
 >
 > **Claim boundary.** The repository owner authored the firmware changes. The
 > gates named below were run to completion on a fully provisioned host — target
-> toolchains, simulators and the mutation suite included — and became
+> toolchains, simulators and the mutation suite included — and first became
 > *retained* release evidence when the `v0.9.10` cut recorded them in a signed
-> MANIFEST bound to one commit. That cut was never published, so no published
-> release binds them yet — see [release/README.md](../release/README.md). Local
-> completion, retained release qualification and publication are separate
+> MANIFEST bound to one commit. That cut was never published. The published
+> `v0.9.11` release retains explicit F2 evidence under its own source-bound
+> qualification — see [release/README.md](../release/README.md). Local
+> completion, retained release qualification and publication remain separate
 > claims. None of them is hardware qualification — see
 > [HARDWARE_VALIDATION_LOG.md](../HARDWARE_VALIDATION_LOG.md).
 

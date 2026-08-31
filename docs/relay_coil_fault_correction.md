@@ -19,9 +19,13 @@
 
 ## Policy
 
-**An unexpectedly energized relay coil is a fault. The firmware de-energizes
-both coils immediately, then forces watchdog recovery, so that logical state,
-LED state and physical relay position are driven back into agreement.**
+**An unexpectedly energized relay coil is a fault. On detection, the firmware
+commands both coil-control outputs idle before the watchdog spin. If the reset
+completes, initialization sets logical state and LED to BYPASS, keeps SET
+inactive, commands a nominal 12 ms RESET-coil pulse, and then commands both
+coils idle. Those are firmware and electrical guarantees within the documented
+fault model; physical relay convergence additionally requires the hardware
+assumptions under "Relay mechanics and physical convergence."**
 
 This replaces the correct-in-place model that shipped on PIC10F320 in v0.9.8 and
 on the four modular shells in `93f637b`. Nothing is re-driven ahead of a sanity
@@ -43,29 +47,35 @@ mechanically harmless". No datasheet parameter, and no simulation, says what a
 armature position.
 
 So the firmware cannot know whether the latching relay moved. If it did, silent
-clearing leaves the physical audio route disagreeing with the effect state and
-the LED, permanently, with nothing in the system able to notice or repair it.
-That is the single failure this policy exists to remove:
+clearing could leave the physical audio route disagreeing with the effect state
+and LED indefinitely because the old firmware issued no corrective relay
+command. The new policy removes that omission; it does not observe or by itself
+guarantee armature movement:
 
-| | correct in place (old) | fail-safe resynchronization (now) |
+| | correct in place (old) | fail-safe recovery (now) |
 | --- | --- | --- |
-| coil de-energized | yes, ≤ 1 tick | yes, ≤ 1 tick |
-| logical/physical convergence if the pulse DID actuate | never | guaranteed by the recovery |
-| disruption when it did NOT actuate | none | ~0.26 s dropout, returns to BYPASS |
-| firmware has to know whether the relay moved | yes (it cannot) | no |
+| coil-control outputs commanded idle | at the next loop-top refresh | at the next sanity gate, before the watchdog spin |
+| corrective recovery command | none | nominal 12 ms RESET command with SET inactive, then both coils idle |
+| logical/LED result after recovery | unchanged | BYPASS / dark |
+| physical result if the stray pulse actuated | no correction attempted | BYPASS only if the validated hardware delivers the RESET pulse and the relay actuates as specified |
+| policy depends on knowing whether the stray pulse moved the relay | yes (the firmware cannot know) | no; the RESET recovery command is unconditional |
 
-The old model minimized disruption on the assumption the pulse was harmless.
-The new model gives that up — a cosmic-ray-class coil upset now costs an audible
-interruption and a return to BYPASS — in exchange for never depending on an
-assumption the project cannot substantiate. For a bypass switch whose entire
-purpose is that the audio path matches what the player sees, that is the
-conservative trade.
+The old model minimized recovery disruption on the assumption the pulse was
+harmless. The new model gives that up: a cosmic-ray-class coil upset now causes
+watchdog recovery and a firmware command to BYPASS, without depending on the
+unsubstantiated assumption that a below-minimum stray pulse is mechanically
+harmless. Audible interruption and physical return to BYPASS follow only on
+hardware satisfying the assumptions below. For a bypass switch whose purpose
+is that the audio path matches what the player sees, issuing the corrective
+command is the conservative firmware trade.
 
 The alternative disposition — retaining silent correction — would have required
-the release to accept possible permanent logical/physical desynchronization and
-to add hardware characterization across representative relays, supply voltage,
-temperature and pulse phase. Testing samples cannot turn a below-minimum pulse
-into a datasheet guarantee, so that path was not taken.
+the release to accept that no corrective command follows possible physical
+desynchronization and to characterize below-minimum upset pulses across
+representative relays, supply voltage, temperature and pulse phase. Testing
+samples cannot turn a below-minimum pulse into a datasheet guarantee, so that
+path was not taken. The selected policy still requires ordinary hardware
+qualification of the recovery driver, supply and relay path.
 
 ### Cost
 
@@ -109,11 +119,12 @@ final-low coils are *not* recovery:
 1. **De-energization.** `hw_force_wdt_reset()` runs its emergency output path
    *before* it disables interrupts and spins, so a fault cannot hold a coil
    energized for the watchdog period.
-2. **Resynchronization.** The watchdog reset re-runs `init()`, whose
-   `hw_set_bypass_state()` drives a complete 12 ms RESET-coil actuation
-   (`TQ2_L2_5V_PULSE_MS`, 3× the datasheet minimum). *That* is what puts the
-   physical relay back in agreement with the logical state and the LED. The
-   device comes up in BYPASS with the LED dark.
+2. **Electrical recovery command.** The watchdog reset re-runs `init()`, which
+   sets logical state and LED to BYPASS and has `hw_set_bypass_state()` command
+   a nominal 12 ms RESET-coil pulse (`TQ2_L2_5V_PULSE_MS`) with SET inactive,
+   followed by both coils idle. Tests establish that sequence on the substrates
+   listed below. Under the relay-mechanics assumptions, it also returns the
+   physical relay to BYPASS; firmware does not observe that result.
 
 How each shell performs half 1 -- the single masked write, the replay hazard
 that forbids a per-bit clear, and the MCU-specific pin teardown AVR-XT and
@@ -228,21 +239,44 @@ residual-risk list with holes in it is not reviewable.
   the watchdog period. Trading the re-assert away therefore cost no latency.
 - **A stuck external pin.** Only PIC12F675 compares physical port against
   independent shadow intent; the other shells guard writable state.
-- **Relay mechanics.** No simulator models an armature. Every measurement below
-  is of the *electrical pulse the firmware drives*. Whether a given relay,
-  at a given voltage and temperature, moves for a below-minimum pulse — or fails
-  to move for an above-minimum one — is a bench question, and the project's
-  `1.x.y` hardware-validation pass is where it belongs.
+
+### Relay mechanics and physical convergence
+
+No simulator models an armature, contacts, coil current or voltage at the relay
+terminals. Every measurement below is of the electrical command or modeled MCU
+pin. A pulse whose duration exceeds the datasheet minimum is not by itself proof
+that the board delivered the required energy or that the relay moved.
+
+Physical convergence to BYPASS requires all of these hardware assumptions:
+
+- The detected fault is inside the documented fault model, watchdog reset and
+  initialization complete without another fault, and the event is outside the
+  excluded blocking-actuation window.
+- Board wiring maps the RESET coil and contact position to audio BYPASS, and the
+  fail-safe pull-downs work during emergency input/high-impedance intervals.
+- The external driver, flyback network, PCB and wiring accept the MCU command
+  with the intended polarity, keep SET inactive, and are not stuck, open or
+  inverted.
+- The supply and driver deliver the required voltage, current and pulse duration
+  at the relay terminals throughout recovery, including on PIC boards whose BOR
+  cannot enforce a greater-than-4 V peripheral-safe floor.
+- Voltage, temperature, component tolerances and relay life remain within the
+  guaranteed-actuation conditions for the intended compatible relay, which is
+  not mechanically stuck, welded, damaged or worn out.
+
+Those conditions require controlled bench qualification; none has been
+established by the simulator evidence in this document. See
+[HARDWARE_VALIDATION_LOG.md](../HARDWARE_VALIDATION_LOG.md).
 
 ## Test coverage
 
 Five independent harnesses across eight part/substrate rows. Each names which
-half of the contract it can prove on its substrate, and none of them claims the
-other.
+electrical phase it can prove on its substrate. No row observes armature or
+contact position.
 
-| Substrate | Harness | De-energization | Resynchronization |
+| Substrate | Harness | De-energization | Recovery electrical evidence |
 | --- | --- | --- | --- |
-| PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 4 ms, SET dark, settles BYPASS |
+| PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 4 ms, SET dark, firmware settles BYPASS |
 | PIC10F320 (gpsim) | `test/pic10f320/gpsim/test_fault_pic.cc` (same case) | same | same |
 | PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | direct modeled GP1/GP2 node voltage at the watchdog spin, including comparator-owned GP2, plus parked GP4's pad on every relay case | same |
 | AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 4 ms, SET never driven, LED dark |
@@ -253,9 +287,11 @@ other.
 
 The directional coil-output cases cover both settled-state hazards: BYPASS with
 an unintended SET (the relay may move to ENGAGED while the firmware believes
-BYPASS) and ENGAGED with an unintended RESET (the mirror). Both must converge on
-BYPASS. Pin-configuration fixtures use the one settled state needed to isolate
-their register and physical-pad mechanism.
+BYPASS) and ENGAGED with an unintended RESET (the mirror). Both must produce the
+same recovery electrical sequence and settled firmware state: RESET commanded,
+SET inactive, LED dark and both coils idle. No case observes mechanical
+convergence. Pin-configuration fixtures use the one settled state needed to
+isolate their register and physical-pad mechanism.
 
 Each PIC lane requires the measured recovery pulse to clear the relay's 4 ms
 datasheet minimum against a 12 ms design pulse, and each reports what it
@@ -321,9 +357,9 @@ move.
 **Where this policy stops.** It closes at the firmware boundary. This project
 does not specify the external coil-driver topology, the power supply, the
 flyback network or the PCB, so an adopter must validate relay motion and the
-simultaneous-driver supply transient against their own hardware. That
-responsibility is not an argument for leaving the firmware's former unbounded
-energy path open; it is the part of the problem firmware cannot reach.
+simultaneous-driver supply transient against the hardware assumptions above.
+That responsibility is not an argument for leaving the firmware's former
+unbounded energy path open; it is the part of the problem firmware cannot reach.
 
 ### PIC12F675 whole-port write
 

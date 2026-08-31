@@ -246,7 +246,7 @@ release_validate_development_state() {
 	local repo_root=$1 image_count=$2 soak_count=$3
 	local designated=release/README.md
 	local document="$repo_root/$designated"
-	local block plain version version_count transition_line
+	local block plain version version_count transition_line retained_record
 
 	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
 		|| _release_documentation_error "designated current-release document is not a regular nonempty file: $designated" || return
@@ -271,8 +271,11 @@ release_validate_development_state() {
 	# QUALIFICATION, not the directory, is what verify-release-history.sh treats
 	# as "this tree already contains the release" -- so a half-staged directory
 	# left by an aborted cut is still the pre-tag state and still owes the
-	# disclosure.
-	if [ ! -f "$repo_root/release/$version/QUALIFICATION" ]; then
+	# disclosure. Use the verifier's minimum retained-record boundary: an empty
+	# file or symlink is not release evidence merely because -f follows it.
+	retained_record="$repo_root/release/$version/QUALIFICATION"
+	if [ ! -f "$retained_record" ] || [ ! -s "$retained_record" ] \
+			|| [ -L "$retained_record" ]; then
 		transition_line=$(_release_transition_line "$version")
 		[ "$(grep -Fxc "$transition_line" <<<"$plain" || true)" -eq 1 ] \
 			|| _release_documentation_error "$designated declares $version, whose retained record release/$version/ this tree does not contain, and must carry the exact pre-tag transition line: $transition_line" || return

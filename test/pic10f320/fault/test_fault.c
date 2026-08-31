@@ -176,8 +176,8 @@ static void test_fault_injection(void) {
 //
 // This lane proves escalation and de-energization on the shipping source. It
 // deliberately does NOT claim recovery: final-low coils alone are not
-// resynchronization. The gpsim lane measures the recovery's full-width
-// RESET-coil actuation on the real image, and no simulator proves what a
+// electrical recovery. The gpsim lane measures the recovery RESET-coil pulse
+// on the real image, and no simulator proves what a
 // below-minimum pulse does to relay mechanics.
 //
 // It also proves HOW the coils go low, not only that they end low: the mock

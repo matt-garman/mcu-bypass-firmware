@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Prove the TARGET-LOCAL compile-time guards fire -- under each target's own
-# toolchain, its own pin map, and its own watchdog floor.
+# Prove selected TARGET-LOCAL compile-time guards fire -- under each target's
+# own toolchain, its own pin map, and its own watchdog floor.
 #
 # WHY THIS EXISTS. test/test_static_assert_guards.sh proves the mechanism: break
 # one input to a guard, the build must fail with that guard's own message. But it
 # compiles the classic-AVR lane only, with avr-gcc, and says so. Four MCU shells
 # sit outside it -- bypass_mcu_avr_xt.c, bypass_mcu_pic10f322.c,
 # bypass_mcu_pic12f675.c and bypass_mcu_pic10f320.c -- and they hold 52 of the
-# firmware's 79 static_assert guards.
+# firmware's 79 static_assert guards. This file exercises selected predicates
+# from their pin, clock, layout, threshold and timing-budget families.
 #
-# Those 52 are exactly the guards that CANNOT be proven anywhere else. A pin
+# Those target-local predicates cannot be proven with a shared compile. A pin
 # assert reads _PORTA_RA3_POSN out of the Microchip device pack, PIN7_bp out of
 # <avr/io.h>; a clock assert reads the -D_XTAL_FREQ or -DF_CPU that only that
 # part's build passes; a watchdog assert compares against that part's own
@@ -19,9 +20,10 @@
 # different expression, or does not preprocess at all.
 #
 # Until this file existed the census in test_static_assert_guards.sh was the only
-# thing standing between those 52 guards and silent removal, and the census
-# cannot tell a guard that still enforces its invariant from one whose inputs
-# have drifted out from under it.
+# check over those 52 declarations. The census still records only per-file
+# counts: this mutation roster does not detect arbitrary weakening of an
+# unmutated predicate, and must not be represented as semantic coverage of all
+# 52 guards.
 #
 # HOW. The same discipline as the classic-AVR file, so the two read alike:
 # copy src/ to a throwaway tree, break ONE input, compile with the flags the real

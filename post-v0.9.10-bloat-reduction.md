@@ -3528,7 +3528,7 @@ but checking it against the signing key needs GnuPG and a trust decision
 
 ## BR-REL-08 - Collapse duplicate release phase logs
 
-**Status:** TODO
+**Status:** DONE
 
 **Depends on:** BR-REL-02
 
@@ -3540,15 +3540,39 @@ undefined task.
 
 **Work:**
 
-- [ ] Decide whether the initial and final build phases remain independently
+- [x] Decide whether the initial and final build phases remain independently
   useful operations or are duplicate execution.
-- [ ] If both operations remain, emit phase-specific structured records that
+- [x] If both operations remain, emit phase-specific structured records that
   establish the distinct claim made by each.
-- [ ] If one operation is redundant, remove it and update the retained evidence
+- [x] If one operation is redundant, remove it and update the retained evidence
   role map, index, qualification verifier, release documentation, and fixtures
-  atomically.
-- [ ] Preserve the final-candidate image identity and post-soak rebuild checks;
+  atomically. Not applicable: both operations remain for the distinct reasons
+  recorded below.
+- [x] Preserve the final-candidate image identity and post-soak rebuild checks;
   do not collapse two genuinely independent image witnesses into one.
+
+**Result:** The byte-identical historical payloads were an output coincidence,
+not duplicate execution. The initial Classic AVR phase performs a clean
+source-to-ELF/HEX build and catches build or inventory failure before expensive
+qualification. Validation later rebuilds the ELFs and invalidates their paired
+HEX files. After soak, the final phase removes only those HEX files and
+materializes them from the unchanged validated ELFs; those are the bytes hashed,
+remeasured and staged. The initial HEX files are therefore not an independent
+witness for the final candidate.
+
+Both operations and filenames remain. Their operation-sealed records now carry
+distinct `initial-image-build` and `final-image-build` roles from the Makefile's
+independent role map. The producer and qualification verifier require the exact
+expanded role set, derive each terminal record with its declared role, and reject
+a final-phase log carrying the initial-phase role. Release documentation states
+where each claim stops. Evidence membership, index cardinality, qualification
+format, historical releases, validated-ELF hashes, post-soak comparisons, final
+image hashing and byte-bound staging are unchanged.
+
+Shell syntax and `git diff --check` passed. The focused
+`test-release-qualification` run did not reach a verdict within 180 seconds on
+this host while repeatedly encountering the absent AVR compiler; the external
+full-toolchain run remains the validation authority for that regression.
 
 **Acceptance:**
 
@@ -3712,8 +3736,8 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 **Status:** DONE `781cb43`
 
 **Observation:** Existing static-assert negative testing is strongest for
-Classic AVR/shared sources and does not equivalently exercise every target-local
-guard.
+Classic AVR/shared sources and does not equivalently exercise target-local
+guard families.
 
 **Work:**
 
@@ -3726,8 +3750,10 @@ guard.
 
 **Acceptance:**
 
-- Deleting or bypassing any required guard is detected even when firmware bytes
-  would otherwise remain valid.
+- Adding or deleting a required guard declaration changes the per-file census.
+- Selected high-consequence predicates in each target-local risk family are
+  proven load-bearing under the relevant toolchain. This does not claim that an
+  arbitrary predicate rewrite in every declaration is mutation-covered.
 
 **Result:**
 
@@ -3741,7 +3767,7 @@ mutated input against any of them. Neither half of the pair was in place: no
 mutation could prove one of those guards fires, and the census did not even
 count them, so deleting one outright was also invisible.
 
-Those 52 are exactly the guards no shared proof can stand in for. A pin assert
+Those 52 contain guards no shared proof can stand in for. A pin assert
 resolves `_PORTA_RA3_POSN` out of the Microchip device pack or `PIN7_bp` out of
 `<avr/io.h>`; a clock assert reads the `-D_XTAL_FREQ` or `-DF_CPU` only that
 part's build passes; a watchdog assert compares against that part's own de-rated
@@ -3749,7 +3775,8 @@ floor over a tick and an ISR duty that also differ by part. Compiled with
 another part's toolchain each one evaluates a different expression, or does not
 preprocess at all.
 
-`test/test_target_guard_mutations.sh` closes it, in the discipline the
+`test/test_target_guard_mutations.sh` closes the target-toolchain gap for the
+selected risk families, in the discipline the
 classic-AVR file established: copy `src/` to a throwaway tree, break one INPUT
 to a guard, compile with flags read from the Makefile via `print-<VAR>`, and
 require the failure to carry that guard's own message. 53 fixtures over 20
@@ -4042,7 +4069,7 @@ prospective release implementation.
   `test-release-provenance`: 77 checks, 0 failures; resource-table contract: 133
   checks, 0 failures.
 
-- [ ] **BR-RVW-05 -- MEDIUM -- reviewed ceiling parsing can disagree with
+- [x] **BR-RVW-05 -- MEDIUM -- reviewed ceiling parsing can disagree with
   effective Make policy (BR-RES-02, `e7c4f68`).** `parse_policy()` counts only
   decimal assignments (`test/test_resource_tables.py:173-190`). One decimal
   assignment followed by a computed reassignment therefore looks unique to the
@@ -4050,7 +4077,13 @@ prospective release implementation.
   then require the sole assignment to have the reviewed constant form; add
   duplicate-constant and constant-plus-computed negative cases.
 
-- [ ] **BR-RVW-06 -- MEDIUM -- an empty or symlinked `QUALIFICATION` suppresses
+  **Resolved:** `parse_policy()` now counts every direct GNU Make assignment to
+  each reviewed ceiling, regardless of operator or value form, before accepting
+  the sole assignment as a decimal constant. A duplicate decimal declaration
+  and a decimal declaration followed by a computed `:=` reassignment both fail
+  the isolated contract. Resource-table contract: 135 checks, 0 failures.
+
+- [x] **BR-RVW-06 -- MEDIUM -- an empty or symlinked `QUALIFICATION` suppresses
   the pre-tag disclosure (BR-STATE-02, `d4675d0`).** Development-state
   validation checks only `-f` (`scripts/release-documentation.sh:270-278`), and
   `test/test_release_preflight.sh:1186-1193` explicitly calls an empty file a
@@ -4058,14 +4091,30 @@ prospective release implementation.
   record boundary the release verifier relies on, with empty and symlink
   negative cases.
 
-- [ ] **BR-RVW-07 -- MEDIUM -- the XC8 context parser does not prove data-memory
+  **Resolved:** The development-state gate now treats `QUALIFICATION` as a
+  retained release record only when it is a nonempty regular file and not a
+  symlink, matching the minimum boundary enforced by qualification verification.
+  Its released-tree fixture now carries a nonempty record; empty and symlinked
+  placeholders each retain the pre-tag disclosure requirement. Focused shell
+  syntax and diff checks passed; the full preflight regression was left to the
+  external validation run because it repeatedly exercises the complete release
+  preflight.
+
+- [x] **BR-RVW-07 -- MEDIUM -- the XC8 context parser does not prove data-memory
   class (BR-TEST-07, `cee6bab`/`0dada67`).**
   `test/check_pic_context_layout.sh:59-65` rejects only literal `CODE` and
   accepts any other syntactically uppercase class. Define the reviewed XC8
   data-memory class set and reject unknown and other program-memory classes;
   exercise each boundary in `test/test_xc8_helpers.sh`.
 
-- [ ] **BR-RVW-08 -- MEDIUM -- target guard coverage does not meet its stated
+  **Resolved:** Local XC8 history and both realistic sidecar producers establish
+  `BANK0` as the one reviewed `_ctx_` SRAM class for PIC10F322, PIC10F320 and
+  PIC12F675 under the pinned XC8/DFP. The resolver now uses that positive
+  allowlist rather than a `CODE` blacklist. Focused controls reject `CODE`,
+  `CONST`, `STRCODE`, `CONFIG`, `EEDATA`, an unreviewed `BANK1` and an invented
+  uppercase class. `test-xc8-helpers`: 34 checks, 0 failures.
+
+- [x] **BR-RVW-08 -- MEDIUM -- target guard coverage does not meet its stated
   all-guards acceptance criterion (BR-SRC-03, `781cb43`).** The census checks
   only the number of `static_assert` lines
   (`test/test_static_assert_guards.sh:244-263`), while target-toolchain mutations
@@ -4075,7 +4124,15 @@ prospective release implementation.
   justify the acceptance claim without representing a census as semantic
   coverage.
 
-- [ ] **BR-RVW-09 -- MEDIUM -- mutable release and test inventories remain
+  **Resolved:** The acceptance claim now matches the implemented evidence. The
+  toolchain-backed mutations prove selected high-consequence pin, clock,
+  layout, threshold and timing-budget predicates, while the independent
+  79-guard census detects only changed per-file declaration counts. Test and
+  changelog descriptions now state explicitly that neither the census nor the
+  representative mutation roster detects arbitrary weakening of an unmutated
+  predicate. No fixture behavior or firmware changed.
+
+- [x] **BR-RVW-09 -- MEDIUM -- mutable release and test inventories remain
   mandatory prose duplication (BR-AUTH-01, BR-README-01, BR-TESTDOC-01 and
   BR-STATE-01).** The authority map forbids repeated counts and inventories
   (`README.md:99-120`), while `README.md:6-11` and
@@ -4084,14 +4141,34 @@ prospective release implementation.
   generate mutable reader-facing counts while retaining independent executable
   set and coverage oracles.
 
-- [ ] **BR-RVW-10 -- MEDIUM -- mutable resource figures remain in development
+  **Resolved:** The top-level overview now leaves exact release inventories to
+  the bounded contract in `release/README.md`, and its simulator summary leaves
+  target/substrate membership to the test guide. The test guide no longer
+  restates per-profile check totals, current evidence/soak cardinalities or a
+  historical evidence/soak boundary. `test-release-qualification` no longer
+  requires those prose copies, while its release-authority checks, test-layer
+  coverage assertions, canonical set/cardinality fixtures and override controls
+  remain unchanged. Shell syntax and `git diff --check` passed. The focused
+  qualification regression exceeded 120 seconds on this host while repeatedly
+  encountering the absent AVR toolchain, so it produced no verdict and was left
+  to the external full-suite run.
+
+- [x] **BR-RVW-10 -- MEDIUM -- mutable resource figures remain in development
   prose (BR-RES-01, `e7c4f68`).** Examples are current flash percentages in
   `DESIGN_DOCUMENTATION.adoc:48-52`, static/stack/free-SRAM values in
   `TODO.md:224-227`, and current PIC10F320 margins in `TODO.md:578-580`. Replace
   them with stable consequences or bind genuinely historical measurements to an
   immutable release/commit and exact toolchain.
 
-- [ ] **BR-RVW-11 -- MEDIUM -- the relay safety case overstates physical
+  **Resolved:** Current flash percentages, static-data/stack/free-SRAM results
+  and PIC10F320 image margins were removed from maintained design, planning,
+  Makefile and simulator prose. Stable silicon capacities and reviewed ceilings
+  remain where they explain a design constraint. Current measurements now come
+  only from their build/resource gates and retained per-release evidence; no
+  prose-synchronization check was added. `test-reference-contract`: 10 checks,
+  0 failures; `test-todo-index`: 102 checks, 0 failures.
+
+- [x] **BR-RVW-11 -- MEDIUM -- the relay safety case overstates physical
   convergence (BR-DOC-04, `8180569`).**
   `docs/relay_coil_fault_correction.md:50-55` says recovery guarantees
   logical/physical convergence, while lines 231-235 acknowledge that even an
@@ -4099,7 +4176,17 @@ prospective release implementation.
   firmware guarantee separately from the physical result and name the hardware
   assumptions required for the latter.
 
-- [ ] **BR-RVW-12 -- LOW -- repair three live-document contradictions.**
+  **Resolved:** The safety case and normative design now define the guaranteed
+  firmware/electrical sequence separately from conditional armature/contact
+  movement. They name the fault-model, reset, wiring, pull-down, driver, flyback,
+  PCB, supply, terminal voltage/current/pulse, environmental and functional-relay
+  assumptions required for physical BYPASS. Test documentation and comments now
+  describe only the electrical phase each substrate observes, distinguish the
+  fault lane's datasheet-minimum pulse from separate nominal-width evidence, and
+  state that no simulator observes relay mechanics. `test-reference-contract`:
+  10 checks, 0 failures; `test-makefile-name-contract`: 48 checks, 0 failures.
+
+- [x] **BR-RVW-12 -- LOW -- repair three live-document contradictions.**
   `docs/context_seu_detection.md:14-20` says no published release binds F2 even
   though `v0.9.11` retains explicit F2 evidence; `release/README.md:543-544`
   says the verifier checks 24-hour soak evidence even for the supported one-hour
@@ -4107,12 +4194,29 @@ prospective release implementation.
   `release/README.md` instead of the authority-map owner,
   `HARDWARE_VALIDATION_LOG.md`.
 
-- [ ] **BR-RVW-13 -- LOW -- enforce the prospective concise changelog policy
+  **Resolved:** The F2 safety record now recognizes the explicit evidence in the
+  published `v0.9.11` qualification while preserving the distinction between
+  local completion, retained qualification and publication. Release reproduction
+  guidance states the verifier's mode-dependent soak floors: 24 hours for
+  production and one hour for express. The PIC12F675 bench task now sends its
+  controlled result to `HARDWARE_VALIDATION_LOG.md`, the sole live owner, while
+  retaining the generated JSON. `test-reference-contract`: 10 checks, 0
+  failures; `test-todo-index`: 102 checks, 0 failures.
+
+- [x] **BR-RVW-13 -- LOW -- enforce the prospective concise changelog policy
   (BR-CHANGELOG-01, `da1d62d`).** The policy at `CHANGELOG.md:24-32` excludes
   implementation journals and exhaustive fixture mechanics, but `[Unreleased]`
   at lines 46-279 already carries substantial examples of both. Reduce the
   current entry to user-visible behavior, safety/compatibility changes, material
   residual limitations and migration actions before the next release.
+
+  **Resolved:** `[Unreleased]` was reduced from 288 lines and 18 long-form
+  bullets to 71 lines and 10 concise bullets. It retains release-facing resource,
+  provenance, programming, safety and compatibility changes; the v0.9.11 command
+  erratum and pre-v0.9.12 signature boundary; material selector and guard-coverage
+  limitations; and release-maintainer actions. Implementation chronology,
+  fixture inventories, check counts and mutable resource figures were removed.
+  `test-reference-contract`: 10 checks, 0 failures.
 
 **Commit/status bookkeeping found by the review:**
 
@@ -4303,7 +4407,7 @@ banner recognizer the release gate uses.
 
 ## BR-FINAL-02 - Verify safety and claim boundaries
 
-**Status:** DONE `<commit>`
+**Status:** DONE `de29c39`
 
 **Work:**
 
@@ -4433,11 +4537,14 @@ overclaims in wording it does not enumerate. What it removes is the specific
 failure this branch kept producing: a boundary that is correct today,
 load-bearing, and silently deletable.
 
-**One finding left to its owner.** `docs/relay_coil_fault_correction.md:50-55`
-still calls logical/physical convergence "guaranteed by the recovery" while
-`:231-235` says whether a relay moves is a bench question. That is BR-RVW-11,
-open and assigned; it is a contradiction inside one document rather than a
-lost bound, and pinning either half here would collide with the repair.
+**One finding left to its owner.** At the time of this audit
+`docs/relay_coil_fault_correction.md:50-55` still called logical/physical
+convergence "guaranteed by the recovery" while `:231-235` said whether a relay
+moves is a bench question. That was BR-RVW-11, open and assigned; it was a
+contradiction inside one document rather than a lost bound, and pinning either
+half here would have collided with the repair. BR-RVW-11 has since closed it
+in `cb30da7`, which separates the guaranteed firmware and electrical sequence
+from the conditional armature outcome.
 
 **Acceptance:**
 
@@ -4772,14 +4879,14 @@ dependencies and acceptance criteria.
 | BR-REL-05 | Keep releases self-contained | DONE `a636400` |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
-| BR-REL-08 | Collapse duplicate release phase logs | TODO |
+| BR-REL-08 | Collapse duplicate release phase logs | DONE |
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
 | BR-REVIEW-01 | Resolve completed-item review findings | TODO |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
-| BR-FINAL-02 | Verify safety/claim boundaries | DONE `<commit>` |
+| BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |

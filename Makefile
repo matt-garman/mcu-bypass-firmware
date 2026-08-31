@@ -590,8 +590,8 @@ SANITIZE    ?= -fsanitize=undefined,address -fno-sanitize-recover=all
 # --- Resource-budget gate thresholds -----------------------------------------
 # Per-function stack-frame ceiling for test-stack-bound (-fstack-usage).
 # This gates individual frames, not total depth; test-stack-bound remeasures
-# them. The whole-program runtime high-water mark is 31-33 B across the variants,
-# measured separately by test-sim-attiny13a.
+# them. The simulator separately measures whole-program runtime high water and
+# enforces the reviewed free-SRAM floor.
 # Run `make test-stack-bound` to re-measure every frame.  Any individual frame
 # above this threshold signals unintended bloat (e.g. an accidental local
 # array).
@@ -603,12 +603,8 @@ override AVR_STACK_SOURCES := src/bypass_mcu_avr_classic.c src/bypass_pure.c \
                           src/bypass_output_tq2_l2_5v_relay.c
 
 # ATtiny13a flash-budget ceiling for test-flash-budget (percentage of 1 KB).
-# Firmware is at 81.4/85.4/84.4% today for simple/mute/relay, so the 90%
-# ceiling leaves 4.6 points of margin at the tightest image. Run
-# `make test-flash-budget` to re-measure -- it prints the per-variant
-# percentages, so this comment can be
-# checked rather than trusted.  A future accidental bloat passes silently
-# without this gate.
+# Run `make test-flash-budget` to measure every current variant against the 90%
+# ceiling. A future accidental bloat passes silently without this gate.
 ATTINY13A_FLASH_BUDGET ?= 90
 override ATTINY13A_FLASH_MCU := attiny13a
 override ATTINY13A_FLASH_BYTES := 1024
@@ -3957,10 +3953,8 @@ test-stack-bound-regression:
 
 # Flash-utilization budget assertion: run avr-size on every ATtiny13a variant
 # ELF and fail if flash (Program bytes) exceeds ATTINY13A_FLASH_BUDGET% of 1024 B.
-# Firmware is at 81.4/85.4/84.4% today for simple/mute/relay, inside the 90%
-# default ceiling by 4.6 points at the tightest image. The target prints the
-# measured per-variant percentages, so this figure can be re-checked by running
-# it. A future accidental bloat would otherwise pass silently.
+# The target prints current per-variant measurements rather than duplicating
+# them here. A future accidental bloat would otherwise pass silently.
 # Override: make test-flash-budget ATTINY13A_FLASH_BUDGET=80
 test-flash-budget:
 	@if [ "$(ATTINY13A_MCU)" != "$(ATTINY13A_FLASH_MCU)" ] || [ "$(FW_BASE)" != "bypass" ] \
@@ -7871,13 +7865,16 @@ override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 # rather than producing an index that quietly omits it.
 #
 # The `bound` roles below carry their own exact source-bound terminal record
-# that the verifier matches. `build` and `target-test` did not, and that is what
+# that the verifier matches. The operation roles did not, and that is what
 # operation-sealed EVIDENCE_RESULT records now cover -- 13 files and 62% of the
-# evidence bytes whose only previous check was name and non-emptiness.
+# evidence bytes whose only previous check was name and non-emptiness. The
+# Classic AVR phases are intentionally distinct: initial-image-build is the
+# clean source-to-ELF/HEX build, while final-image-build is the post-soak,
+# HEX-only materialization from unchanged validated ELFs.
 override RELEASE_EVIDENCE_ROLES := \
-	build-avr-classic.log=build build-avr-xt.log=build \
+	build-avr-classic.log=initial-image-build build-avr-xt.log=build \
 	build-pic10f322.log=build build-pic10f320.log=build \
-	build-pic12f675.log=build final-image-build.log=build \
+	build-pic12f675.log=build final-image-build.log=final-image-build \
 	soak-build.log=build \
 	attiny202-test.log=target-test attiny202-test-target.log=target-test \
 	pic10f322-test.log=target-test \
@@ -7894,7 +7891,8 @@ override RELEASE_EVIDENCE_ROLES := \
 # after their final producer closes. The other roles are bound by an authority
 # that predates this one and is stronger: a digest named in QUALIFICATION, or a
 # terminal record the verifier already matched exactly. Nothing is bound twice.
-override RELEASE_EVIDENCE_RESULT_ROLES := build target-test
+override RELEASE_EVIDENCE_RESULT_ROLES := \
+	build final-image-build initial-image-build target-test
 
 # --- the immutable production release identity -------------------------------
 # WHAT A RELEASE IS, written as literal text that no caller can move.

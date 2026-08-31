@@ -13,7 +13,7 @@
 // location at runtime (an SEU/EMI single-event-upset model). Every guarded
 // fault -- relay coils included -- requires watchdog recovery; the relay cases
 // additionally require the two halves of the F1 fail-safe contract
-// (de-energization, then a complete resynchronizing actuation).
+// (de-energization, then the recovery electrical sequence).
 //
 // COMMON COVERAGE (the register sets are the family matrix's to name; this core
 // only sequences them):
@@ -61,8 +61,9 @@
 //      catches a reset-LOOP (the only gpsim-modeling risk; see the WDTCON note
 //      below), which would otherwise pass silently.
 // `inject_relay_resync_case()` asserts the same single reset, but brackets it:
-// both coils low BEFORE the spin, and a full-width RESET-coil pulse AFTER the
-// recovery, from either a settled BYPASS or a settled ENGAGED start.
+// both coils low BEFORE the spin, and a RESET-coil pulse of at least the
+// datasheet minimum AFTER recovery, from either a settled BYPASS or a settled
+// ENGAGED start.
 //
 // A no-injection CONTROL case runs first and asserts delta == 0: a quiescent
 // device must NOT reset in a full window, proving the window is not catching
@@ -226,8 +227,9 @@
 #define RESYNC_SAMPLE_CYCLES 16u
 // Panasonic TQ2-L2-5V specified minimum coil pulse for GUARANTEED actuation.
 // The firmware drives 12 ms (TQ2_L2_5V_PULSE_MS, 3x margin); this is the floor
-// the recovery pulse must clear for the resynchronization to be a guarantee
-// rather than a hope. Simulation proves the PULSE, never the mechanics.
+// the recovery pulse must clear before physical convergence can be expected
+// under the documented hardware assumptions. Simulation proves the PULSE,
+// never the mechanics.
 #define RELAY_MIN_PULSE_MS 4u
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
 // gpsim drives digital outputs at the rails. Keep the assertions in the
@@ -547,12 +549,11 @@ static void prove_post_reset_liveness(void) {
 //      quiescence BEFORE it spins, so both coils go low within one tick of the
 //      gate that detected them -- never held energized for the whole watchdog
 //      period.
-//   2. RESYNCHRONIZATION. The watchdog recovery re-runs init(), whose BYPASS
-//      actuation drives a COMPLETE RESET-coil pulse. That, and not the clear
-//      in (1), is what puts the physical relay back in agreement with the
-//      logical state. This case measures that pulse and requires it to exceed
-//      the datasheet minimum, and requires the SET coil to stay dark for the
-//      whole recovery.
+//   2. ELECTRICAL RECOVERY. The watchdog recovery re-runs init(), whose BYPASS
+//      path commands a RESET-coil pulse. This case measures that pulse, requires
+//      it to exceed the datasheet minimum, and requires the SET coil to stay
+//      dark for the whole recovery. Physical relay convergence remains
+//      conditional on the documented hardware assumptions.
 //
 // EXCLUSIONS, unchanged and deliberate. The injection lands at the trailing
 // loop CLRWDT -- one reviewed, deterministic settled seam. It does not sweep
@@ -814,9 +815,9 @@ static void inject_relay_resync_case(unsigned addr, const char *token,
 //
 // The coils are already idle at injection -- this case corrupts a NON-coil bit --
 // so no de-energization TRANSITION can be required of it; everything else in the
-// F1 contract (one reset, a full-width RESET-coil recovery pulse with SET dark,
-// settled BYPASS, renewed liveness) applies unchanged. Contributes exactly ONE
-// check, the same as the inject_case it replaces on this variant.
+// F1 contract (one reset, a minimum-qualified RESET-coil recovery pulse with SET
+// dark, settled BYPASS, renewed liveness) applies unchanged. Contributes exactly
+// ONE check, the same as the inject_case it replaces on this variant.
 static void inject_parked_output_resync_case(const char *note) {
     g_checks++;
 

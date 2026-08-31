@@ -97,10 +97,10 @@
 #if defined(TQ2_L2_5V_RELAY)
 #  define CTL_DELAY_MS  TQ2_L2_5V_PULSE_MS
 // Panasonic TQ2-L2-5V specified minimum coil pulse for GUARANTEED actuation.
-// The firmware drives TQ2_L2_5V_PULSE_MS (12 ms, 3x margin); this is the floor a
-// pulse must clear to count as an actuation rather than a disturbance, and it is
-// what the fail-safe recovery has to deliver for its resynchronization to be a
-// guarantee. Simulation proves the PULSE, never the relay mechanics.
+// The firmware drives TQ2_L2_5V_PULSE_MS (12 ms, 3x margin); the recovery pulse
+// must clear this electrical floor before mechanical convergence can be expected
+// under the documented hardware assumptions. Simulation proves the PULSE, never
+// the relay mechanics.
 #  define TQ2_L2_5V_MIN_PULSE_MS 4U
 #elif defined(CD4053_WITH_MUTE)
 #  define CTL_DELAY_MS  CD4053_MUTE_DELAY_MS
@@ -1947,7 +1947,7 @@ static void inject_output_latch_bit(uint8_t const pin, const char *what) {
 //
 //   1. DE-ENERGIZATION, which both classic parts can show: after the gate
 //      fires, neither coil latch is still driven.
-//   2. RESYNCHRONIZATION, the recovery's complete BYPASS actuation. Only the
+//   2. ELECTRICAL RECOVERY, the recovery's BYPASS command. Only the
 //      tinyx5 build can show it: simavr does not model the ATtiny13A watchdog
 //      SYSTEM RESET, so on t13a the firmware is (correctly) observed wedged in
 //      the cli()+spin loop and the reset that would follow on silicon simply
@@ -2009,9 +2009,10 @@ static void inject_coil_resync(uint8_t const pin, int const engaged,
 #ifdef TARGET_TINYX5
     // Half 2, tinyx5 only: simavr models this part's WDT SYSTEM RESET, so the
     // recovery actually runs and can be measured. init() re-initializes to
-    // BYPASS, which means a complete RESET-coil actuation -- one rise, one fall,
-    // at least the datasheet minimum apart -- with the SET coil never driven.
-    // THAT is the resynchronization; the clear in half 1 is not.
+    // BYPASS, which means a RESET-coil pulse -- one rise, one fall, at least the
+    // datasheet minimum apart -- with the SET coil never driven.
+    // THAT is the recovery electrical sequence; the clear in half 1 is not.
+    // Mechanical convergence remains conditional on the documented hardware.
     //
     // The injected latch bit never reached the pin (avr_core_watch_write does
     // not re-drive the pin IRQ), so every transition counted below is one the
@@ -2066,9 +2067,9 @@ static void inject_coil_resync(uint8_t const pin, int const engaged,
 static void test_fault_inject_output_latches(void) {
     // Every PORTB latch bit resets on every variant. On the relay variant the
     // two coil bits additionally have to be de-energized before the reset spin
-    // and resynchronized by the recovery, and the fault is delivered in both
-    // settled states so BYPASS+unintended-SET and ENGAGED+unintended-RESET are
-    // both covered.
+    // and receive the recovery electrical sequence. The fault is delivered in
+    // both settled states so BYPASS+unintended-SET and
+    // ENGAGED+unintended-RESET are both covered.
     inject_output_latch_bit(PB1, "PORTB.PB1 LED latch");
 #if defined(TQ2_L2_5V_RELAY)
     inject_coil_resync(PB2, 1, "PORTB.PB2 RESET-coil latch, ENGAGED");
@@ -2453,8 +2454,8 @@ static void test_clean_press_phase_jitter(void) {
 //
 // Limitation: a register or local variable that coincidentally holds 0xAA
 // during a stack frame produces a false-clean canary byte, making the result
-// a conservative (optimistic) estimate. For a small MCU with ~4 bytes of BSS
-// and short ISR frames, collisions are extremely rare in practice.
+// a conservative (optimistic) estimate. For these small MCUs and short ISR
+// frames, collisions are extremely rare in practice.
 //////////////////////////////////////////////////////////////////////////////
 
 static void test_stack_high_water_mark(void) {

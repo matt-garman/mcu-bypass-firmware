@@ -137,19 +137,12 @@ if grep -Eiq 'All targets use a nominal 1ms timer-derived sample cadence|while b
 fi
 checks=$((checks + 1))
 
-# Current reader-facing inventories must agree with the canonical seven-part,
-# three-PIC, 21-image, 18-soak, and 35-evidence contract while preserving the
-# explicitly historical six-target releases.
-project_contract=$(tr '\n' ' ' < "$PROJECT_README" | tr -s ' ')
+# The release authority must retain its current and historical contracts. The
+# test assurance map must retain key target coverage and hardware-gap sections.
+# Exact counts and inventories stay in their executable owners rather than
+# becoming required reader-facing prose here.
 release_contract=$(tr '\n' ' ' < "$RELEASE_README" | tr -s ' ')
 test_contract=$(tr '\n' ' ' < "$TEST_README" | tr -s ' ')
-for required in \
-		'seven release parts across four microcontroller core generations' \
-		'PIC10F322, PIC10F320, and PIC12F675 provide functional, fault-injection' \
-		'PIC12F675 is release-supported from `v0.9.9`, raising the canonical set to 21 images'; do
-	grep -Fq "$required" <<<"$project_contract" \
-		|| fail "top-level README omits current release scope: $required"
-done
 for required in \
 		'Unified releases `v0.9.6`–`v0.9.8` shipped the six pre-PIC12F675 targets only' \
 		'From `v0.9.9`, every combination exists, so a release is exactly 7 x 3 = 21 images' \
@@ -162,10 +155,6 @@ for required in \
 done
 for required in \
 		'`pic10f320-test-stack-bound`, `pic12f675-test-stack-bound`' \
-		'exact canonical 37-file evidence set' \
-		'each of 18 release soak combinations' \
-		'historical 28-file/15-soak boundary for v0.9.6-v0.9.8' \
-		'48 PIC10F322, 102 PIC10F320, and 168 PIC12F675 checks' \
 		'## Known gaps (PIC — hardware-bench only)' \
 		'### PIC10F32x hardware gaps' \
 		'### PIC12F675 hardware gaps'; do
@@ -265,6 +254,10 @@ declare -A fixture_role=()
 for role_entry in "${evidence_role_entries[@]}"; do
 	fixture_role[${role_entry%%=*}]=${role_entry#*=}
 done
+[ "${fixture_role[build-avr-classic.log]:-}" = initial-image-build ] \
+	&& [ "${fixture_role[final-image-build.log]:-}" = final-image-build ] \
+	|| fail "Classic AVR initial and final image phases do not have distinct evidence roles"
+checks=$((checks + 1))
 read -r -a canonical_images \
 	<<<"$(make -s --no-print-directory -C "$ROOT" CC=: print-RELEASE_IMAGES)"
 fw_base=$(make -s --no-print-directory -C "$ROOT" CC=: print-FW_BASE)
@@ -551,13 +544,16 @@ write_flashing_section() {
 # release script's own writer could not catch the two of them disagreeing, which
 # is the failure that reached a commit last time this pattern was extended.
 #
-# Appends the terminal record to every build/target-test log first, because that
-# changes their size and the index records sizes.
+# Appends the terminal record to every operation-role log first, because that
+# changes its size and the index records sizes.
 write_evidence_index() {
 	local name role size record lines payload_digest
 	for name in "${!fixture_role[@]}"; do
 		role=${fixture_role[$name]}
-		case "$role" in build|target-test) ;; *) continue ;; esac
+		case "$role" in
+			build|final-image-build|initial-image-build|target-test) ;;
+			*) continue ;;
+		esac
 		grep -q '^EVIDENCE_RESULT ' "$release/evidence/$name" && continue
 		lines=$(wc -l < "$release/evidence/$name")
 		payload_digest=$(sha256sum -- "$release/evidence/$name")
@@ -572,7 +568,7 @@ write_evidence_index() {
 			role=${fixture_role[$name]}
 			size=$(stat -c%s "$release/evidence/$name")
 			case "$role" in
-				build|target-test)
+				build|final-image-build|initial-image-build|target-test)
 					record=$(grep -m1 '^EVIDENCE_RESULT ' "$release/evidence/$name") ;;
 				soak)
 					record=$(grep -m1 '^SOAK_RESULT ' "$release/evidence/$name") ;;
@@ -1240,6 +1236,16 @@ sed -i 's/^build-avr-xt\.log\tbuild\t/build-avr-xt.log\tsoak\t/' \
 reseal_evidence_index
 expect_fail "evidence index mislabels a member's role" \
 	"the Makefile declares build"
+
+# Both Classic AVR logs carry the same record schema, but their roles establish
+# different claims. Re-state the index against the declared final role so only a
+# terminal record that substitutes the initial role is under test.
+reset_fixture
+sed -i 's/role=final-image-build evidence=final-image-build\.log/role=initial-image-build evidence=final-image-build.log/' \
+	"$release/evidence/final-image-build.log"
+restate_index_row final-image-build.log
+expect_fail "final image build carrying the initial phase role" \
+	"final-image-build.log payload digest or result metadata does not match"
 
 reset_fixture
 sed -i 's/^\(build-avr-xt\.log\tbuild\t\)[0-9]*\t/\19999\t/' \

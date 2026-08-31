@@ -98,7 +98,7 @@ done
 # verification reaches where the firmware came from. format=5 adds
 # toolchain_sha256: the MANIFEST toolchain table stopped being authored prose
 # and is now rendered from bound evidence. format=6 added evidence_index_sha256
-# and length-attributed the thirteen retained build and target-test logs. Format
+# and length-attributed the thirteen retained operation logs. Format
 # 7 closes the remaining same-shape substitution gap: each operation seals its
 # exact transcript payload by SHA-256 before appending its terminal result, which
 # the index commits through the existing qualification root. Releases through
@@ -282,8 +282,9 @@ case " ${identity_parts[*]} " in
 	*" $pic12f675_tag "*) ;;
 	*) die "PIC12F675_TAG is absent from the reviewed release part set" ;;
 esac
-[ "$(printf '%s\n' "${result_roles[@]}" | sort)" = $'build\ntarget-test' ] \
-	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build and target-test"
+[ "$(printf '%s\n' "${result_roles[@]}" | sort)" = \
+	$'build\nfinal-image-build\ninitial-image-build\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, and target-test"
 
 # The declared role of every retained file. Read from the Makefile rather than
 # from the index being checked: an index that supplied its own role vocabulary
@@ -506,7 +507,7 @@ mapfile -t index_results < <(grep '^EVIDENCE_INDEX_RESULT ' "$index_log" || true
 expected_terminal_record() {
 	local role=$1 path=$2 name=$3 pattern matches total_lines payload_lines digest
 	case "$role" in
-		build|target-test)
+		build|final-image-build|initial-image-build|target-test)
 			[ -z "$(tail -c 1 "$path")" ] || return 1
 			total_lines=$(wc -l < "$path") || return 1
 			[ "$total_lines" -ge 2 ] || return 1
@@ -553,7 +554,7 @@ while IFS=$'\t' read -r index_name index_role index_size index_record; do
 	# same-line-count payload substitution leaves member and index agreeing with
 	# each other about the OLD digest; independent rehashing must be what fails.
 	case "$index_role" in
-		build|target-test)
+		build|final-image-build|initial-image-build|target-test)
 			mapfile -t member_results < <(grep '^EVIDENCE_RESULT ' "$member" || true)
 			[ "${#member_results[@]}" -eq 1 ] \
 				|| die "$index_name carries ${#member_results[@]} EVIDENCE_RESULT records, expected 1"
@@ -564,7 +565,7 @@ while IFS=$'\t' read -r index_name index_role index_size index_record; do
 	expected_record=$(expected_terminal_record "$index_role" "$member" "$index_name") \
 		|| die "no single terminal record for $index_name (role $index_role)"
 	case "$index_role" in
-		build|target-test)
+		build|final-image-build|initial-image-build|target-test)
 			[ "${member_results[0]}" = "$expected_record" ] \
 				|| die "$index_name payload digest or result metadata does not match its transcript"
 			;;

@@ -1815,7 +1815,7 @@ PIC12F675_MUTATIONS=(
 "src/bypass_mcu_pic12f675.c	s@        next_ctx.program_state = res.program_state;@        (void)res.program_state; /* MUTANT: program-state write-back dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET program_state write-back dropped: the context never enters release lockout and lock-step diverges from the pure model"
 "src/bypass_mcu_pic12f675.c	s@        next_ctx.effect_state  = res.effect_state;@@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET effect_state write-back dropped: the pins still follow res, so only the ctx_ lock-step against the pure model diverges"
 "src/bypass_mcu_pic12f675.c	s@            next_ctx.debounce_counter = res.lockout_value;@            (void)res.lockout_value; /* MUTANT: lockout reload dropped */@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	lockstep:divergence	TARGET debounce lockout write-back dropped: the context retains its integrated threshold instead of RELEASE_THRESH and lock-step diverges"
-"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	resync:minimum-pulse	TARGET relay coil pulse shortened below the datasheet minimum; the fail-safe recovery actuation is then too short to resynchronize the relay, so the fault lane reports it before the target-I/O minimum check gets to run"
+"src/bypass_output_tq2_l2_5v_relay.c	s@BYPASS_DELAY_MS(TQ2_L2_5V_PULSE_MS)@BYPASS_DELAY_MS(1)@g	PIC12F675_TARGET_VARIANT=tq2_l2_5v_relay pic12f675-test-target	resync:minimum-pulse	TARGET relay coil pulse shortened below the datasheet minimum; the fail-safe recovery pulse then violates its electrical contract, so the fault lane reports it before the target-I/O minimum check gets to run"
 "src/bypass_mcu_pic12f675.c	s@static void hw_wdt_pet(void) { CLRWDT(); }@static void hw_wdt_pet(void) { (void)0; /* MUTANT: no WDT pet */ }@	PIC12F675_SOAK_VARIANT=cd4053_simple PIC12F675_SOAK_DURATION_MS=$PIC_SOAK_MUT_MS PIC12F675_SOAK_LIVENESS_INTERVAL_MS=$PIC_SOAK_MUT_LIVENESS_MS PIC12F675_SOAK_COMBINATION_NAME=mutation-wdt pic12f675-test-soak	soak:wdt-reset	SOAK main-loop WDT pet removed; the soak's reset notifier catches the un-pet watchdog inside the short mutation window (this part's period is ~288 ms, well inside it)"
 # F2 context-SEU: delete the polled shadow clause; killed by the fault leg.
 "src/bypass_mcu_pic12f675.c	s@(ctx_check_ != debounce_ctx_check_word(next_ctx)) ||@(0U != 0U) ||@	PIC12F675_TARGET_VARIANT=cd4053_simple pic12f675-test-target	fault:ctx.debounce.inrange	PIC12F675 F2 shadow clause deleted from the polled sanity gate; the in-range debounce SEU is no longer caught and the target fault leg ctx.debounce.inrange case sees 0 resets at checks=38."
@@ -2555,7 +2555,7 @@ EOF
         exit 1
     }
     # A recovery pulse that still clears the 4 ms floor must NOT satisfy this
-    # signature: the regex is what separates "too short to resynchronize" from
+    # signature: the regex separates a sub-minimum recovery pulse from
     # any other fault-lane failure.
     printf '%s\n' \
         '  inject relay coils    @0x005: 0x20 -> 0x22  (fixture, from BYPASS)' \
