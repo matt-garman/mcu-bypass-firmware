@@ -4179,12 +4179,20 @@ prospective release implementation.
   retaining the generated JSON. `test-reference-contract`: 10 checks, 0
   failures; `test-todo-index`: 102 checks, 0 failures.
 
-- [ ] **BR-RVW-13 -- LOW -- enforce the prospective concise changelog policy
+- [x] **BR-RVW-13 -- LOW -- enforce the prospective concise changelog policy
   (BR-CHANGELOG-01, `da1d62d`).** The policy at `CHANGELOG.md:24-32` excludes
   implementation journals and exhaustive fixture mechanics, but `[Unreleased]`
   at lines 46-279 already carries substantial examples of both. Reduce the
   current entry to user-visible behavior, safety/compatibility changes, material
   residual limitations and migration actions before the next release.
+
+  **Resolved:** `[Unreleased]` was reduced from 288 lines and 18 long-form
+  bullets to 71 lines and 10 concise bullets. It retains release-facing resource,
+  provenance, programming, safety and compatibility changes; the v0.9.11 command
+  erratum and pre-v0.9.12 signature boundary; material selector and guard-coverage
+  limitations; and release-maintainer actions. Implementation chronology,
+  fixture inventories, check counts and mutable resource figures were removed.
+  `test-reference-contract`: 10 checks, 0 failures.
 
 **Commit/status bookkeeping found by the review:**
 

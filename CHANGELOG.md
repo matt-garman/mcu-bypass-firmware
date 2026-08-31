@@ -47,289 +47,72 @@ historical records and are not retroactively compacted by this policy.
 
 ### Added
 
-- **`make test-reference-contract`: every citation in the live tree still
-  resolves.** The PIC10F320 merge plan was cited by section number from 43
-  places in the Makefile, the release scripts, the CI workflows and the test
-  suite. It was deleted once its normative content had moved into
-  `DESIGN_DOCUMENTATION.adoc`, and every one of those citations became a
-  pointer to nothing -- silently, because a comment cannot fail to compile.
-  Two stale line-number citations and one dead Markdown link in this file had
-  the same shape. All 46 are repaired: each comment keeps the reasoning it
-  carried and loses only the pointer a reader could not follow. The gate
-  reserves the section glyph for external documents, whose publishers renumber
-  them rather than we do, and requires every relative link and anchor in a
-  durable document to resolve.
+- **Release manifests now publish qualification-bound resource use.** Each image
+  reports flash use against its reviewed ceiling, and the Resources section
+  reports applicable static RAM, observed Classic AVR stack high-water,
+  AVR-XT per-frame compiler bound, PIC12F675 Data-space and PIC return-stack
+  results with their ceilings and margins. The AVR-XT figure is a per-frame
+  bound, not an observed whole-path high-water mark.
 
-- **Releases publish the resource measurements they were already taking.**
-  `MANIFEST.md` gains a **Resources** section with static RAM, the deepest
-  observed Classic AVR stack, the AVR-XT per-frame compiler bound, PIC12F675
-  Data space and PIC return-stack depth, each beside the reviewed ceiling that
-  bounds it and the margin left. The images table's flash column now reads
-  `used / reviewed ceiling (free)` for every image, including the three
-  PIC10F322 images that published `n/a` while sitting closest to their limit,
-  and the ATtiny13a images whose reviewed budget is tighter than the silicon.
-  A downloaded release previously stated no RAM or stack figure for any part.
-
-  Every figure comes from one machine record in the signed
-  `evidence/resource-tables.log`, and the qualification verifier re-derives each
-  published row from those records; the release script no longer derives flash
-  usage of its own, so the figure that is checked and the figure that is
-  published are the same figure. The AVR-XT entry is labelled a per-frame static
-  bound and is rejected if it carries a high-water field, because
-  `-fstack-usage` does not measure the deepest path through the frames it
-  bounds. Each resource record now has one closed field schema and one exact
-  reviewed part/variant identity, so duplicate fields or count-preserving record
-  substitutions cannot change what a signed resource table means.
+- **Focused documentation and safety contracts now run under `make test`.**
+  Durable links and anchors are checked, deliberately independent safety
+  definitions remain structurally separate, and selected high-consequence
+  AVR-XT and PIC guards are exercised under their target toolchains. Guard
+  mutations are representative rather than exhaustive; conflicting output
+  selectors and foreign driver selectors remain unsupported configurations that
+  are not yet rejected uniformly. Firmware behavior is unchanged.
 
 ### Changed
 
-- **Current resource measurements are no longer restated in development
-  documentation.** Each part's capacity, its reviewed ceiling and the gate that
-  enforces it stay in `DESIGN_DOCUMENTATION.adoc`; the exact per-image flash,
-  static-data and stack figures belong to the release record that binds them to
-  a source commit and a pinned toolchain. A firmware size change no longer
-  requires a documentation edit before release. `make test-resource-tables`
-  reads every ceiling from the Makefile that declares it, measures each built
-  image against it, and refuses a ceiling wider than the silicon it bounds; the
-  release-time evidence checks validate each retained record against its own
-  arithmetic and the limit it reports rather than against a remembered figure.
-  Each reviewed ceiling must have exactly one Make assignment and that sole
-  assignment must be a decimal constant, so a later computed reassignment cannot
-  make the effective build policy differ from the value this gate reads. Release
-  resource measurement remains fail-closed at 21 of 21 images with complete RAM
-  and stack evidence.
+- **Changing measurements and inventories now stay with their executable or
+  per-release authorities.** Maintained design documentation keeps stable
+  capacities, reviewed ceilings and their enforcing gates, while exact resource
+  results come from source- and toolchain-bound release evidence. Reader guides
+  no longer duplicate release image, profile, evidence or soak inventories.
 
-- **Normal hosted CI now runs the full mutation driver once per applicable
-  event.** The fully provisioned PIC job remains the fail-closed mutation gate;
-  hosted `stress` keeps every exhaustive non-mutation workload without repeating
-  the skip-capable partial run. Release and local qualification retain
-  `make test-long` as the exhaustive-plus-mutation aggregate.
+- **Retained qualification evidence is now bound to what each operation
+  produced.** Build and target-test logs bind their payload, source commit, role
+  and identity through the qualification index. Manifest toolchain rows are
+  rendered from qualification-bound toolchain evidence rather than parallel
+  prose.
+
+- **Release-state documentation now fails closed between releases.** A declared
+  release must carry the pre-tag transition disclosure until a nonempty regular,
+  non-symlinked qualification record exists. Root-level branch-only working
+  documents must declare that status in their opening blockquote.
 
 ### Removed
 
-- **Retired the flashing-simplicity design journal.** The 678-line
-  `docs/flashing_simplicity.md` recorded a v0.9.9 design discussion in the
-  present tense of the branch it was argued on, so every section had to be read
-  as a proposal unless an update paragraph said otherwise. Both proposals it
-  recorded as shipped are stated where they are enforced -- the AVR
-  build-before-hardware repair by `make test-avr-program-order`, the PIC12F675
-  no-compiler path by `scripts/flash-pic12f675.py` and `FLASHING.md` -- and the
-  command-shape and pasteability defects it described are fixed above. What
-  remains open moved to `TODO.md` as three actionable items and two declined
-  ones. Its `release_validate_flashing_simplicity_status` preflight contract
-  goes with it: the contract existed to stop a preserved proposal from denying
-  the implementation its own body recorded, and a document that no longer
-  exists cannot mislead a reader.
+- **Retired the flashing-simplicity design journal.** Shipped instructions stay
+  in `FLASHING.md` and their executable checks; unresolved work stays in
+  `TODO.md`, while historical reasoning remains in Git history.
 
-- **Retired the one-shot v0.9.8 rename-identity lane.** The signed v0.9.8 tag
-  retains the historical verifier and its 17-identical/one-changed report.
-  Current releases continue to require exact canonical image reproduction,
-  expected-image identity, signed checksums, and a frozen publication inventory
-  without carrying inapplicable rename-report state.
+- **Retired the one-shot v0.9.8 rename-identity lane from current
+  qualification.** The signed v0.9.8 tag and report remain the historical
+  authority, while current releases retain canonical image reproduction,
+  expected-image identity, checksum and publication-inventory checks.
 
 ### Fixed
 
-- **Maintained design and planning prose no longer freezes current resource
-  measurements.** Stable silicon capacities and reviewed budget consequences
-  remain documented; changing flash occupancy, static data, stack high-water and
-  free-space results come from build gates and retained release evidence.
-
-- **Reader guides no longer duplicate executable release inventories.** The
-  project overview points to the release authority for exact image sets, while
-  the test guide points to executable owners for profile checks, evidence and
-  soak membership. Qualification no longer makes those mutable figures
-  mandatory prose.
+- **Newly generated release manifests now contain validated, shell-valid,
+  image-specific programming commands.** Project defaults, supported
+  substitutions and power assumptions are explicit; PIC writes require
+  readback, and PIC12F675 continues to use its dedicated flashing helper rather
+  than a per-image command. The published v0.9.11 manifest is unchanged and most
+  of its commands are templates rather than pasteable shell; users of that
+  release should follow `FLASHING.md` and its PIC12F675 helper requirements.
 
 - **PIC context sidecars now prove the guarded context is in reviewed SRAM.**
-  The shared XC8 symbol resolver accepts `_ctx_` only in the `BANK0` class
-  emitted for all supported PIC families under the pinned toolchain. Program,
-  configuration, EEPROM, alternate-bank and unknown classes fail closed instead
-  of being treated as data memory merely because they are not named `CODE`.
+  The pinned XC8 resolver accepts `_ctx_` only in `BANK0`; program,
+  configuration, EEPROM, alternate-bank and unknown classes fail closed.
 
-- **Every programming command a release publishes now runs as written.** Of the
-  eighteen per-image commands in the v0.9.11 manifest, three were pasteable. Six
-  carried the source-checkout alternative as parenthesised prose inside the
-  fenced block and are not valid shell; nine carried a bare `-c <prog>`, which a
-  shell reads as a redirection rather than a placeholder, so the option left the
-  command line silently. The two `make ...` forms named a Makefile no downloaded
-  release contains and asked for a `VARIANT=<v>` the image basename beside them
-  already fixed. Commands are now complete -- the project's default programmer
-  and port are published inside them, a programmer-profile table names the only
-  substitutions and the power assumption, and the source-checkout equivalents
-  moved to their own section with their variants resolved. Nothing had ever
-  checked this section: a release now fails if a published command is not valid
-  shell, does not name the image it is filed under, omits a fuse byte its own
-  images row publishes, writes a PIC without reading it back, or leaves a
-  released image with no command at all, and the qualification verifier
-  re-derives all of it from the staged manifest. Release metadata queries also
-  no longer inherit the host's `AVR_PROGRAMMER`, `XT_PROGRAMMER` or
-  `XT_UPDI_PORT`, so a release host's local programmer preference can no longer
-  change the instructions a source tag publishes. PIC12F675 is unchanged: it
-  still has no per-image command, and both the producer and the verifier now
-  reject a manifest that gives it one.
-
-- **The retained logs nothing was reading are now bound to the run that
-  produced them.** Thirteen of the thirty-six retained evidence files -- seven
-  build logs and six PIC/ATtiny202 target-test logs, 62% of the evidence tree by
-  bytes -- were checked only for having the right name and being non-empty. No
-  gate read a byte of their content, and `test/published_release_digests.txt`
-  then froze whatever had been staged, so a log kept from an earlier run became
-  a permanent part of the qualification record instead of failing anything: it
-  is an immutability gate, and this was the qualification gate it cannot be.
-  Each operation now closes by appending an `EVIDENCE_RESULT format=2` record
-  whose `payload_sha256` binds every preceding transcript byte, along with the
-  released commit, declared role, own name and payload line count. A same-size,
-  same-line-count substitution therefore fails independently of the record and
-  index continuing to agree with each other. `evidence/INDEX` lists every
-  retained file by role, size and terminal record, bound from `QUALIFICATION` as
-  `evidence_index_sha256` (`format=7`; index format 2). Roles are declared in the
-  Makefile and never inferred from filenames. The index deliberately carries no
-  separate digest column: the operation result is the one payload-digest
-  authority, while `published_release_digests.txt` records the different final
-  published file for historical immutability.
-
-- **The manifest's toolchain table is evidence now, not prose.** Fifteen rows
-  of compiler, simulator and analyzer versions were printed into `MANIFEST.md`
-  from shell captures, with no machine authority behind them and nothing
-  checking them, so a wrong version there was a provenance error that passed
-  every gate -- on the one table a reader consults to decide whether a released
-  image was built with the toolchain it claims. The captures are now written
-  once to `evidence/toolchain.txt`, that file's digest is bound from
-  `QUALIFICATION` as `toolchain_sha256` (moving it to `format=5`, the same
-  mechanism already used for the PIC12F675 matrix and the resource tables), and
-  the table is *rendered from* the record instead of printed alongside it.
-  `verify-release-qualification.sh` then holds the rendered table back to the
-  record in both directions: every recorded tool must appear as a row, and the
-  table may carry no row the record does not justify. The now-redundant
-  `release_render_pic_toolchain_rows` renderer is deleted rather than left as a
-  second producer of the same four rows.
-
-- **A release signature now covers where the release came from, not just the
-  firmware.** Through v0.9.11 `SHA256SUMS` listed the images and the required
-  programming helper and nothing else, so `gpg --verify SHA256SUMS.asc
-  SHA256SUMS` followed by `sha256sum -c SHA256SUMS` -- the two commands
-  `release/README.md` gives a recipient -- authenticated the firmware and
-  nothing about its origin: not the source commit, not whether qualification
-  was production or express, not the soak duration, not the PIC12F675
-  raw-write hazard text. `QUALIFICATION`, `MANIFEST.md` and `README.md` sat
-  outside the signature and could be replaced with no verification failing.
-  From v0.9.12 they are inside it, declared in one place as
-  `RELEASE_PROVENANCE_FILES`, published as release assets so the checksum list
-  and the published set stay the same set, and held by
-  `verify-release-images.sh` as a third exactly-declared set beside the images
-  and the helpers. `QUALIFICATION` moves to `format=4` to mark the new
-  contract, and the two verifiers treat it differently because they see
-  different inputs. `verify-release-qualification.sh` requires `format=4`: it
-  only ever runs on a directory being staged or a tag being published, so a
-  branch for an older format would be unreachable. `verify-release-images.sh`
-  accepts all three published eras -- no `QUALIFICATION` at all
-  (v0.9.0-v0.9.5), `format=1` (v0.9.6-v0.9.9) and `format=3`
-  (v0.9.10-v0.9.11) -- because every PIC12F675 field programming runs it
-  against a published directory through
-  `scripts/verify-release-program-image.sh`, and those signatures cannot be
-  reissued. A pre-`format=4` release is held to the old contract rather than
-  merely tolerated: it must not list provenance in its checksum file either,
-  so a half-adopted contract cannot leave a recipient unable to tell which era
-  they are verifying. The per-release `README.md`, which no verifier had ever read, is
-  now bound to `QUALIFICATION` for its version heading and its qualification
-  banner in both directions, exactly as `MANIFEST.md` already was. Releases
-  through v0.9.11 are left as published -- bringing their provenance inside
-  their signatures would invalidate a published signature -- and are covered
-  instead by `make test-published-release-immutability` and their signed tags.
-
-- **Published releases are now held to what was published.** Every release
-  directory ships `SHA256SUMS` over its images and programming helpers, so
-  those stay verifiable by a recipient holding only that directory. That list
-  covers 215 of the 576 published files; the other 361 -- the evidence logs,
-  `QUALIFICATION`, the manifests and the detached signatures themselves -- are
-  the account of what was actually run, are not rebuildable from source, and
-  were covered by nothing. `make test-published-release-immutability`
-  re-verifies each release's own list, holds the remainder to
-  `test/published_release_digests.txt`, requires the two to partition each
-  directory exactly so a newly added file cannot fall between them, rejects
-  symbolic links because every content check reads through the path, and
-  compares against the release tag wherever the clone has one. The record is an
-  ordinary `sha256sum -c` file, so `sha256sum -c
-  test/published_release_digests.txt` reproduces its central claim with
-  coreutils alone. The safety errata added to `v0.9.0`-`v0.9.2` after the
-  TMUX4053 polarity defect is registered as the one amendment ever made to a
-  published release, with the check that it touched no file any verifier reads.
-  No release content changed.
-
-- **Folding a deliberate duplication no longer passes silently.** Several facts
-  in this tree are decided twice on purpose, by routes able to disagree: the
-  PIC10F320 shell is a second implementation compiled by a different compiler
-  for a 256-word part, each part states its own pin ordinals and its own four
-  watchdog terms, the AVR shells are interrupt-driven where the PIC shells are
-  polled, the clock is stated by the build and re-derived by a firmware guard,
-  the PIC harnesses keep their register facts literal, and the PIC return stack
-  is bounded twice -- once over generated assembly, once over the shipped HEX.
-  In each case the pair is the evidence, not either half. Merging one into a
-  shared definition left every gate green, because the survivor still agreed
-  with itself and there was nothing left to disagree with. `make test` now runs
-  `test-deliberate-duplication`, a register in which each row names the
-  independent opinion a merge destroys and asserts a structural witness that
-  fails when it does, so the reason is read at the moment of the merge rather
-  than found afterwards. It is lexical -- no compiler, no device pack -- because
-  the loss it detects is a source edit, and it also holds every verification
-  layer (BFS, two symbolic engines, CBMC, mutation, coverage, both instruction
-  simulators, hardware qualification) to a subject and target of its own. The
-  firmware is unchanged.
-
-- **Selected compile-time guards in the AVR-XT and PIC shells are now proven to
-  fire under their target toolchains.** 52 of the firmware's 79 `static_assert`
-  guards live in the four MCU shells that need a target toolchain, and nothing
-  compiled a mutated input
-  against any of them; the guard census did not count them either, so a deleted
-  guard was equally invisible. These are the guards no shared proof can stand in
-  for -- a pin assert resolves against the part's device pack, a clock assert
-  against the `-D` only that part's build passes, a watchdog assert against that
-  part's own de-rated floor, tick and ISR duty. `make test` now runs
-  `test-attiny202-guard-mutations` (avr-gcc + ATtiny device pack) and
-  `test-pic-guard-mutations` (XC8), each breaking one input to a guard in a
-  throwaway copy of `src/` and requiring the build to fail with that guard's own
-  message: wrong pin, wrong clock, wrong part selector, enum width, and every
-  part's watchdog pet-to-pet budget pinned to its exact millisecond by a
-  reject/accept pair. These are representative safety families, not semantic
-  mutation coverage of every assertion. Both skip cleanly without their
-  toolchain and fail closed under `STRICT_TOOLS=1`; the separate census is left
-  outside them so it detects changed declaration counts across all 79 guards on
-  a host with no XC8. Three configurations the firmware
-  still accepts in silence -- two output selectors on one shell, a driver built
-  under a foreign selector, and the PIC10F320's dual-scheme rejection that comes
-  from undeclared identifiers rather than a guard -- are recorded as fixtures
-  that fail when the guard closing them lands. The firmware is unchanged.
-
-- **The single declaration of the release contract is now checked between
-  releases, not only on release day.** `release/README.md`'s bounded block is
-  the one place the version, part, image and soak counts are declared, and the
-  validator that holds it to the build was reachable only through
-  `scripts/make-release.sh`, which supplies both the version and the counts. In
-  between, the declaration could name any version, any counts and any retained
-  record with nothing to disagree. `make test` now runs the same validator
-  against the working tree, taking the version from the declaration and the
-  counts from the Makefile that builds the images, and additionally requires a
-  tree that declares `vX.Y.Z` without a nonempty, regular, non-symlinked
-  `release/vX.Y.Z/QUALIFICATION` to carry the exact pre-tag transition line.
-  Empty and symlinked placeholders therefore cannot suppress the disclosure.
-  That disclosure was previously owed only by a block that happened to name the
-  directory, so the pre-tag window -- and an abandoned finalization commit left
-  standing in it -- could pass unmentioned. `test-release-preflight`: 221 -> 230
-  checks before the retained-record boundary controls added later.
-
-- **A branch-only working document is now recognized by the declaration it
-  carries rather than by its name.** The release documentation gate had been
-  taught one name family at a time, each after a document the previous pattern
-  could not see had already been written; the third such document was reported
-  as durable-document-set drift instead, which failed the release preflight for
-  a file the branch legitimately carries. A root-level Markdown file that
-  declares itself a branch-only working document in its opening blockquote is
-  now refused as one whatever it is named, and the live-tree documentation
-  sweeps prune it on the same terms. The declaration never decides acceptance:
-  every root-level document outside the durable set is still refused, so a
-  working document that omits its banner fails closed as drift with the
-  corrective action named, and a durable document that merely describes the
-  convention has not declared itself.
+- **Beginning with v0.9.12, the release signature covers provenance as well as
+  firmware.** Signed checksums now include `QUALIFICATION`, `MANIFEST.md` and
+  `README.md`. Releases through v0.9.11 remain unchanged, so their provenance is
+  outside their checksum signatures; signed tags and the repository's
+  immutability gate are separate historical controls, not retroactive signature
+  coverage. The immutability baseline also records the prior safety-errata
+  amendment to v0.9.0-v0.9.2 rather than claiming published files never changed.
 
 ## [0.9.11] - 2026-08-29
 
