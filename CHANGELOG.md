@@ -47,6 +47,19 @@ historical records and are not retroactively compacted by this policy.
 
 ### Added
 
+- **`make test-reference-contract`: every citation in the live tree still
+  resolves.** The PIC10F320 merge plan was cited by section number from 43
+  places in the Makefile, the release scripts, the CI workflows and the test
+  suite. It was deleted once its normative content had moved into
+  `DESIGN_DOCUMENTATION.adoc`, and every one of those citations became a
+  pointer to nothing -- silently, because a comment cannot fail to compile.
+  Two stale line-number citations and one dead Markdown link in this file had
+  the same shape. All 46 are repaired: each comment keeps the reasoning it
+  carried and loses only the pointer a reader could not follow. The gate
+  reserves the section glyph for external documents, whose publishers renumber
+  them rather than we do, and requires every relative link and anchor in a
+  durable document to resolve.
+
 - **Releases publish the resource measurements they were already taking.**
   `MANIFEST.md` gains a **Resources** section with static RAM, the deepest
   observed Classic AVR stack, the AVR-XT per-frame compiler bound, PIC12F675
@@ -3673,10 +3686,8 @@ historical records and are not retroactively compacted by this policy.
   firmware does not compile the verified core but implements the debounce
   algorithm directly, because 256 words of flash cannot hold the shared-core
   architecture. Merged from a separate repository with its full history
-  preserved. See
-  [docs/pic10f320_special_case.md](docs/pic10f320_special_case.md) for what that
-  difference does and does not buy, and `docs/pic10f320_merge_plan.md` for every
-  decision taken.
+  preserved. See `docs/pic10f320_special_case.md` for what that difference does
+  and does not buy, and `docs/pic10f320_merge_plan.md` for every decision taken.
 - PIC10F320 validation lanes: firmware-to-core equivalence against
   `src/bypass_pure.c` itself (266,144 sequences, all 66 reachable model states),
   per-variant actuation-sequence checks, host fault injection, an exact-line

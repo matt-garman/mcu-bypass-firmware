@@ -148,10 +148,10 @@ jobs:
   # (TODO T3-pic12f675-bench). Its release images are built and its lanes re-run
   # by the tag workflow (.github/workflows/release.yml), the same as the other
   # PICs. The guarded `pic12f675-preflight` / `pic12f675-program` bench workflow
-  # produces the OSCCAL/BG preservation evidence that closes §8 items 1 and 2 at
-  # a bench; that evidence is what the 1.x.y pass retains, not a 0.9.x blocker.
+  # produces the OSCCAL and bandgap preservation evidence at a bench; that
+  # evidence is what the 1.x.y pass retains, not a 0.9.x blocker.
   #
-  # ONE job for all three, deliberately (merge plan §11, decision D3). `verify`,
+  # ONE job for all three, deliberately. `verify`,
   # `attiny202`, `build-matrix` and `stress` ALL declare `needs: pic`, so this job
   # gates the whole repository -- and folding each new part into it means those
   # four gate on it for free, with one XC8 install and one cache restore. The

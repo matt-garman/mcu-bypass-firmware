@@ -259,9 +259,9 @@ trap on_exit EXIT
 # defaults; exported selector overrides win because they are ?= in the Makefile.
 #
 # The two variable pairs are checked independently rather than assuming
-# PIC10F320_* still tracks PIC_*: the whole point of the separate pair (merge plan
-# §5.6) is that the 320 can be re-pinned, and a checker that reads only PIC_*
-# would then assert the wrong installation and pass while that lane skipped.
+# PIC10F320_* still tracks PIC_*: the whole point of the separate pair is that
+# the 320 can be re-pinned, and a checker that reads only PIC_* would then
+# assert the wrong installation and pass while that lane skipped.
 assert_pic_toolchain() {
 	# Every print-<VAR> query in this file passes --no-print-directory, and -s
 	# does not imply it: Make enables -w in a sub-make and propagates a literal

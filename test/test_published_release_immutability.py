@@ -32,6 +32,18 @@ link to identical bytes elsewhere would satisfy all of them. Where tags are pres
 tag tree is compared directly, an independent opinion on the same claim that
 owes nothing to either list.
 
+CONTINUITY IS DECLARED TOO. Every release republishes the whole canonical image
+set, unchanged bytes included, so that nobody needs an older release to assemble
+a complete one. That makes repeated bytes ordinary here -- five releases
+republished every image they inherited -- and ordinary is what makes them
+invisible: a build that restaged its predecessor's images instead of producing
+its own would publish, verify and reproduce perfectly. So what each release did
+to the images it inherited is declared below and recomputed from the two signed
+lists. The newest release is the one exception, and it is a timing exception
+rather than a hole: its counts cannot exist in any commit that publishes it, so
+its declaration is due before the NEXT release is cut, and that release cannot
+pass this gate without it.
+
 AMENDMENTS ARE POSSIBLE AND ARE NOT SILENT. Three published releases do differ
 from their tags: v0.9.0-v0.9.2 carry a safety errata added after the TMUX4053
 polarity defect was found. That was the right call -- someone who fetches only
@@ -96,6 +108,42 @@ AMENDMENT_MARKERS = (
     "../README.md#safety-warning-v090-v092-tmux-images",
 )
 AMENDMENT_ANCHOR = "## Safety warning: v0.9.0-v0.9.2 TMUX images"
+
+# What each release did to the images the one before it published: how many of
+# the shared names it republished byte for byte, how many it rebuilt, and why.
+# Recomputed on every run from the two signed lists, so a release that restaged
+# bytes it did not build has to say so here before this gate will pass.
+# <version>: (republished unchanged, rebuilt, why)
+IMAGE_CONTINUITY = {
+    "v0.9.1": (0, 20, "every image was rebuilt"),
+    "v0.9.2": (15, 5, "only the five PIC10F322 images changed, by that part's "
+                      "16 MHz to 2 MHz core clock drop"),
+    "v0.9.3": (12, 0, "the TMUX4053 polarity errata withdrew the eight _tmux "
+                      "variants rather than rebuilding them, and the twelve "
+                      "that remained were republished untouched"),
+    "v0.9.4": (6, 6, "the three PIC10F322 images and the three Classic AVR "
+                     "mute images changed"),
+    "v0.9.5": (0, 12, "every image was rebuilt"),
+    "v0.9.6": (12, 0, "ATtiny202 and PIC10F320 joined the release set; the "
+                      "twelve images already in it were republished untouched"),
+    "v0.9.7": (18, 0, "a test and release-tooling release: no firmware image "
+                      "changed"),
+    "v0.9.8": (0, 0, "every image was renamed, so this release shares no image "
+                     "name with the one before it. That the contents survived "
+                     "the rename was proved at the time by a one-shot verifier, "
+                     "and its signed report is published in this release"),
+    "v0.9.9": (18, 0, "PIC12F675 joined the release set; the eighteen images "
+                      "already in it were republished untouched"),
+    "v0.9.10": (2, 19, "nineteen images changed; the two PIC10F320 cd4053 "
+                       "images did not"),
+    "v0.9.11": (21, 0, "v0.9.10 was tagged and never published -- its own gate "
+                       "refused the environment CI ran it in, after tag CI had "
+                       "already rebuilt all 21 images from the tagged source "
+                       "and confirmed they reproduced bit for bit. Identical "
+                       "bytes under a release that could be published is the "
+                       "whole purpose of this one"),
+}
+
 
 REGISTER = []
 FAILURES = []
@@ -528,6 +576,65 @@ def verify_record_append(version):
     return 0
 
 
+@row("image-continuity-is-declared",
+     "a release republishes every canonical image, the unchanged ones "
+     "included, so that no recipient needs an older release to hold a complete "
+     "one. That policy makes repeated bytes ordinary, which is precisely what "
+     "makes them invisible: a build that restaged its predecessor's images "
+     "instead of producing its own would publish, verify and reproduce "
+     "perfectly, and every gate in this file would pass. Declaring the "
+     "relation is what separates a deliberate republication from an accident")
+def image_continuity_is_declared():
+    identifier = "image-continuity-is-declared"
+    published = versions()
+    for previous, version in zip(published, published[1:]):
+        declared = IMAGE_CONTINUITY.get(version)
+        # The newest release must not be REQUIRED to carry a declaration, and
+        # is still checked against one when it has it. Its counts are not known
+        # until its images are built, and the commit that publishes them may
+        # change only release/<version>/ plus the one canonical append to the
+        # publication registry -- so no commit exists in which its declaration
+        # could land, and a release under construction would fail this gate
+        # with nothing its author could do about it. That is the same defect as
+        # a gate no prospective release can pass, which is what makes it worth
+        # spelling out rather than special-casing quietly. The declaration is
+        # owed by the time the next release is cut: at that point this release
+        # is no longer the newest, and the next release's own source commit
+        # cannot go green without it.
+        if declared is None and version == published[-1]:
+            continue
+        if not counted(declared is not None, identifier,
+                       "%s inherits images from %s and declares nothing about "
+                       "them. Say how many it republished byte for byte, how "
+                       "many it rebuilt, and why" % (version, previous)):
+            continue
+        before, after = payload_of(previous), payload_of(version)
+        if not counted(before is not None and after is not None, identifier,
+                       "%s or %s has no signed list, so the images they share "
+                       "cannot be compared" % (previous, version)):
+            continue
+        # The comparison is between the two SIGNED lists rather than the files
+        # on disk: those digests are what each release published about itself,
+        # and the rows above already hold the directories to them.
+        shared = [name for name in sorted(after)
+                  if name.endswith(".hex") and name in before]
+        identical = sum(1 for name in shared if after[name] == before[name])
+        counted((identical, len(shared) - identical) == declared[:2], identifier,
+                "%s republished %d of %s's images unchanged and rebuilt %d; the "
+                "declaration here says %d and %d. Reconcile it: an unexpected "
+                "republication is a build that staged bytes it did not produce"
+                % (version, identical, previous, len(shared) - identical,
+                   declared[0], declared[1]))
+        counted(bool(declared[2].strip()), identifier,
+                "%s declares its continuity counts with no reason, which "
+                "records the arithmetic and not the decision" % version)
+
+    orphans = sorted(set(IMAGE_CONTINUITY) - set(published[1:]))
+    counted(not orphans, identifier,
+            "%s is declared here but is not a published release with a "
+            "predecessor" % ", ".join(orphans))
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "--print-record":
         raise SystemExit(print_record(sys.argv[2]))
@@ -568,11 +675,21 @@ def main():
         reach += " (no release tags in this clone)"
     elif tags_absent:
         reach += " (untagged here: %s)" % ", ".join(tags_absent)
+    continuity = "%d declared image continuities" % len(IMAGE_CONTINUITY)
+    published = versions()
+    if len(published) > 1 and published[-1] not in IMAGE_CONTINUITY:
+        # Exempting the newest release defers the declaration; it does not
+        # cancel it, and this is the one moment the debt is invisible -- the
+        # run is green and the release just published has said nothing about
+        # the images it inherited. Name it here, so the operator who published
+        # it is told rather than whoever cuts the next release finding out.
+        continuity += " (%s owes one)" % published[-1]
     print("published release immutability: %d checks, 0 failures "
           "(%d releases, %d files signed by their own SHA256SUMS, %d recorded, "
-          "%d recorded amendments, %s)"
-          % (checks, len(versions()), signed, len(recorded),
-             sum(len(names) for names in AMENDMENTS.values()), reach))
+          "%d recorded amendments, %s, %s)"
+          % (checks, len(published), signed, len(recorded),
+             sum(len(names) for names in AMENDMENTS.values()),
+             continuity, reach))
 
 
 if __name__ == "__main__":

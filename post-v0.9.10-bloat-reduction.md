@@ -1503,7 +1503,7 @@ Three of twenty-one were runnable. Behind that:
 
 ## BR-FLASH-03 - Retire the flashing-simplicity work journal
 
-**Status:** DONE `<commit>`
+**Status:** DONE `fc11171`
 
 **Depends on:** BR-FLASH-01, BR-FLASH-02 or explicit deferral of BR-FLASH-02
 
@@ -3239,23 +3239,140 @@ that the removal cannot be quiet.
 
 ## BR-REL-05 - Keep future releases self-contained
 
-**Status:** TODO
+**Status:** DONE `a636400`
 
 **Rationale:** Repeated firmware images are inexpensive and self-contained
 releases are safer than deltas or links to prior assets.
 
-**Work:**
+**The policy already held. The whole published history now says so, in numbers.**
+Every release from `v0.9.0` to `v0.9.11` was compared against the one before it,
+using the digests each release signed for itself rather than the files on disk.
+Not one of them replaced an image with a delta or a pointer at an older release.
+Every release directory carries its era's complete image set as regular files --
+12, then 18, then 20, then 21 -- beside its helper and its provenance.
 
-- [ ] Continue publishing every canonical image in every release, even when
-  bytes are unchanged.
-- [ ] Continue publishing all required programming helpers and verification
-  metadata.
-- [ ] Do not replace images with deltas or references to an older release.
-- [ ] Use the signed index to identify deliberate byte identity when relevant.
+| Release | republished unchanged | rebuilt | what moved |
+| --- | --- | --- | --- |
+| `v0.9.1` | 0 | 20 | every image rebuilt |
+| `v0.9.2` | 15 | 5 | exactly the five PIC10F322 images, by that part's 16 MHz to 2 MHz core clock drop |
+| `v0.9.3` | 12 | 0 | the TMUX4053 polarity errata withdrew the eight `_tmux` variants rather than rebuilding them |
+| `v0.9.4` | 6 | 6 | the three PIC10F322 images and the three Classic AVR mute images |
+| `v0.9.5` | 0 | 12 | every image rebuilt |
+| `v0.9.6` | 12 | 0 | ATtiny202 and PIC10F320 joined the set; six images added |
+| `v0.9.7` | 18 | 0 | a test and release-tooling release; no firmware image changed |
+| `v0.9.8` | 0 | 0 | every image renamed, so no name is shared with `v0.9.7` |
+| `v0.9.9` | 18 | 0 | PIC12F675 joined the set; three images added |
+| `v0.9.10` | 2 | 19 | only the two PIC10F320 cd4053 images survived unchanged |
+| `v0.9.11` | 21 | 0 | `v0.9.10` was tagged and never published |
+
+**What settles each work item:**
+
+- **Every canonical image is published in every release, unchanged bytes
+  included.** This is not a habit, it is mechanically impossible to break:
+  `test-release-images` compares a release's contents, its `SHA256SUMS` and a
+  fresh reproduction against the canonical `RELEASE_IMAGES` set, and against the
+  literal `RELEASE_IDENTITY_IMAGES` pin behind it (BR-FINAL-03). Omitting an
+  image because its bytes did not change fails in both directions -- an image
+  missing from all three observed sets at once is the case that gate was built
+  for.
+- **Helpers and verification metadata travel with the release.**
+  `RELEASE_HELPER_MAP` binds the staged helper to its tracked source, and since
+  `v0.9.12` `RELEASE_PROVENANCE_FILES` puts `QUALIFICATION`, `MANIFEST.md` and
+  `README.md` inside the signature rather than beside it.
+- **No release refers to another for content.** Searched: the only paths any
+  published `README.md`, `MANIFEST.md` or `QUALIFICATION` writes into a release
+  directory are into its own. The version numbers that do appear in other
+  releases' text are historical statements -- `v0.9.11`'s manifest notes that
+  the imported `bypass_mcu_` prefix "is gone as of `v0.9.8`" -- and not
+  dependencies. Nothing under `release/` is a symbolic link either, which is the
+  other way an image could become a pointer.
+- **Byte identity is now identified rather than merely occurring.** This was the
+  gap; see below.
+
+**The finding: byte identity between releases is the normal case here, and
+nothing said so.**
+
+Five of the eleven releases -- `v0.9.3`, `v0.9.6`, `v0.9.7`, `v0.9.9` and
+`v0.9.11` -- republished every image they inherited without a byte changing, and
+two more republished most of theirs. That is the policy working as intended: a
+release repeats an unchanged image instead of pointing at the older one. But it
+is also what makes the failure invisible. A build that restaged its
+predecessor's images rather than producing its own would publish, verify,
+reproduce and pass every gate in the tree, because repeated bytes are exactly
+what a correct release looks like here.
+
+`v0.9.11` is the sharpest case. All 21 of its images are byte-identical to
+`v0.9.10`'s, and that is the entire point of the release: `v0.9.10` was tagged
+and never published because its own gate refused the environment CI ran it in,
+after tag CI had already rebuilt all 21 images from the tagged source and
+confirmed they reproduced bit for bit. A reader holding both directories cannot
+tell that from the releases themselves.
+
+**The repair: declare the relation, and recompute it from the signed lists.**
+
+`test-published-release-immutability` already owns the published set and the
+principle -- "the question is never whether a published file may be amended, it
+is whether the amendment is on the record". A new row,
+`image-continuity-is-declared`, extends that principle from amendment to
+continuity. It reads the `SHA256SUMS` of each release and its predecessor,
+counts the shared image names that carry the same digest and the ones that do
+not, and requires the table above to state both numbers and a reason. The
+comparison is between the two signed lists, not the files on disk, because those
+digests are what each release published about itself.
+
+The next release therefore cannot be cut without someone writing down what it
+did to the images it inherited. If the answer is "all 21 unchanged, because the
+firmware did not change", that is a sentence someone chose to write; if it is
+unexpected, the gate says so before publication rather than after.
+
+**Verification:** the gate goes from 2,719 checks to 2,764 over 12 releases and
+11 declared continuities, and the declared table matched the computed relation
+on the first run. Three negative controls against doctored copies of the
+published tree via `PUBLISHED_RELEASE_ROOT`, each rejected with the intended
+message: a `v0.9.10` that restages one of `v0.9.9`'s images (which fires twice,
+because the doctored digest moves the following relation too), an undeclared new
+release, and a declaration left behind for a release that is no longer
+published. The pristine copy passes.
+
+**What this does not do:** it does not decide whether a republication was right,
+only whether it was intended and said so. It cannot see a release that rebuilt
+an image and got identical bytes because the source genuinely did not change --
+that is indistinguishable from restaging, and correctly so, since the two
+produce the same release. And it says nothing about the images a release adds or
+drops; the canonical set and the identity pin own that.
+
+**Correction, `<commit>`:** the row as first committed blocked every future
+release, and the full suite is what found it. `test-release-history` builds a
+synthetic future prerelease and runs this complete gate against it; that release
+inherits images and can declare nothing, so the gate failed. The synthetic one
+only stood in for the real problem: a release's continuity counts are not known
+until its images are built, and the commit that publishes them may change only
+`release/<version>/` plus the one canonical append to the publication registry,
+so no commit existed in which a new release's declaration could land. That is
+the defect class BR-RVW-01 found -- a gate no prospective release can pass --
+reintroduced by the gate written to close a different hole.
+
+The requirement is now owed one release later rather than never. The newest
+release is not required to carry a declaration; a declaration it does carry is
+still checked; and the requirement returns the moment the next release
+supersedes it, because that release's own source commit cannot go green without
+it. Three controls over the declaration table alone, with the published tree
+read unmodified: removing a superseded release's entry (`v0.9.10`) is rejected
+by name; removing the newest release's entry (`v0.9.11`) passes, at 2,760 checks
+against 2,764 -- exactly the four the exemption costs; and giving the newest
+release the wrong counts is still rejected. A green run is not silent about
+the deferral either: while the newest release has not declared, the passing
+summary carries `(<version> owes one)`, so the operator who just published
+it is told rather than whoever cuts the next release finding out.
+`test-release-history` returns 92 checks, 0 failures.
 
 **Acceptance:**
 
 - A release remains usable and verifiable without another release.
+
+This is held mechanically rather than by policy: the `payload-still-verifies`
+row requires each release directory to verify on its own, offline, by a
+recipient who has only it and `sha256sum`.
 
 ## BR-REL-06 - Consider artifact-only tagged commits outside future main history
 
@@ -3984,42 +4101,136 @@ review.
 
 ## BR-FINAL-01 - Run a complete current-reference audit
 
-**Status:** TODO
+**Status:** DONE `880d28b`
 
 **Depends on:** All document deletion/consolidation tasks
 
-**Found during BR-COMMENT-01:** the largest instance of "stale section-number
-reference" is already enumerated. `docs/pic10f320_merge_plan.md` was deleted by
-BR-PIC-03 (`b8b4af1`); after BR-COMMENT-01 removed eight of them with the
-comment blocks they sat in, 48 citations of its section numbers remain in live
-code and CI -- `Makefile` 24, `scripts/make-release.sh` 6, `scripts/ci-local.sh`
-2, `scripts/verify-release-images.sh` 2, `test/` 10 (`test_pic_rebuild.sh` 4,
-`test_release_images.sh` 2, and one each in `check_stack_depth_pic.sh`,
-`test_strict_tools.sh`, `test_gpsim_wrappers.sh`, `run_mutation_tests.sh`, and
-`formal/test_model_check.c`), and `.github/workflows/` 3. Several are bare
-`§N` with no document named at all. `CHANGELOG.md`'s 8 are historical record and
-correct as they stand; `docs/flashing_simplicity.md`'s 10 leave with the file
-under BR-FLASH-03; the `§` citations in `DESIGN_DOCUMENTATION.adoc` and
-`src/bypass_mcu_avr_classic.c` are datasheet sections and resolve.
+**Seven of the eight searches came back clean.** Each is recorded below with
+what keeps it clean, because a search result is worth only what the next commit
+cannot quietly undo:
+
+- **Deleted document paths.** Nothing in live text names one. The twelve files
+  this branch deleted are mentioned only in `CHANGELOG.md`, which records what
+  a past release said, and in this plan, which BR-FINAL-07 deletes. The
+  `docs/notes.md`, `docs/field_notes.md` and `docs/programming.md` a path scan
+  reports are synthetic fixtures written into temporary trees by the preflight
+  negative controls, not references.
+- **Retired target, variable and image names.** Every live occurrence is one of
+  three intentional kinds: a negative control that exists to REJECT the name
+  (`tmux4053` in `test_release_images.sh` and the matrix harnesses,
+  `verify-rename-identity` in `test_release_provenance.sh`), a published digest
+  of a historical release, or a revisit condition that states what the retired
+  form was and why the current one replaced it.
+- **Current resource measurements outside release evidence.**
+  `DESIGN_DOCUMENTATION.adoc`'s table carries device capacities and the
+  variable that owns each ceiling, not measurements.
+  `docs/relay_coil_fault_correction.md`'s cost table says in its own next
+  sentence that its figures are historical deltas and not current occupancy,
+  and `docs/context_seu_detection.md` ties each figure to the release that
+  measured it. `make test-resource-tables` measures the images themselves.
+- **Duplicated current-release declarations.** Mechanically impossible rather
+  than merely absent: `release_validate_development_state` requires exactly one
+  bounded declaration in exactly one designated document. `README.md`'s
+  authority map points at that declaration instead of restating it.
+- **Multiple current programming procedures.** `FLASHING.md` is the only live
+  document carrying programmer command lines; `README.md` points to it, and
+  the per-release guide is generated.
+- **Markdown/AsciiDoc links and named anchors.** All resolve, after the one
+  repair below.
+- **Immutable release directories.** Excluded from every rewrite and from the
+  new gate, for the reason BR-REL-07 gives: their links were correct against
+  the tree of their own tag, and `test-published-release-immutability` is what
+  holds them.
+
+**The finding: citations that outlived their document.**
+`docs/pic10f320_merge_plan.md` was 3,432 lines and was deleted by BR-PIC-03
+(`b8b4af1`) once its normative content reached `DESIGN_DOCUMENTATION.adoc`. It
+left **43 comment lines carrying 45 section citations** across `Makefile` (22),
+`scripts/make-release.sh` (6), `scripts/verify-release-images.sh` (2),
+`.github/workflows/` (3), `scripts/ci-local.sh` (1) and `test/` (9). Several
+were bare `§N` naming no document at all, and one of those turned out to cite
+`docs/pic12f675_feasibility.md` rather than the merge plan. That document had
+kept its own numbering stable "so that the cross-references to these numbers
+elsewhere in the repository stay valid" -- which is the tell: a reference that
+needs a whole document frozen to stay true is a reference that will outlive it.
+
+Two more of the same shape, found by the line-number half of the same search:
+`test/avr/test_sim.c` cited `bypass_mcu_avr_classic.c lines 180-182` for a
+watchdog sequence that now lives in `hw_wdt_arm()`, and
+`test/test_makefile_name_contract.py` cited `ci-local.sh:368` for a
+`print-%` query that had moved 21 lines. Both now name the construct instead of
+the line. `CHANGELOG.md` carried one live Markdown link to a deleted document,
+which rendered dead on every page view; it is now a code span, matching the
+sibling document already written that way in the same sentence.
+
+**This item's own enumeration was wrong, in three particulars.** It reported 48
+citations; the count is 43 lines and 45 citations. It attributed 24 to the
+`Makefile`, which carries 22. And it named `test/run_mutation_tests.sh` and
+`formal/test_model_check.c`, neither of which has ever carried a `§`. The
+counts here were taken from the tree at BR-COMMENT-01's commit and at HEAD, and
+agree.
+
+**What each repair kept.** In every one of the 43 comment sites the sentence
+already carried its content and the citation was an appended pointer, so the
+repair is the pointer's removal and nothing else. Two needed a clause restated
+rather than dropped -- the naming rule that "supersedes merge-plan §15 D1" now
+supersedes "the earlier decision that kept the bare `pic-` prefix", and the
+CI comment that closed "§8 items 1 and 2" now names the OSCCAL and bandgap
+preservation evidence those items were. No executable line changed.
+
+**One repair this required.** Nothing in the tree could report the class. A
+dangling comment citation cannot fail to compile, and the branch-only-document
+reference gate in `scripts/release-documentation.sh` says so of itself: its
+reference half "necessarily stays name-pattern based", so a reference to a
+document named outside the two branch families "dangles unseen once that
+document is gone". `test/test_reference_contract.py` (`make
+test-reference-contract`, 10 checks) closes that for durable documents with two
+lexical rules and a negative control for each:
+
+- A section citation must name an external document on the same line, or repeat
+  a number the same file has already attributed to one. A section number is
+  stable only where its publisher owns the numbering; inside this repository it
+  is a line count in disguise, and repository documents are cited by name and
+  anchor instead -- which the second rule then checks.
+- Every relative link and fragment anchor in a durable `.md`/`.adoc` must
+  resolve.
+
+`CHANGELOG.md` is exempt from the first rule only: an entry recording what a
+since-deleted document said is a true statement about the past, and each such
+entry names the document, so a reader sees at once what is cited. Its links are
+still checked. Branch-only working documents are exempt from both, by the same
+banner recognizer the release gate uses.
 
 **Work:**
 
-- [ ] Search all current tracked text for deleted document paths.
-- [ ] Search for stale section-number and line-number references.
-- [ ] Search for retired target/variable/image names outside intentional
+- [x] Search all current tracked text for deleted document paths.
+- [x] Search for stale section-number and line-number references.
+- [x] Search for retired target/variable/image names outside intentional
   historical contexts.
-- [ ] Search for current resource measurements outside release evidence.
-- [ ] Search for duplicated current-release declarations.
-- [ ] Search for multiple current programming procedures.
-- [ ] Check all Markdown/AsciiDoc links and named anchors.
-- [ ] Exclude immutable historical release directories from current-policy
+- [x] Search for current resource measurements outside release evidence.
+- [x] Search for duplicated current-release declarations.
+- [x] Search for multiple current programming procedures.
+- [x] Check all Markdown/AsciiDoc links and named anchors.
+- [x] Exclude immutable historical release directories from current-policy
   rewrites while still checking their links under tag-local rules where
   appropriate.
 
 **Acceptance:**
 
-- No dangling current references remain.
+- No dangling current references remain: 43 section citations, 2 line-number
+  citations and 1 dead link repaired, and `make test-reference-contract` fails
+  on the next one.
 - Historical prose is clearly historical and not used as current authority.
+
+**What this does not do:**
+
+- It does not gate the word "section". `HARDWARE_VALIDATION_LOG.md`'s sections
+  1 and 2 and `scripts/make-release.sh`'s numbered phases are cited that way
+  and resolve; the glyph is what became shorthand for a document that is gone.
+- It does not gate line-number citations. Three existed, two were stale, and
+  the two false positives a lexical rule would produce are simulated compiler
+  diagnostics in fixture strings -- the class is too small to justify a rule
+  that has to be taught the difference. It stays a reading of the diff.
 
 ## BR-FINAL-02 - Verify safety and claim boundaries
 
@@ -4046,28 +4257,179 @@ under BR-FLASH-03; the `§` citations in `DESIGN_DOCUMENTATION.adoc` and
 
 ## BR-FINAL-03 - Verify independent oracles were not centralized away
 
-**Status:** TODO
+**Status:** DONE `0dc5231`
+
+**Audit baseline:** `227d824` against the branch point `13be50a` -- 55 non-merge
+commits, 207 files, 31,184 insertions and 18,514 deletions.
+
+**No gate was retired.** The set of goals the Makefile defines at the branch
+point is a strict subset of the set at the tip: none was removed and eight were
+added (`test-analysis-matrix`, `test-attiny202-guard-mutations`,
+`test-deliberate-duplication`, `test-pic-guard-mutations`,
+`test-pic-toolchain-assert`, `test-published-release-immutability`,
+`test-reference-contract`, `test-xc8-helpers`). Two files left `test/` and
+`scripts/`, and seven commits are net-negative across the Makefile, the scripts,
+the tests and the workflows. Those, the ten deleted documents, and the
+consolidation commits named in the bullets below are the corpus this item had to
+classify. Each is settled by evidence read at the tip rather than by the commit
+message that claimed it.
+
+**Every removal was redundant authority, and the evidence for each:**
+
+- **`test/test_fault_wdt_note_contract.sh`** (`cee6bab`) was five lines ending
+  in `exec python3 "$ROOT/test/test_fault_wdt_note_contract.py"`. The Python
+  gate survives and still owns `test-fault-wdt-note-contract`. Redundant
+  indirection, never an opinion.
+
+- **`scripts/verify-rename-identity.sh`** (`893d647`, the largest single
+  removal at 972 net lines) was a one-shot that named its own successor and its
+  own retirement condition in its header: "the standing form of this check is
+  per-release, and already exists (`test/pic10f320/expected_images.sha256`,
+  `make test-release-images`)" and "when that table stops naming the current
+  release, this check is already inert; delete it then". The signed v0.9.8
+  report and mapping remain published under `release/v0.9.8/`. The retirement
+  also added an opinion rather than only removing one:
+  `test_release_provenance.sh:473` now fails if active release production still
+  carries retired rename-identity state.
+
+- **Four line-oriented workflow checks** (`7aab253`) left
+  `test_release_history.sh` and `test_release_provenance.sh`. Every fact they
+  asserted is asserted at the tip, exactly once, in `test_workflow_syntax.sh`:
+  `fetch-depth`, the `RELEASE_OBJECT` routing, the binding of qualification to
+  tag history, the remote tag recheck, the twice-verified detached signature,
+  and the ordering dominance. Two greps of one file with one method are one
+  opinion spelled twice, not two oracles. What replaced them is stronger: it
+  tokenizes the publication shell, pins the exact command inventory, and
+  requires publication to be the very next command after the second inventory
+  verification rather than merely a larger line number.
+
+- **Four resource-figure restatements** (`e7c4f68`, 568 lines out of the
+  checker) are the one case where independence measurably increased. The
+  removed check compared five hand-maintained transcriptions with each other,
+  three of which were already several changes stale when it was written. What
+  replaced it measures the images the tree has actually built -- all 21 of them
+  under `--require-all-images` -- against ceilings parsed from the Makefile, and
+  cross-checks those ceilings against datasheet capacities the test itself owns.
+  Documentation stopped being an input to the resource oracle.
+
+- **Duplicate CI execution** (`b86a5a7`, `b9cbd36`, `bc5f11d`) removed repeated
+  runs rather than opinions, and the arithmetic is pinned rather than asserted
+  in prose. `test_workflow_syntax.sh` requires exactly one direct
+  `test-mutation` invocation per hosted event and no other mutation-bearing job;
+  `test_workload_rebuild.sh` requires `test-long` to be the stress inventory
+  plus exactly one mutation gate, requires stress to keep the mutation-driver
+  sandbox regression, and walks Make's own prerequisite graph to prove no target
+  other than `test-long` reaches full mutation. The resource policy pins stayed
+  per-surface: `16`, `32` and `48` are stated once each in `ci.yml`,
+  `ci-local.sh`, `release.yml` and `make-release.sh`, and the Makefile keeps its
+  own `?=` production defaults. Five independent statements, not one.
+
+- **Declaration consolidation in Make** (`d3ea121`, `4fa470b`, `746ddcf`) moved
+  where facts are written without moving who decides them. The tests kept
+  literal test-owned canonical sets -- `TM_CANONICAL_VARIANTS` in
+  `test_target_matrix.sh` carries that reason on the line above it -- and gained
+  literal fake-compiler argument contracts for every producer.
+  `CLASSIC_VARIANTS_SUPPORTED`, `XT_VARIANTS_SUPPORTED` and
+  `PIC10F320_VARIANTS_SUPPORTED` remain three separate declarations that can
+  still diverge; the PIC10F322 and PIC12F675 target sets alias the classic one
+  deliberately, because those parts are classic-family.
+
+- **Ten deleted documents** carried their evidence with them. The hardest case
+  is `docs/pic10f320_validation.md`, a 570-line validation record: its
+  measurement date (2026-06-26), its pinned free-tier XC8 and device pack, its
+  356/386/381-word builds and the 47-word and 12-word prices of the two rejected
+  reductions are in `DESIGN_DOCUMENTATION.adoc` verbatim, and each of its
+  historical one-shot results -- the two return-stack gates, the rebuild-trigger
+  regression, byte identity, mutation topology -- has a live standing gate that
+  re-derives it on every run instead of a paragraph recording that it once
+  passed.
+
+**The finding: the release-identity pin is literal only by convention.**
+
+The release identity is the strongest independent oracle on this branch and the
+one this item names by hand. `RELEASE_IMAGES` is composed from `FW_BASE`, the
+per-part MCU tags and the supported-variant sets, every one of which a command
+line or an inherited environment can move. `RELEASE_IDENTITY_IMAGES` is the
+`override` pin built from literal words that it is checked against, and Make
+refuses at parse time if the two sets differ (`Makefile:8082`).
+`test_release_images.sh` pins the count at a literal 21 and the soak set at 18,
+requires the two sets to be equal in both directions, and re-reads every pinned
+name under a command-line and an environment override to prove no channel
+reaches it.
+
+Nothing checked the property all of that rests on. The Makefile states it in
+prose -- "a pin computed from `FW_BASE` would agree with the very thing it
+exists to check ... they are both literals, so they cannot disagree at run
+time" -- and no gate could tell a literal pin from a derived one. Rewriting
+`RELEASE_IDENTITY_PARTS` to read the per-part tag variables is a plausible
+tidying edit, it is not an override, and it survives every check listed above.
+
+Measured rather than argued. On a doctored copy of the tree with
+`RELEASE_IDENTITY_PINNED`, `RELEASE_IDENTITY_PARTS` and
+`RELEASE_IDENTITY_SOAK_PARTS` reading `$(PIC12F675_TAG)` -- a `?=` variable that
+an exported environment value wins -- exporting `PIC12F675_TAG=pic12f629` takes
+the tree from reporting `PIC12F675_TAG=pic12f629 RELEASE_IMAGES` drift to
+reporting only `RELEASE_SOAK_NAMES`. The field-by-field comparison and the
+21-image comparison both fall silent, and three of the pinned image names have
+been renamed inside the pin itself. Every override-channel check still passes,
+because those hijack the pin's own name rather than the variable it now reads.
+The one residual is an accident of asymmetry rather than a defense:
+`RELEASE_SOAK_NAMES` is literal on the live side too, so it did not move with
+the pin.
+
+**The repair: a ninth row in the register that already exists for this.**
+
+`test-deliberate-duplication` is the gate for exactly this defect class -- "fold
+a pair into one shared definition and the survivor still agrees with itself,
+every existing test still passes, and half the evidence is gone". The new row,
+`release-identity-pin-is-literal`, reads the `override` definitions of the six
+pinned names out of the Makefile and requires each to reference nothing outside
+its own closure: the four reviewed lists may reference nothing at all, and the
+two composed names may reference only the other pins and `foreach`'s own loop
+variables. It also holds the other half of the pair, requiring
+`RELEASE_IDENTITY_SELECTED` to keep reading each pinned name's live value
+through `$($(n))` -- two literal tables cannot disagree either, and a pin
+compared against itself polices nothing.
+
+That no *channel* can move the pin stays where it is, in
+`test_release_images.sh`. This row is the other way to lose it: an edit, in the
+file itself, that leaves all of those passing.
+
+**Verification:** the register goes from 335 checks over 8 duplications to 350
+over 9, still lexical and still needing no toolchain. Five negative controls
+against doctored trees via `DUPLICATION_ROOT`, each rejected with the intended
+message: the parts list composed from the build's tag variables, the image names
+taking `$(FW_BASE)`, the pinned field table reading a variable, a pin that lost
+its `override`, and the selected side made literal so the comparison compares
+the pin with itself. The pristine copy passes.
 
 **Work:**
 
-- [ ] Review every removed duplicate and classify it as redundant authority or
+- [x] Review every removed duplicate and classify it as redundant authority or
   independent oracle.
-- [ ] Confirm release identity still has an independent literal pin.
-- [ ] Confirm expected pin/output facts are not generated from firmware maps.
-- [ ] Confirm supported sets can legitimately diverge by target.
-- [ ] Confirm both PIC stack witnesses remain where applicable.
-- [ ] Confirm formal and simulation substrates remain distinct.
-- [ ] Confirm build constants and firmware guards can still disagree and fail.
+- [x] Confirm release identity still has an independent literal pin.
+- [x] Confirm expected pin/output facts are not generated from firmware maps.
+- [x] Confirm supported sets can legitimately diverge by target.
+- [x] Confirm both PIC stack witnesses remain where applicable.
+- [x] Confirm formal and simulation substrates remain distinct.
+- [x] Confirm build constants and firmware guards can still disagree and fail.
 
-`make test-deliberate-duplication` (BR-SRC-01) now decides five of these
-mechanically on every run: the pin/output facts the PIC harnesses expect are
-literal rather than taken from the firmware map, the supported sets diverge by
-part because each part states its own pin ordinals and watchdog terms, both PIC
-stack witnesses remain and still read different artifacts, the formal and
-simulation substrates remain distinct subjects under distinct targets, and no
-file in `src/` supplies the clock its guards check. The remaining two -- the
-classification of each removed duplicate, and the release-identity literal --
-stay a reading of the diff.
+`make test-deliberate-duplication` (BR-SRC-01) decides six of these mechanically
+on every run, one more than when this item was written: the pin/output facts the
+PIC harnesses expect are literal rather than taken from the firmware map, the
+supported sets diverge by part because each part states its own pin ordinals and
+watchdog terms, both PIC stack witnesses remain and still read different
+artifacts, the formal and simulation substrates remain distinct subjects under
+distinct targets, no file in `src/` supplies the clock its guards check, and --
+as of this item -- the release-identity pin is still spelled in literals. The
+classification of each removed duplicate remains a reading of the diff, which is
+what the record above is.
+
+**What this does not do:** it does not check that either half of any pair is
+*correct*, which is what the formal, simulation, oracle and hardware layers are
+for; and it does not gate the classification itself. A future deduplication is
+still a judgement, and the register only fails the nine folds someone has
+already thought about.
 
 **Acceptance:**
 
@@ -4189,7 +4551,7 @@ dependencies and acceptance criteria.
 | BR-PIC-05 | Update firmware document references | DONE `f968de7` |
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
 | BR-FLASH-02 | Generate release programming guide | DONE `23eac73` |
-| BR-FLASH-03 | Delete flashing proposal journal | DONE `<commit>` |
+| BR-FLASH-03 | Delete flashing proposal journal | DONE `fc11171` |
 | BR-FLASH-04 | Close PIC10F32x programming authority gaps | TODO |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
@@ -4217,7 +4579,7 @@ dependencies and acceptance criteria.
 | BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `f401507` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
-| BR-REL-05 | Keep releases self-contained | TODO |
+| BR-REL-05 | Keep releases self-contained | DONE `a636400` |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
 | BR-REL-08 | Collapse duplicate release phase logs | TODO |
@@ -4226,9 +4588,9 @@ dependencies and acceptance criteria.
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | TODO |
 | BR-REVIEW-01 | Resolve completed-item review findings | TODO |
-| BR-FINAL-01 | Audit current references | TODO |
+| BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
-| BR-FINAL-03 | Verify independent oracles remain | TODO |
+| BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |
 | BR-FINAL-06 | Measure outcome | TODO |

@@ -3,10 +3,10 @@
 #
 # Four sets must agree, not three. The committed directory, the SHA256SUMS
 # entries and the fresh build output are all observations of what happened to be
-# produced; the CANONICAL SET (Makefile RELEASE_IMAGES, merge plan §10) is the
+# produced; the CANONICAL SET (Makefile RELEASE_IMAGES) is the
 # independent statement of what a complete release must contain. Without it,
 # three sets computed by the same glob agree perfectly on an incomplete release
-# -- omit an entire MCU from the build and nothing here would notice (§14.8).
+# -- omit an entire MCU from the build and nothing here would notice.
 # With it, the omission fails at the first comparison.
 set -euo pipefail
 

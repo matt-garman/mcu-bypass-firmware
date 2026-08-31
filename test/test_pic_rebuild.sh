@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # Host-only rebuild-determinism regression for the PIC soak binaries -- the PIC
-# counterpart of test-workload-rebuild / test-avr-build-rebuild, and the last
-# open row of the merge plan's §6.12.
+# counterpart of test-workload-rebuild / test-avr-build-rebuild.
 #
 # THE PROPERTY
 # ------------
@@ -29,7 +28,7 @@ set -euo pipefail
 # inside `make test` on any host. The recipe under test is the file rule itself,
 # which carries no tool guards -- only the surrounding lane does.
 #
-# Parameterized so ONE regression covers both chips (merge plan §4 FOLD).
+# Parameterized so ONE regression covers both chips.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-${HOME:?HOME is required when TMPDIR is unset}}/test-pic-rebuild.XXXXXX")
@@ -81,7 +80,7 @@ blank_prereq() {
 }
 
 # ONE soak source for the two 10F32x parts: PIC10F320_SOAK_SRC = $(PIC_SOAK_SRC)
-# (merge plan §4 FOLD), so both chips' rules name test/pic/test_soak_pic.cc. A
+# so both chips' rules name test/pic/test_soak_pic.cc. A
 # test/pic10f320/ counterpart would fabricate a prerequisite no rule has. The
 # PIC12F675 has its own adapter, and all three share the core header below.
 blank_prereq test/soak_timing_config.h
@@ -391,7 +390,7 @@ grep -q 'PIC12F675_SOAK_VARIANT=unknown is not supported' "$mklog" \
 checks=$((checks + 1))
 
 # --- the three chips must not share one binary -------------------------------
-# The two 10F32x parts compile from the SAME source since the §4 FOLD, and all
+# The two 10F32x parts compile from the SAME source, and all
 # three now share the same core header, differing only in the -D flags and the
 # output path -- which is exactly what makes a shared output path the live
 # hazard here: it would leave one chip's soak silently running another's image.

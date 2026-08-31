@@ -20,7 +20,7 @@ name: Release
 #      declares are all the same complete set with byte-identical contents
 #      (fails the release if not). The fourth set is what makes the other three
 #      mean anything: three sets derived by globbing the same directories agree
-#      perfectly on a release that is missing an entire MCU (merge plan §10);
+#      perfectly on a release that is missing an entire MCU;
 #   4. re-runs `make test-long` + `make attiny202-test` +
 #      `make attiny202-test-target` + `make pic10f322-test` +
 #      `make pic10f322-test-target-variants` + `make pic10f320-test` +
