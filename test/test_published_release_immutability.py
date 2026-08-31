@@ -32,6 +32,15 @@ link to identical bytes elsewhere would satisfy all of them. Where tags are pres
 tag tree is compared directly, an independent opinion on the same claim that
 owes nothing to either list.
 
+CONTINUITY IS DECLARED TOO. Every release republishes the whole canonical image
+set, unchanged bytes included, so that nobody needs an older release to assemble
+a complete one. That makes repeated bytes ordinary here -- five releases
+republished every image they inherited -- and ordinary is what makes them
+invisible: a build that restaged its predecessor's images instead of producing
+its own would publish, verify and reproduce perfectly. So what each release did
+to the images it inherited is declared below and recomputed from the two signed
+lists.
+
 AMENDMENTS ARE POSSIBLE AND ARE NOT SILENT. Three published releases do differ
 from their tags: v0.9.0-v0.9.2 carry a safety errata added after the TMUX4053
 polarity defect was found. That was the right call -- someone who fetches only
@@ -96,6 +105,42 @@ AMENDMENT_MARKERS = (
     "../README.md#safety-warning-v090-v092-tmux-images",
 )
 AMENDMENT_ANCHOR = "## Safety warning: v0.9.0-v0.9.2 TMUX images"
+
+# What each release did to the images the one before it published: how many of
+# the shared names it republished byte for byte, how many it rebuilt, and why.
+# Recomputed on every run from the two signed lists, so a release that restaged
+# bytes it did not build has to say so here before this gate will pass.
+# <version>: (republished unchanged, rebuilt, why)
+IMAGE_CONTINUITY = {
+    "v0.9.1": (0, 20, "every image was rebuilt"),
+    "v0.9.2": (15, 5, "only the five PIC10F322 images changed, by that part's "
+                      "16 MHz to 2 MHz core clock drop"),
+    "v0.9.3": (12, 0, "the TMUX4053 polarity errata withdrew the eight _tmux "
+                      "variants rather than rebuilding them, and the twelve "
+                      "that remained were republished untouched"),
+    "v0.9.4": (6, 6, "the three PIC10F322 images and the three Classic AVR "
+                     "mute images changed"),
+    "v0.9.5": (0, 12, "every image was rebuilt"),
+    "v0.9.6": (12, 0, "ATtiny202 and PIC10F320 joined the release set; the "
+                      "twelve images already in it were republished untouched"),
+    "v0.9.7": (18, 0, "a test and release-tooling release: no firmware image "
+                      "changed"),
+    "v0.9.8": (0, 0, "every image was renamed, so this release shares no image "
+                     "name with the one before it. That the contents survived "
+                     "the rename was proved at the time by a one-shot verifier, "
+                     "and its signed report is published in this release"),
+    "v0.9.9": (18, 0, "PIC12F675 joined the release set; the eighteen images "
+                      "already in it were republished untouched"),
+    "v0.9.10": (2, 19, "nineteen images changed; the two PIC10F320 cd4053 "
+                       "images did not"),
+    "v0.9.11": (21, 0, "v0.9.10 was tagged and never published -- its own gate "
+                       "refused the environment CI ran it in, after tag CI had "
+                       "already rebuilt all 21 images from the tagged source "
+                       "and confirmed they reproduced bit for bit. Identical "
+                       "bytes under a release that could be published is the "
+                       "whole purpose of this one"),
+}
+
 
 REGISTER = []
 FAILURES = []
@@ -528,6 +573,51 @@ def verify_record_append(version):
     return 0
 
 
+@row("image-continuity-is-declared",
+     "a release republishes every canonical image, the unchanged ones "
+     "included, so that no recipient needs an older release to hold a complete "
+     "one. That policy makes repeated bytes ordinary, which is precisely what "
+     "makes them invisible: a build that restaged its predecessor's images "
+     "instead of producing its own would publish, verify and reproduce "
+     "perfectly, and every gate in this file would pass. Declaring the "
+     "relation is what separates a deliberate republication from an accident")
+def image_continuity_is_declared():
+    identifier = "image-continuity-is-declared"
+    published = versions()
+    for previous, version in zip(published, published[1:]):
+        declared = IMAGE_CONTINUITY.get(version)
+        if not counted(declared is not None, identifier,
+                       "%s inherits images from %s and declares nothing about "
+                       "them. Say how many it republished byte for byte, how "
+                       "many it rebuilt, and why" % (version, previous)):
+            continue
+        before, after = payload_of(previous), payload_of(version)
+        if not counted(before is not None and after is not None, identifier,
+                       "%s or %s has no signed list, so the images they share "
+                       "cannot be compared" % (previous, version)):
+            continue
+        # The comparison is between the two SIGNED lists rather than the files
+        # on disk: those digests are what each release published about itself,
+        # and the rows above already hold the directories to them.
+        shared = [name for name in sorted(after)
+                  if name.endswith(".hex") and name in before]
+        identical = sum(1 for name in shared if after[name] == before[name])
+        counted((identical, len(shared) - identical) == declared[:2], identifier,
+                "%s republished %d of %s's images unchanged and rebuilt %d; the "
+                "declaration here says %d and %d. Reconcile it: an unexpected "
+                "republication is a build that staged bytes it did not produce"
+                % (version, identical, previous, len(shared) - identical,
+                   declared[0], declared[1]))
+        counted(bool(declared[2].strip()), identifier,
+                "%s declares its continuity counts with no reason, which "
+                "records the arithmetic and not the decision" % version)
+
+    orphans = sorted(set(IMAGE_CONTINUITY) - set(published[1:]))
+    counted(not orphans, identifier,
+            "%s is declared here but is not a published release with a "
+            "predecessor" % ", ".join(orphans))
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "--print-record":
         raise SystemExit(print_record(sys.argv[2]))
@@ -570,9 +660,10 @@ def main():
         reach += " (untagged here: %s)" % ", ".join(tags_absent)
     print("published release immutability: %d checks, 0 failures "
           "(%d releases, %d files signed by their own SHA256SUMS, %d recorded, "
-          "%d recorded amendments, %s)"
+          "%d recorded amendments, %d declared image continuities, %s)"
           % (checks, len(versions()), signed, len(recorded),
-             sum(len(names) for names in AMENDMENTS.values()), reach))
+             sum(len(names) for names in AMENDMENTS.values()),
+             len(IMAGE_CONTINUITY), reach))
 
 
 if __name__ == "__main__":

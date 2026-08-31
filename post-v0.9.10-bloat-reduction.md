@@ -3239,23 +3239,115 @@ that the removal cannot be quiet.
 
 ## BR-REL-05 - Keep future releases self-contained
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Rationale:** Repeated firmware images are inexpensive and self-contained
 releases are safer than deltas or links to prior assets.
 
-**Work:**
+**The policy already held. The whole published history now says so, in numbers.**
+Every release from `v0.9.0` to `v0.9.11` was compared against the one before it,
+using the digests each release signed for itself rather than the files on disk.
+Not one of them replaced an image with a delta or a pointer at an older release.
+Every release directory carries its era's complete image set as regular files --
+12, then 18, then 20, then 21 -- beside its helper and its provenance.
 
-- [ ] Continue publishing every canonical image in every release, even when
-  bytes are unchanged.
-- [ ] Continue publishing all required programming helpers and verification
-  metadata.
-- [ ] Do not replace images with deltas or references to an older release.
-- [ ] Use the signed index to identify deliberate byte identity when relevant.
+| Release | republished unchanged | rebuilt | what moved |
+| --- | --- | --- | --- |
+| `v0.9.1` | 0 | 20 | every image rebuilt |
+| `v0.9.2` | 15 | 5 | exactly the five PIC10F322 images, by that part's 16 MHz to 2 MHz core clock drop |
+| `v0.9.3` | 12 | 0 | the TMUX4053 polarity errata withdrew the eight `_tmux` variants rather than rebuilding them |
+| `v0.9.4` | 6 | 6 | the three PIC10F322 images and the three Classic AVR mute images |
+| `v0.9.5` | 0 | 12 | every image rebuilt |
+| `v0.9.6` | 12 | 0 | ATtiny202 and PIC10F320 joined the set; six images added |
+| `v0.9.7` | 18 | 0 | a test and release-tooling release; no firmware image changed |
+| `v0.9.8` | 0 | 0 | every image renamed, so no name is shared with `v0.9.7` |
+| `v0.9.9` | 18 | 0 | PIC12F675 joined the set; three images added |
+| `v0.9.10` | 2 | 19 | only the two PIC10F320 cd4053 images survived unchanged |
+| `v0.9.11` | 21 | 0 | `v0.9.10` was tagged and never published |
+
+**What settles each work item:**
+
+- **Every canonical image is published in every release, unchanged bytes
+  included.** This is not a habit, it is mechanically impossible to break:
+  `test-release-images` compares a release's contents, its `SHA256SUMS` and a
+  fresh reproduction against the canonical `RELEASE_IMAGES` set, and against the
+  literal `RELEASE_IDENTITY_IMAGES` pin behind it (BR-FINAL-03). Omitting an
+  image because its bytes did not change fails in both directions -- an image
+  missing from all three observed sets at once is the case that gate was built
+  for.
+- **Helpers and verification metadata travel with the release.**
+  `RELEASE_HELPER_MAP` binds the staged helper to its tracked source, and since
+  `v0.9.12` `RELEASE_PROVENANCE_FILES` puts `QUALIFICATION`, `MANIFEST.md` and
+  `README.md` inside the signature rather than beside it.
+- **No release refers to another for content.** Searched: the only paths any
+  published `README.md`, `MANIFEST.md` or `QUALIFICATION` writes into a release
+  directory are into its own. The version numbers that do appear in other
+  releases' text are historical statements -- `v0.9.11`'s manifest notes that
+  the imported `bypass_mcu_` prefix "is gone as of `v0.9.8`" -- and not
+  dependencies. Nothing under `release/` is a symbolic link either, which is the
+  other way an image could become a pointer.
+- **Byte identity is now identified rather than merely occurring.** This was the
+  gap; see below.
+
+**The finding: byte identity between releases is the normal case here, and
+nothing said so.**
+
+Five of the eleven releases -- `v0.9.3`, `v0.9.6`, `v0.9.7`, `v0.9.9` and
+`v0.9.11` -- republished every image they inherited without a byte changing, and
+two more republished most of theirs. That is the policy working as intended: a
+release repeats an unchanged image instead of pointing at the older one. But it
+is also what makes the failure invisible. A build that restaged its
+predecessor's images rather than producing its own would publish, verify,
+reproduce and pass every gate in the tree, because repeated bytes are exactly
+what a correct release looks like here.
+
+`v0.9.11` is the sharpest case. All 21 of its images are byte-identical to
+`v0.9.10`'s, and that is the entire point of the release: `v0.9.10` was tagged
+and never published because its own gate refused the environment CI ran it in,
+after tag CI had already rebuilt all 21 images from the tagged source and
+confirmed they reproduced bit for bit. A reader holding both directories cannot
+tell that from the releases themselves.
+
+**The repair: declare the relation, and recompute it from the signed lists.**
+
+`test-published-release-immutability` already owns the published set and the
+principle -- "the question is never whether a published file may be amended, it
+is whether the amendment is on the record". A new row,
+`image-continuity-is-declared`, extends that principle from amendment to
+continuity. It reads the `SHA256SUMS` of each release and its predecessor,
+counts the shared image names that carry the same digest and the ones that do
+not, and requires the table above to state both numbers and a reason. The
+comparison is between the two signed lists, not the files on disk, because those
+digests are what each release published about itself.
+
+The next release therefore cannot be cut without someone writing down what it
+did to the images it inherited. If the answer is "all 21 unchanged, because the
+firmware did not change", that is a sentence someone chose to write; if it is
+unexpected, the gate says so before publication rather than after.
+
+**Verification:** the gate goes from 2,719 checks to 2,764 over 12 releases and
+11 declared continuities, and the declared table matched the computed relation
+on the first run. Three negative controls against doctored copies of the
+published tree via `PUBLISHED_RELEASE_ROOT`, each rejected with the intended
+message: a `v0.9.10` that restages one of `v0.9.9`'s images (which fires twice,
+because the doctored digest moves the following relation too), an undeclared new
+release, and a declaration left behind for a release that is no longer
+published. The pristine copy passes.
+
+**What this does not do:** it does not decide whether a republication was right,
+only whether it was intended and said so. It cannot see a release that rebuilt
+an image and got identical bytes because the source genuinely did not change --
+that is indistinguishable from restaging, and correctly so, since the two
+produce the same release. And it says nothing about the images a release adds or
+drops; the canonical set and the identity pin own that.
 
 **Acceptance:**
 
 - A release remains usable and verifiable without another release.
+
+This is held mechanically rather than by policy: the `payload-still-verifies`
+row requires each release directory to verify on its own, offline, by a
+recipient who has only it and `sha256sum`.
 
 ## BR-REL-06 - Consider artifact-only tagged commits outside future main history
 
@@ -4128,7 +4220,7 @@ banner recognizer the release gate uses.
 
 ## BR-FINAL-03 - Verify independent oracles were not centralized away
 
-**Status:** DONE `<commit>`
+**Status:** DONE `0dc5231`
 
 **Audit baseline:** `227d824` against the branch point `13be50a` -- 55 non-merge
 commits, 207 files, 31,184 insertions and 18,514 deletions.
@@ -4450,7 +4542,7 @@ dependencies and acceptance criteria.
 | BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `f401507` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
 | BR-REL-04 | Define hosted retention/mirroring | TODO |
-| BR-REL-05 | Keep releases self-contained | TODO |
+| BR-REL-05 | Keep releases self-contained | DONE `<commit>` |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
 | BR-REL-08 | Collapse duplicate release phase logs | TODO |
@@ -4461,7 +4553,7 @@ dependencies and acceptance criteria.
 | BR-REVIEW-01 | Resolve completed-item review findings | TODO |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | TODO |
-| BR-FINAL-03 | Verify independent oracles remain | DONE `<commit>` |
+| BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |
 | BR-FINAL-06 | Measure outcome | TODO |
