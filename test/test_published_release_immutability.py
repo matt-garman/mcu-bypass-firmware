@@ -180,18 +180,54 @@ def digest_of(path):
     return hasher.hexdigest()
 
 
-def versions():
-    """Release directories on disk, oldest first."""
+def release_directory_names():
+    """Directory names that claim to be releases, before syntax validation."""
     if not RELEASE.is_dir():
         return []
-    found = [entry.name for entry in RELEASE.iterdir()
-             if entry.is_dir() and entry.name.startswith("v")]
-    def order(name):
-        try:
-            return [int(part) for part in name.lstrip("v").split(".")]
-        except ValueError:
-            return [1 << 30]
-    return sorted(found, key=order)
+    return [entry.name for entry in RELEASE.iterdir()
+            if entry.is_dir() and entry.name.startswith("v")]
+
+
+def version_order(name):
+    """Deterministic release precedence, including prerelease identifiers."""
+    if not VERSION.fullmatch(name):
+        raise ValueError("invalid release version: %s" % name)
+    core, separator, prerelease = name[1:].partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    if not separator:
+        # A final release follows every prerelease with the same numeric core.
+        return major, minor, patch, 1, (), name
+
+    identifiers = []
+    for identifier in re.split(r"[.-]", prerelease):
+        if identifier.isdigit():
+            # Numeric identifiers precede textual ones. Length and spelling
+            # break ties admitted by this project's version grammar (01/1).
+            identifiers.append((0, int(identifier), len(identifier), identifier))
+        else:
+            identifiers.append((1, identifier))
+    # VERSION accepts both dot and hyphen separators inside the prerelease.
+    # The original name is therefore the final tiebreak for equivalent token
+    # sequences such as rc.1 and rc-1.
+    return major, minor, patch, 0, tuple(identifiers), name
+
+
+def versions():
+    """Valid release directories on disk, oldest first."""
+    found = [name for name in release_directory_names()
+             if VERSION.fullmatch(name)]
+    return sorted(found, key=version_order)
+
+
+@row("release-directory-names-are-valid",
+     "a directory whose name claims to be a release must have deterministic "
+     "release precedence. Silently sorting malformed names last can give one "
+     "the newest-release continuity exemption")
+def release_directory_names_are_valid():
+    identifier = "release-directory-names-are-valid"
+    for name in sorted(release_directory_names()):
+        counted(VERSION.fullmatch(name), identifier,
+                "release/%s is not a valid release directory name" % name)
 
 
 def payload_of(version):

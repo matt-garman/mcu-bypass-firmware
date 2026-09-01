@@ -4543,7 +4543,7 @@ qualification and plan deletion.
   foreign selectors, another MCU's goal, duplicate assignments and conflicting
   assignments through all three validation boundaries.
 
-- [ ] **BR-RVW2-03 -- HIGH -- order prereleases before their corresponding
+- [x] **BR-RVW2-03 -- HIGH -- order prereleases before their corresponding
   final release.** `versions()` in
   `test/test_published_release_immutability.py` parses only dot-separated
   integers; a name such as `v0.9.12-rc.1` falls through to the final fallback and
@@ -4554,6 +4554,17 @@ qualification and plan deletion.
   precedence, reject or deliberately classify malformed release directory
   names, and add a complete synthetic RC-then-final publication fixture. The
   test must prove both ordering and the continuity-declaration handoff.
+
+  **Resolved:** Release directories now sort by numeric core and explicit
+  prerelease precedence: prereleases precede their matching final, numeric
+  prerelease identifiers precede textual identifiers, and the original name is
+  a deterministic tiebreak for equivalent accepted spellings. Malformed `v*`
+  directory names are excluded from ordering and fail a dedicated contract
+  instead of receiving the newest-release exemption. The synthetic history
+  fixture now publishes an RC and then its final as separate source/artifact
+  pairs. It proves that the RC may owe continuity while newest, that the final's
+  source supplies the RC declaration, and that removing that declaration after
+  the final appears fails specifically on the RC-to-predecessor relation.
 
 - [ ] **BR-RVW2-04 -- MEDIUM -- make the release lifecycle policy agree with
   retained history.** `README.md` and `release/README.md` say retained release

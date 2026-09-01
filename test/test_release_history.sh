@@ -229,6 +229,37 @@ setup_fixture() {
 	cp -a "$repo/release/$version" "$snapshot"
 }
 
+append_complete_registered_release() {
+	local release_version=$1
+	mkdir -p "$repo/release/$release_version/evidence"
+	printf 'source_commit=%s\n' "$source_sha" \
+		> "$repo/release/$release_version/QUALIFICATION"
+	printf 'manifest %s\n' "$release_version" \
+		> "$repo/release/$release_version/MANIFEST.md"
+	printf 'release readme %s\n' "$release_version" \
+		> "$repo/release/$release_version/README.md"
+	printf 'evidence %s\n' "$release_version" \
+		> "$repo/release/$release_version/evidence/result.log"
+	printf 'firmware %s\n' "$release_version" \
+		> "$repo/release/$release_version/firmware.hex"
+	(
+		cd "$repo/release/$release_version"
+		sha256sum -- firmware.hex QUALIFICATION MANIFEST.md README.md \
+			evidence/result.log > SHA256SUMS
+	)
+	printf 'detached signature fixture\n' \
+		> "$repo/release/$release_version/SHA256SUMS.asc"
+	python3 "$repo/test/test_published_release_immutability.py" \
+		--print-record "$release_version" \
+		>> "$repo/test/published_release_digests.txt"
+	git -C "$repo" add "release/$release_version" \
+		test/published_release_digests.txt
+	git -C "$repo" -c commit.gpgsign=false commit -qm release
+	release_sha=$(git -C "$repo" rev-parse HEAD)
+	rm -rf "$snapshot"
+	cp -a "$repo/release/$release_version" "$snapshot"
+}
+
 setup_complete_registered_fixture() {
 	rm -rf "$repo" "$snapshot"
 	mkdir -p "$repo/scripts" "$repo/test"
@@ -248,27 +279,7 @@ setup_complete_registered_fixture() {
 	git -C "$repo" add source.txt
 	git -C "$repo" -c commit.gpgsign=false commit -qm source
 	source_sha=$(git -C "$repo" rev-parse HEAD)
-
-	mkdir -p "$repo/release/$version/evidence"
-	printf 'source_commit=%s\n' "$source_sha" \
-		> "$repo/release/$version/QUALIFICATION"
-	printf 'manifest\n' > "$repo/release/$version/MANIFEST.md"
-	printf 'release readme\n' > "$repo/release/$version/README.md"
-	printf 'evidence\n' > "$repo/release/$version/evidence/result.log"
-	printf 'firmware\n' > "$repo/release/$version/firmware.hex"
-	(
-		cd "$repo/release/$version"
-		sha256sum -- firmware.hex QUALIFICATION MANIFEST.md README.md \
-			evidence/result.log > SHA256SUMS
-	)
-	printf 'detached signature fixture\n' \
-		> "$repo/release/$version/SHA256SUMS.asc"
-	python3 "$repo/test/test_published_release_immutability.py" \
-		--print-record "$version" >> "$repo/test/published_release_digests.txt"
-	git -C "$repo" add "release/$version" test/published_release_digests.txt
-	git -C "$repo" -c commit.gpgsign=false commit -qm release
-	release_sha=$(git -C "$repo" rev-parse HEAD)
-	cp -a "$repo/release/$version" "$snapshot"
+	append_complete_registered_release "$version"
 }
 
 expect_pass() {
@@ -317,6 +328,43 @@ expect_pass "synthetic future prerelease history"
 PUBLISHED_RELEASE_ROOT="$repo" \
 	python3 "$repo/test/test_published_release_immutability.py" >/dev/null \
 	|| fail "synthetic future prerelease failed the complete immutability gate"
+checks=$((checks + 1))
+
+# The RC is allowed to owe continuity while it is newest. Its declaration must
+# land in the final release's source commit; once the final artifact exists, the
+# exemption moves to the final and the RC becomes a required predecessor.
+missing_rc_declaration="$work/immutability-without-rc-declaration.py"
+cp "$repo/test/test_published_release_immutability.py" "$missing_rc_declaration"
+sed -i '/^IMAGE_CONTINUITY = {$/a\    "v99.0.0-rc.1": (0, 0, "synthetic RC shares no image names with v0.9.11"),' \
+	"$repo/test/test_published_release_immutability.py"
+printf 'qualified final source\n' >> "$repo/source.txt"
+git -C "$repo" add source.txt test/test_published_release_immutability.py
+git -C "$repo" -c commit.gpgsign=false commit -qm final-source
+source_sha=$(git -C "$repo" rev-parse HEAD)
+version=v99.0.0
+append_complete_registered_release "$version"
+expect_pass "synthetic final release after its RC"
+PUBLISHED_RELEASE_ROOT="$repo" \
+	python3 "$repo/test/test_published_release_immutability.py" >/dev/null \
+	|| fail "synthetic RC-then-final publication failed the complete immutability gate"
+checks=$((checks + 1))
+
+if output=$(PUBLISHED_RELEASE_ROOT="$repo" \
+		python3 "$missing_rc_declaration" 2>&1); then
+	fail "final publication did not make the RC continuity declaration mandatory"
+fi
+[[ "$output" == *"v99.0.0-rc.1 inherits images from v0.9.11 and declares nothing"* ]] \
+	|| fail "RC continuity handoff failed for the wrong release order: $output"
+checks=$((checks + 1))
+
+mkdir "$repo/release/v99.bad"
+if output=$(PUBLISHED_RELEASE_ROOT="$repo" \
+		python3 "$repo/test/test_published_release_immutability.py" 2>&1); then
+	fail "immutability gate accepted a malformed release directory name"
+fi
+[[ "$output" == *"release/v99.bad is not a valid release directory name"* ]] \
+	|| fail "malformed release directory failed for the wrong reason: $output"
+rm -rf "$repo/release/v99.bad"
 checks=$((checks + 1))
 version=v99.0.0
 
