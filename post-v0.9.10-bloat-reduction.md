@@ -2409,7 +2409,9 @@ topology into target-specific and TODO documents.
 - [x] Keep literal release identity in the Makefile where it serves as an
   independent fail-closed production pin.
 - [x] Remove global topology declarations from TODO and target-specific docs.
-- [ ] Generate human release topology where needed from canonical data.
+- [x] Decline a generated human release-topology view: the sole live declaration
+  is already checked semantically against canonical data, so another view would
+  add machinery without removing an authority.
 - [x] Replace occurrence/prose synchronization tests with semantic release
   identity checks.
 
@@ -2447,10 +2449,11 @@ topology into target-specific and TODO documents.
 - Work item 2 needed nothing: `RELEASE_IDENTITY_PINNED` in the Makefile is
   already the independent literal production pin, and `make-release.sh` already
   refuses a release goal whose selected identity drifts from it.
-- Work item 4 (generate human release topology from canonical data) is left
-  open. With one hand-maintained declaration held to canonical counts at
-  release time, generation would buy correctness that is already enforced; it
-  belongs with BR-RES-03 and BR-FLASH-02, which are the generated-view tasks.
+- Work item 4 (generate human release topology from canonical data) is declined.
+  With one hand-maintained declaration held to canonical counts at release time,
+  generation would buy correctness that is already enforced. BR-RES-03 and
+  BR-FLASH-02 separately generate the resource and programming views that have
+  real consumers.
 - A latent defect in `test_release_preflight.sh` surfaced and was fixed.
   `declare_in_block()` read `local document=$1 line=$2 target=".../$document"`
   on one line; bash expands every word of a `local` assignment list *before*
@@ -3237,10 +3240,10 @@ covers only the 18 named combinations.
   directions: no member unlisted, no row unmatched.
 - [x] Retain raw logs where forensic detail is useful -- unchanged, and now the
   reason the archive was declined.
-- [ ] Replace duplicate initial/final output-only logs with structured phase
-  records. NOT DONE: `build-avr-classic.log` and `final-image-build.log` are
-  byte-identical in v0.9.11, and collapsing them is a separate change to what
-  the release *runs*, not to how it is recorded. Left as BR-REL-08.
+- [x] Transfer the duplicate initial/final output-only log decision to
+  BR-REL-08. That task retained both operations and gave their records distinct
+  phase roles because their byte-identical v0.9.11 payloads represented
+  different release claims.
 
 **Acceptance:**
 
@@ -3583,9 +3586,10 @@ tree rather than only the machinery that writes new ones.
 - [x] Correct "keep current safety errata outside immutable historical files":
   the tree deliberately does the opposite, and is right to. See the finding
   below.
-- [ ] Use each historical tag's own scripts and naming contract for
-  reproduction. Deferred: this is a procedure for a reproduction attempt, not a
-  property of the tree, and nothing in the current work performs one.
+- [x] Transfer historical reproduction to `release/README.md`, which requires a
+  checkout of each release's own tag and gives tag-local commands for every
+  historical naming and verifier boundary. Execution remains part of an actual
+  reproduction attempt, not a migration property.
 - [x] If old payloads are eventually removed from the tip of `main`, do so only
   in an ordinary new commit after archive verification; do not rewrite history.
 - [x] Verify old tagged objects remain reachable after any tip cleanup.
@@ -3680,7 +3684,7 @@ but checking it against the signing key needs GnuPG and a trust decision
 
 ## BR-REL-08 - Collapse duplicate release phase logs
 
-**Status:** DONE
+**Status:** DONE `df344a7`
 
 **Depends on:** BR-REL-02
 
@@ -4576,7 +4580,8 @@ qualification and plan deletion.
   15 documents; the added document and three negative checks account for the
   change from the review baseline.
 
-- [x] **BR-RVW2-08 -- LOW -- close direct PIC harness dependency gaps.** The
+- [x] **BR-RVW2-08 -- LOW -- close direct PIC harness dependency gaps
+  (`328a8e7`).** The
   direct PIC10F322 and PIC12F675 fault/lock-step binary targets derive `CTX_ADDR`
   from generated assembly/symbol sidecars, but the sidecars and
   `test/check_pic_context_layout.sh` are not prerequisites. The authoritative
@@ -4593,7 +4598,7 @@ qualification and plan deletion.
   an existing binary and requires the direct target to restore them and
   recompile; `test-pic-build-rebuild` passes 42 checks with no target toolchain.
 
-- [ ] **BR-RVW2-09 -- LOW -- reconcile plan bookkeeping before deleting the
+- [x] **BR-RVW2-09 -- LOW -- reconcile plan bookkeeping before deleting the
   plan.** BR-STATE-01, BR-REL-02 and BR-REL-07 retain unchecked work inside DONE
   tasks, even where their result text says the work was deferred or moved.
   BR-REL-08 has no commit in its DONE status, contrary to the status vocabulary.
@@ -4601,6 +4606,13 @@ qualification and plan deletion.
   disposition. BR-FINAL-06 is correctly commit-bound to `cc2ff7a`; either keep
   that endpoint explicit or refresh the final metric after later corrective
   commits rather than presenting it as an unqualified tip measurement.
+
+  **Resolved:** BR-STATE-01 now records topology generation as declined rather
+  than open; BR-REL-02 records its phase-log decision as transferred to the
+  completed BR-REL-08; BR-REL-07 points its reproduction procedure to the
+  durable tag-local instructions in `release/README.md`; and BR-REL-08 names its
+  implementation commit, `df344a7`. BR-FINAL-06 remains explicitly scoped to
+  endpoint `cc2ff7a`; it is a fixed comparison, not an unqualified tip metric.
 
 **Measured branch shape:** At the review baseline, `main...7dd4840` changes 92
 paths with 19,963 insertions and 18,636 deletions, including all 5,172 lines of
@@ -5187,6 +5199,8 @@ pre-measurement tip `cc2ff7a`. Paths and blobs were read directly with `git
 ls-tree` and `git cat-file`; no historical tree was checked out. A line is one
 LF byte, matching `wc -l`. Every blob in the scopes below was text by the
 NUL-byte test, including retained HEX, signature and evidence files.
+This fixed endpoint deliberately excludes later corrective commits and is not
+presented as a measurement of the eventual branch tip.
 
 | Exact path scope | Files, before -> after | Lines, before -> after | Line delta |
 |---|---:|---:|---:|
