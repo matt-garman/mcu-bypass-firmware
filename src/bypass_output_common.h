@@ -4,6 +4,8 @@
 #ifndef BYPASS_OUTPUT_COMMON_H__
 #define BYPASS_OUTPUT_COMMON_H__
 
+#include <stdint.h>
+
 
 #if defined(BYPASS_MCU_PIC12F675)
 #  include "bypass_pins_pic12f675.h"

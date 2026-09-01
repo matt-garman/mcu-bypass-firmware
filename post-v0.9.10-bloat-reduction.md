@@ -3851,6 +3851,7 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 **Candidates:**
 
 - Make `src/bypass_output_common.h` include its own `<stdint.h>` dependency.
+  Complete below.
 - Remove empty `src/bypass_output_cd4053_simple.h`, or give it a real driver
   contract such as selector validation.
 - Add one-hot backend/output selector guards. The PIC10F320 output-selector
@@ -3882,7 +3883,7 @@ rejected with the intended message; the pristine copy passes. `make test` green.
   intended.
 - Any generated-byte change is intentional, reviewed, and fully requalified.
 
-**Completed slice -- PIC10F320 output selectors (`<commit>`):** The user added
+**Completed slice -- PIC10F320 output selectors (`cdeaf00`):** The user added
 one explicit file-scope guard for the three output-selector macros. More than
 one selector now fails on `PIC10F320 output selectors are mutually exclusive`
 before the shell's two selection idioms can disagree and produce unrelated
@@ -3906,6 +3907,23 @@ test-static-assert-guards` and `make STRICT_TOOLS=1 pic10f320-test-build`; the
 last must match all three pinned image hashes. This completed slice does not
 claim the other optional candidates above are implemented, so BR-SRC-02 remains
 `NEEDS USER`.
+
+**Completed slice -- direct `<stdint.h>` dependency (`<commit>`):** The user
+made `bypass_output_common.h` include the standard header that defines the
+`uint32_t` type used by its watchdog-budget arithmetic. The header no longer
+depends on whichever selected pin map it includes first to provide that type
+transitively. The pin maps retain their own direct includes because they also use
+fixed-width integer types independently.
+
+This is an include-order cleanup only. Strict host compilation of a translation
+unit that includes the common header passes under each of the four modular MCU
+selectors. Preprocessor output before and after the edit is token-identical for
+all four selectors, and `test-deliberate-duplication` passes 350 checks. The
+cross-toolchain confirmation is `make STRICT_TOOLS=1 all`; no generated-byte
+change is expected, and any changed release image must be investigated rather
+than accepted as part of this slice. No permanent regression was added for the
+presence of a single conventional dependency include. The other optional
+candidates remain, so BR-SRC-02 stays `NEEDS USER`.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 
