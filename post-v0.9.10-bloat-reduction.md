@@ -4060,7 +4060,7 @@ acceptance line above remains a rule for a reviewer.
 
 ## BR-REVIEW-01 - Resolve the completed-item review findings
 
-**Status:** DONE `<commit>`
+**Status:** DONE `cc2ff7a`
 
 **Review baseline:** `23eac73` on 2026-08-31. The review covered every task
 marked `DONE`, its attributed commit or commits, later fixes affecting it, and
@@ -4873,17 +4873,101 @@ coverage.
 
 ## BR-FINAL-06 - Measure the result
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Work:**
 
-- [ ] Record before/after tracked file count.
-- [ ] Record before/after lines by docs, tests, scripts, Makefile, and release
+- [x] Record before/after tracked file count.
+- [x] Record before/after lines by docs, tests, scripts, Makefile, and release
   machinery.
-- [ ] Record before/after normal CI commands and estimated duplicated runtime.
-- [ ] Record the number of mutable current-fact copies removed.
-- [ ] Record retained independent oracles and any assurance coverage added.
-- [ ] Do not use line reduction as the sole success criterion.
+- [x] Record before/after normal CI commands and estimated duplicated runtime.
+- [x] Record the number of mutable current-fact copies removed.
+- [x] Record retained independent oracles and any assurance coverage added.
+- [x] Do not use line reduction as the sole success criterion.
+
+**Result:** Measured from the initial review baseline `a865148` to the clean
+pre-measurement tip `cc2ff7a`. Paths and blobs were read directly with `git
+ls-tree` and `git cat-file`; no historical tree was checked out. A line is one
+LF byte, matching `wc -l`. Every blob in the scopes below was text by the
+NUL-byte test, including retained HEX, signature and evidence files.
+
+| Exact path scope | Files, before -> after | Lines, before -> after | Line delta |
+|---|---:|---:|---:|
+| All tracked paths | 684 -> 808 | -- | -- |
+| `docs/` | 12 -> 2 | 13,391 -> 640 | -12,751 |
+| `test/` | 153 -> 162 | 58,163 -> 64,716 | +6,553 |
+| `scripts/` | 20 -> 20 | 9,204 -> 11,204 | +2,000 |
+| `Makefile` | 1 -> 1 | 8,612 -> 8,529 | -83 |
+| `release/` | 455 -> 579 | 43,279 -> 56,115 | +12,836 |
+
+The file-count increase is entirely retained release history: outside
+`release/`, the tracked count is 229 at both endpoints. `v0.9.10` and
+`v0.9.11` each added 62 files and 6,418 lines; together they account exactly
+for the `release/` delta. That is immutable product/evidence growth brought in
+by baseline reconciliation, not mutable release-machinery growth. Excluding
+`release/`, the four maintained scopes in the table lose 4,281 lines. The ten
+durable root documents, measured separately so they do not overlap those
+scopes, grow from 8,106 to 8,976 lines as stable design and policy replace the
+deleted records. This branch-only plan was 4,983 lines at the endpoint and is
+excluded; BR-FINAL-07 must delete it before that reduction can be credited.
+
+Normal hosted CI retains five logical jobs and the same six PR or seven
+non-PR matrix-expanded jobs. The orchestration delta is:
+
+| Hosted-CI measure | Before | After | Delta |
+|---|---:|---:|---:|
+| YAML `make` command sites, including read-only queries | 19 | 15 | -4 |
+| Non-PR `make` processes, including matrix expansion and queries | 23 | 19 | -4 |
+| Non-PR build/test `make` processes, excluding queries | 19 | 17 | -2 |
+| Mutation-bearing aggregate paths | 2 | 1 | -1 |
+
+The only material duplicated execution removed is the stress job's partial
+second mutation sweep: non-PR CI goes from 137 fully provisioned mutant checks
+plus 62 host-runnable repeats to the 137 authoritative checks, removing 62 of
+199 dispatches (31.2%) and all duplicate mutation dispatches. No wall-clock
+claim follows because mutant costs differ and run in parallel. The three
+ATtiny202 simulation/fault/lock-step lanes still execute three times; routing
+them through one aggregate removes two workflow call sites and two repeated
+Make queries, not validation runtime. Named profiles likewise remove maintained
+argument bundles while retaining all 13 substantive fixture paths.
+
+Mutable-authority reductions use different units and are deliberately not
+summed:
+
+| Class | Measured reduction |
+|---|---|
+| Current resource prose | Five live transcription groups -> zero, plus seven later current-figure sites removed from four files |
+| Current-release declaration | Four bounded document copies -> one; three version-bearing prose edits removed per release |
+| Programming guidance | Two duplicate route-level procedures removed; distinct downloaded-release, generated per-release and source-checkout routes remain |
+| Test inventories/counts | At least five reader-facing inventory views removed; two later prose sites carrying seven numeric facts and four pinning assertions removed |
+| Resource policy | The `16`/`32`/`48` facts go from 33 literal occurrences to 15: five intentionally independent policy surfaces per fact |
+| Variant policy | Five redundant manual variant-association tables removed |
+| Historical search surface | Ten completed or superseded documents and 12,657 lines removed, including the two journals' 7,120 lines |
+
+Source finalization now changes one bounded release declaration rather than
+four; with the independently required changelog, that is two development
+documents per release. Generated artifacts, publication registration and the
+literal release-identity pin remain separate operations rather than being
+miscounted as duplicate prose.
+
+No Make gate goal was retired. The ordinary test inventory grows from 66 to 74
+named gates, and the retained deliberate-duplication register protects nine
+second-opinion structures, including two independent PIC return-stack witnesses
+and ten distinct verification layers. Added assurance includes a guard census
+expanded from 27 to 79 declarations with 53 target-toolchain mutation fixtures
+over 20 configurations; eight published-release invariants over all 12 retained
+releases with 21 negative controls; content binding for 13 formerly unchecked
+logs; three resource-oracle agreement checks; and new reference and
+claim-boundary contracts. These overlap and are not presented as one inflated
+check count.
+
+The result therefore meets the stated criteria by reducing maintained
+authorities, per-release prose edits, mutable measurements, duplicate
+orchestration and historical search noise while retaining every prior gate and
+adding independent checks. Tests and scripts grew because some prior claims had
+no executable witness; that assurance growth, the two retained release trees
+and this not-yet-deleted plan explain why whole-tree line count alone is the
+wrong success measure.
 
 **Success criteria:**
 
@@ -4973,11 +5057,11 @@ dependencies and acceptance criteria.
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
-| BR-REVIEW-01 | Resolve completed-item review findings | DONE `<commit>` |
+| BR-REVIEW-01 | Resolve completed-item review findings | DONE `cc2ff7a` |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |
-| BR-FINAL-06 | Measure outcome | TODO |
+| BR-FINAL-06 | Measure outcome | DONE `<commit>` |
 | BR-FINAL-07 | Delete this working document | TODO |
