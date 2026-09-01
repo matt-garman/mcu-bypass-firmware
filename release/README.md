@@ -163,9 +163,11 @@ validation suite — backs these binaries, through two mechanisms:
    signature against [`release/signing-key.asc`](signing-key.asc) and the pinned
    full fingerprint `6184219C6670945D7174F2B0149F042FCC3D3AEC`. It also requires
    that commit to have exactly one parent, equal to the source commit in
-   `QUALIFICATION`, and to change only `release/<version>/`. Changelog and status
-   documentation must therefore be finalized and committed before starting the
-   production qualification run.
+   `QUALIFICATION`, and to change only `release/<version>/` plus the exact
+   canonical append to `test/published_release_digests.txt` described below; the
+   history gate independently regenerates the append from the release tree.
+   Changelog and status documentation must therefore be finalized and committed
+   before starting the production qualification run.
 
    Release tags must be protected from update and deletion by the repository's
    tag rules. The workflow compares the remote tag's peeled target with the
@@ -179,7 +181,9 @@ Git is the retention authority. Keep every `release/vX.Y.Z/` file, its commit
 and its annotated tag in repository history; a hosted release body or asset is
 a distribution copy, not immutable provenance and never the only retained copy.
 Do not remove evidence from the development branch merely because a hosting
-service currently serves the same bytes.
+service currently serves the same bytes. After publication, keep the dedicated
+artifact commit reachable from the development branch; do not continue from its
+source parent merely to omit the retained release tree.
 
 No locally retained, signed receipt proves the exact hosted asset set or body
 bytes for the historical releases. Their signed workflows prove what they

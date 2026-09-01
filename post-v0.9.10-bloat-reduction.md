@@ -3289,7 +3289,7 @@ hosted log is not a release asset or a dependency of the qualification claim.
 
 ## BR-REL-04 - Define prospective hosted-asset retention and mirroring policy
 
-**Status:** DONE `<commit>`
+**Status:** DONE `e04765a`
 
 **Depends on:** BR-REL-01, BR-REL-02 (partially satisfied -- see below)
 
@@ -3493,7 +3493,7 @@ recipient who has only it and `sha256sum`.
 
 ## BR-REL-06 - Consider artifact-only tagged commits outside future main history
 
-**Status:** TODO
+**Status:** DECLINED
 
 **Depends on:** BR-REL-01, BR-REL-02, BR-REL-04
 
@@ -3524,6 +3524,41 @@ question below is answered: there is no archive to retain in the tagged commit.
 - How release-history verification adapts while preserving the source-parent
   relationship.
 - How local cleanup and garbage-collection guidance changes.
+
+**Decision:** Declined. Keep dedicated artifact commits reachable from ordinary
+development history.
+
+The proposal preserves the existing source-parent/artifact-child distinction but
+removes the child from the branch that supplies its durable reachability. That
+trade is no longer justified after BR-REL-02 declined an evidence archive and
+BR-REL-04 selected Git, not hosted assets, as the retention authority. The local
+audit found no authenticated hosted receipt for any historical release, found
+318 retained files outside the historical workflows' intended asset sets, and
+confirmed that `v0.9.10` has no hosted release at all. An off-main tag would
+therefore make tag protection, hosting retention and an as-yet-unbuilt mirror
+part of recovery without removing a current storage emergency.
+
+The current four-step sequence remains. Qualification measures a source commit;
+one dedicated child carries only the new release tree and its canonical digest-
+registry append; the signed tag points to that child; and the child remains
+reachable from the development branch after publication. Source archives do not
+need to substitute for omitted verifier/evidence files, the declined evidence
+archive is not revived, release-history verification needs no alternate
+topology, and ordinary Git garbage collection cannot discard the release while
+the branch and tag retain it.
+
+The durable edit also qualifies an adjacent stale sentence that still said the
+artifact child changes only `release/<version>/`. Since BR-RVW-01, the one
+permitted exception is the exact canonical append to
+`test/published_release_digests.txt`; the sequencing section already said so and
+the history gate enforces it. The two descriptions now agree.
+
+This deliberately does not satisfy the proposal's checkout-size objective. The
+measured repository is small, and BR-FINAL-06 shows that all baseline-to-tip
+file-count growth is the two retained release trees. The accepted cost is visible
+and bounded per release; the alternative's unauthenticated-host and reachability
+risk is not. `release/README.md` now carries the durable rule so this decision
+survives deletion of the branch plan.
 
 **Acceptance:**
 
@@ -5076,9 +5111,9 @@ dependencies and acceptance criteria.
 | BR-REL-01 | Define canonical signed release index | DONE `bb5ba13` + `b5704f7` |
 | BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `f401507` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
-| BR-REL-04 | Define hosted retention/mirroring | DONE `<commit>` |
+| BR-REL-04 | Define hosted retention/mirroring | DONE `e04765a` |
 | BR-REL-05 | Keep releases self-contained | DONE `a636400` |
-| BR-REL-06 | Consider tag-only artifact commits | TODO |
+| BR-REL-06 | Consider tag-only artifact commits | DECLINED |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
 | BR-REL-08 | Collapse duplicate release phase logs | DONE |
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
