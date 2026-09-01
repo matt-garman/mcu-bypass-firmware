@@ -4561,12 +4561,19 @@ qualification and plan deletion.
   any duplicated safety statement must remain at both sites, classify it as a
   deliberate independent boundary and add the witness that prevents drift.
 
-- [ ] **BR-RVW2-07 -- MEDIUM -- include the live release policy in the durable
+- [x] **BR-RVW2-07 -- MEDIUM -- include the live release policy in the durable
   reference gate.** `test/test_reference_contract.py` skips every path under
   `release/` to avoid rewriting immutable historical bundles, but that also
   skips the actively maintained `release/README.md` authority. Exclude only the
   per-version historical directories, scan the live policy, and add a negative
   fixture proving that a broken path or anchor there fails.
+
+  **Resolved:** The reference contract now excludes only versioned historical
+  release trees and scans `release/README.md` as a durable live document. Its
+  self-test pins both sides of that boundary and rejects a missing relative link
+  from the live policy. The focused gate passes 13 checks across 230 files and
+  15 documents; the added document and three negative checks account for the
+  change from the review baseline.
 
 - [ ] **BR-RVW2-08 -- LOW -- close direct PIC harness dependency gaps.** The
   direct PIC10F322 and PIC12F675 fault/lock-step binary targets derive `CTX_ADDR`

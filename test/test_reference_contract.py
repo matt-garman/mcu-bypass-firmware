@@ -35,15 +35,16 @@ actually defines. This is the same defect one layer up: `CHANGELOG.md` carried
 a live Markdown link to a document deleted two releases later, so the entry
 rendered a dead link on every page view.
 
-SCOPE. `release/` is excluded: published release directories are immutable
-artifacts whose links were correct against the tree of their own tag, and
-`test-published-release-immutability` is what holds them. `CHANGELOG.md` is
-excluded from the section rule only: an entry recording what a since-deleted
-document said is a true statement about the past, and every such entry in it
-names the document, so a reader can see at once what is being cited. Its links
-are still checked, because a dead hyperlink is dead whatever it describes.
-Branch-only working documents are excluded: they are deleted before a release
-and legitimately quote retired wording.
+SCOPE. Versioned directories under `release/` are excluded: published release
+artifacts had links that were correct against the tree of their own tag, and
+`test-published-release-immutability` is what holds them. The live
+`release/README.md` policy is checked like every other durable document.
+`CHANGELOG.md` is excluded from the section rule only: an entry recording what
+a since-deleted document said is a true statement about the past, and every
+such entry in it names the document, so a reader can see at once what is being
+cited. Its links are still checked, because a dead hyperlink is dead whatever
+it describes. Branch-only working documents are excluded: they are deleted
+before a release and legitimately quote retired wording.
 """
 
 import os
@@ -69,6 +70,9 @@ EXTERNAL_DOCUMENT = re.compile(
 
 BRANCH_ONLY_BANNER = re.compile(
     r"^>\s*\*\*Branch-(only|scoped)\s+working\s+document\.\*\*", re.IGNORECASE)
+
+HISTORICAL_RELEASE_PATH = re.compile(
+    r"^release/v[0-9]+(?:\.[0-9]+)+(?:-[^/]+)?/")
 
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 ADOC_LINK = re.compile(r"(?:link|xref):([^\[\s]+)\[")
@@ -101,6 +105,10 @@ def read_text(name):
         return (ROOT / name).read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return None
+
+
+def is_historical_release_path(name):
+    return bool(HISTORICAL_RELEASE_PATH.match(name))
 
 
 def is_branch_only(name, text):
@@ -202,6 +210,13 @@ def self_test():
     check(link_violations("fixture.md", "[x](https://example.invalid/a.md)\n",
                           anchors) == [],
           "negative case -- an absolute URL was resolved against the tree")
+    check(not is_historical_release_path("release/README.md"),
+          "negative case -- the live release policy was excluded")
+    check(is_historical_release_path("release/v0.9.11/MANIFEST.md"),
+          "negative case -- a historical release document was included")
+    check(link_violations("release/README.md", "[x](missing.md)\n", {}) != [],
+          "negative case -- a broken link in the live release policy was "
+          "accepted")
 
 
 def main():
@@ -210,7 +225,7 @@ def main():
     documents = {}
     scanned = 0
     for name in tracked_files():
-        if name.startswith("release/") or name == SELF:
+        if is_historical_release_path(name) or name == SELF:
             continue
         text = read_text(name)
         if text is None or is_branch_only(name, text):
