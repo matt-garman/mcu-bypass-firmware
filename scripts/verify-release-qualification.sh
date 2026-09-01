@@ -991,7 +991,9 @@ for flash_image in "${!flash_command[@]}"; do
 done
 
 # The source-checkout block, if the release publishes one, must be exactly what
-# it says: make invocations, each selecting the variant its own image names.
+# it says: one MCU-specific Make programming goal and one exact selector for the
+# variant its own image names. This mapping is intentionally independent of the
+# producer and renderer.
 if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 	flash_source="$work/flash-source.sh"
 	awk '
@@ -1021,26 +1023,51 @@ if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 			'make '*) ;;
 			*) die "the source-checkout command for $flash_current is not a make invocation: $flash_line" ;;
 		esac
-		# The variant assignment is found by name and then compared for
-		# equality, not tested as a substring of the whole line. Two selector
-		# names are legitimately in use -- VARIANT for the ATtiny and PIC10F322
-		# goals, PIC10F320_VARIANT for the PIC10F320, each being the name its
-		# own build lane reads -- and a substring test would also accept a
-		# longer variant name that merely starts with this image's, or a second
-		# assignment appended after a correct first one.
 		flash_stem=${flash_current%.hex}
+		flash_part=${flash_current#*-}
+		flash_part=${flash_part%%-*}
+		case "$flash_part" in
+			attiny13a) flash_expected_goal=attiny13a-program; flash_expected_selector=VARIANT ;;
+			attiny45)  flash_expected_goal=attiny45-program;  flash_expected_selector=VARIANT ;;
+			attiny85)  flash_expected_goal=attiny85-program;  flash_expected_selector=VARIANT ;;
+			attiny202) flash_expected_goal=attiny202-program; flash_expected_selector=VARIANT ;;
+			pic10f322) flash_expected_goal=pic10f322-program; flash_expected_selector=VARIANT ;;
+			pic10f320) flash_expected_goal=pic10f320-program; flash_expected_selector=PIC10F320_VARIANT ;;
+			pic12f675)
+				die "MANIFEST.md publishes a generic source-checkout command for $flash_current; PIC12F675 requires its guarded transaction" ;;
+			*) die "the source-checkout command names no supported MCU route: $flash_current" ;;
+		esac
 		read -r -a flash_words <<<"$flash_line"
+		[ "${#flash_words[@]}" -ge 3 ] && [ "${flash_words[0]}" = make ] \
+			|| die "the source-checkout command for $flash_current is not one plain make invocation: $flash_line"
+		flash_goal=""
+		flash_goal_count=0
+		flash_selector_name=""
 		flash_selector=""
 		flash_selector_count=0
-		for flash_word in "${flash_words[@]}"; do
+		for flash_word in "${flash_words[@]:1}"; do
 			case "$flash_word" in
-				*VARIANT=*)
-					flash_selector=${flash_word#*VARIANT=}
-					flash_selector_count=$((flash_selector_count + 1)) ;;
+				*=*)
+					flash_name=${flash_word%%=*}
+					[[ "$flash_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+						|| die "the source-checkout command for $flash_current has a malformed assignment: $flash_word"
+					case "$flash_name" in
+						*VARIANT)
+							flash_selector_name=$flash_name
+							flash_selector=${flash_word#*=}
+							flash_selector_count=$((flash_selector_count + 1)) ;;
+					esac ;;
+				*)
+					flash_goal=$flash_word
+					flash_goal_count=$((flash_goal_count + 1)) ;;
 			esac
 		done
+		[ "$flash_goal_count" -eq 1 ] && [ "$flash_goal" = "$flash_expected_goal" ] \
+			|| die "the source-checkout command for $flash_current must use the exact $flash_expected_goal goal: $flash_line"
 		[ "$flash_selector_count" -eq 1 ] \
 			|| die "the source-checkout command for $flash_current must carry exactly one variant selector: $flash_line"
+		[ "$flash_selector_name" = "$flash_expected_selector" ] \
+			|| die "the source-checkout command for $flash_current must use the exact $flash_expected_selector selector: $flash_line"
 		[ "$flash_selector" = "${flash_stem##*-}" ] \
 			|| die "the source-checkout command for $flash_current does not select its own variant: $flash_line"
 		flash_current=""

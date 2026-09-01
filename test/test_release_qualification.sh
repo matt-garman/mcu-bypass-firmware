@@ -231,6 +231,61 @@ done < <(printf '%s\n' "${pinned_pk2_tags[@]}" | while read -r pinned_tag; do
 done)
 checks=$((checks + 1))
 
+# Exercise the producer's actual source-command validator without sourcing the
+# long-running release orchestrator. The validator is intentionally a separate
+# function from img_row's generator, so extracting this one bounded definition
+# preserves the independent comparison while keeping the production script's
+# normal entry point untouched.
+producer_source_validator=$(awk '
+	/^release_producer_source_command_valid\(\) \{$/ { capture=1 }
+	capture { print }
+	capture && /^}$/ { exit }
+' "$RELEASE")
+[ -n "$producer_source_validator" ] \
+	|| fail "release producer has no extractable source-command validator"
+eval "$producer_source_validator"
+declare -F release_producer_source_command_valid >/dev/null \
+	|| fail "release producer source-command validator did not load"
+grep -Fq 'release_producer_source_command_valid "$image" "$command"' "$RELEASE" \
+	|| fail "release producer does not apply its source-command validator to each row"
+source_route_cases=(
+	'attiny13a attiny13a-program VARIANT'
+	'attiny45 attiny45-program VARIANT'
+	'attiny85 attiny85-program VARIANT'
+	'attiny202 attiny202-program VARIANT'
+	'pic10f322 pic10f322-program VARIANT'
+	'pic10f320 pic10f320-program PIC10F320_VARIANT'
+)
+for source_route in "${source_route_cases[@]}"; do
+	read -r source_part source_goal source_selector <<<"$source_route"
+	source_image="bypass-$source_part-cd4053_simple.hex"
+	source_command="make $source_goal $source_selector=cd4053_simple"
+	[ "$source_part" != attiny202 ] \
+		|| source_command+=" XT_UPDI_PORT=/dev/ttyACM0"
+	release_producer_source_command_valid "$source_image" "$source_command" \
+		|| fail "release producer rejected the exact $source_part goal/selector pair"
+	wrong_goal=attiny202-program
+	[ "$source_goal" != "$wrong_goal" ] || wrong_goal=pic10f322-program
+	foreign_selector=PIC10F320_VARIANT
+	[ "$source_selector" != "$foreign_selector" ] || foreign_selector=VARIANT
+	for bad_source_command in \
+			"make $source_goal WRONG${source_selector}=cd4053_simple" \
+			"make $wrong_goal $source_selector=cd4053_simple" \
+			"make $source_goal $foreign_selector=cd4053_simple" \
+			"make $source_goal $source_selector=cd4053_simple $source_selector=cd4053_simple" \
+			"make $source_goal $source_selector=cd4053_simple $source_selector=tq2_l2_5v_relay"; do
+		if release_producer_source_command_valid "$source_image" "$bad_source_command"; then
+			fail "release producer accepted malformed $source_part source command: $bad_source_command"
+		fi
+	done
+done
+if release_producer_source_command_valid \
+		bypass-pic12f675-cd4053_simple.hex \
+		'make pic12f675-release-program VARIANT=cd4053_simple'; then
+	fail "release producer accepted a generic PIC12F675 source command"
+fi
+checks=$((checks + 1))
+
 mapfile -t test_long_run_lines < <(grep -nF \
 	'make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 PIC12F675_FLASH_IMAGES=build' \
 	"$RELEASE")
@@ -554,10 +609,29 @@ fixture_flash_command() {
 	esac
 }
 
+# Independently authored counterpart of the three production mappings. It is
+# intentionally not rendered by release-documentation.sh: retained-manifest
+# verification must catch either side drifting from the executable Make routes.
+fixture_source_command() {
+	local image=$1 part variant goal selector
+	part=${image#*-}; part=${part%%-*}
+	variant=${image%.hex}; variant=${variant##*-}
+	case "$part" in
+		attiny13a) goal=attiny13a-program; selector=VARIANT ;;
+		attiny45)  goal=attiny45-program;  selector=VARIANT ;;
+		attiny85)  goal=attiny85-program;  selector=VARIANT ;;
+		attiny202) goal=attiny202-program; selector=VARIANT ;;
+		pic10f322) goal=pic10f322-program; selector=VARIANT ;;
+		pic10f320) goal=pic10f320-program; selector=PIC10F320_VARIANT ;;
+		*) return 1 ;;
+	esac
+	printf 'make %s %s=%s\n' "$goal" "$selector" "$variant"
+}
+
 # Mirrors release_render_flashing's published shape without calling it, for the
 # same reason write_evidence_index mirrors the index writer.
 write_flashing_section() {
-	local image stem source_image
+	local image source_image
 	printf '\n## Flashing\n\n'
 	printf 'Fixture flashing prose.\n\n'
 	printf '### Programmer profiles\n\n'
@@ -581,12 +655,33 @@ write_flashing_section() {
 		esac
 	done
 	[ -n "$source_image" ] || return 1
-	stem=${source_image%.hex}
 	printf '### Source-checkout equivalents\n\n'
 	printf '```sh\n'
 	printf '# %s\n' "$source_image"
-	printf 'make fixture-program VARIANT=%s\n\n' "${stem##*-}"
+	printf '%s\n' "$(fixture_source_command "$source_image")"
 	printf '```\n\n'
+}
+
+replace_fixture_source_command() {
+	local image=$1 command=$2 staged="$work/manifest-source.tmp"
+	awk -v image="$image" -v command="$command" '
+		$0 == "### Source-checkout equivalents" { source=1 }
+		source && $0 == "```sh" { block=1; print; next }
+		block && !image_done && /^# / {
+			print "# " image
+			image_done=1
+			next
+		}
+		block && image_done && !command_done && $0 != "" && $0 != "```" {
+			print command
+			command_done=1
+			next
+		}
+		{ print }
+		END { exit !(image_done && command_done) }
+	' "$release/MANIFEST.md" > "$staged" \
+		|| fail "could not replace the fixture source-checkout command"
+	mv "$staged" "$release/MANIFEST.md"
 }
 
 # The fixture's own index producer, deliberately written to mirror the shape
@@ -690,7 +785,8 @@ refresh_evidence_index() {
 # unsealed digest is part of what such an edit breaks in a real release.
 reseal_provenance() {
 	local provenance_names
-	provenance_names=$(make -s --no-print-directory -C "$ROOT" print-RELEASE_PROVENANCE_FILES)
+	provenance_names=$(make -s --no-print-directory -C "$ROOT" CC=: \
+		print-RELEASE_PROVENANCE_FILES)
 	(
 		cd "$release"
 		grep -v -E '  (QUALIFICATION|MANIFEST\.md|README\.md)$' SHA256SUMS > SHA256SUMS.tmp || true
@@ -1084,40 +1180,77 @@ sed -i "s|^# ${flash_victim}\$|# bypass-notmine-cd4053_simple.hex\\navrdude -c u
 expect_fail "command for an image this release does not ship" \
 	"which this release does not ship"
 
-# The variant is not a question to ask the reader; the image answers it.
+# The image binds all three fields: programming goal, selector name and selector
+# value. Exercise the generic and PIC10F320 selector families independently.
+source_generic=""
+for image in "${canonical_images[@]}"; do
+	case "$image" in *-attiny13a-*) source_generic=$image; break ;; esac
+done
+[ -n "$source_generic" ] || fail "the canonical image set contains no ATtiny13a image"
+source_variant=${source_generic%.hex}; source_variant=${source_variant##*-}
+
 reset_fixture
-sed -i 's|^make fixture-program VARIANT=.*$|make fixture-program VARIANT=not_the_variant|' \
-	"$release/MANIFEST.md"
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program VARIANT=not_the_variant"
 expect_fail "source-checkout command selecting another variant" \
 	"does not select its own variant"
 
 reset_fixture
-sed -i 's|^make fixture-program VARIANT=|fixture-program VARIANT=|' "$release/MANIFEST.md"
+replace_fixture_source_command "$source_generic" \
+	"attiny13a-program VARIANT=$source_variant"
 expect_fail "source-checkout command that is not a make invocation" \
 	"is not a make invocation"
 
-# Two selectors in one command. The first may name the right variant and the
-# second a different one, so "the correct assignment appears somewhere in this
-# line" is not the question being asked; which variant the command SELECTS is.
 reset_fixture
-sed -i 's|^\(make fixture-program VARIANT=.*\)$|\1 PIC10F320_VARIANT=not_the_variant|' \
-	"$release/MANIFEST.md"
-expect_fail "source-checkout command carrying two variant selectors" \
+prefixed_selector=WRONGVARIANT
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program $prefixed_selector=$source_variant"
+expect_fail "source-checkout command with a prefixed selector" \
+	"must use the exact VARIANT selector"
+
+reset_fixture
+replace_fixture_source_command "$source_generic" \
+	"make pic10f322-program VARIANT=$source_variant"
+expect_fail "source-checkout command using another MCU's goal" \
+	"must use the exact attiny13a-program goal"
+
+reset_fixture
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program PIC10F320_VARIANT=$source_variant"
+expect_fail "source-checkout command using a foreign selector" \
+	"must use the exact VARIANT selector"
+
+reset_fixture
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program VARIANT=$source_variant VARIANT=$source_variant"
+expect_fail "source-checkout command duplicating its selector" \
 	"must carry exactly one variant selector"
 
-# A namespaced selector is legitimate: the PIC10F320 build lane reads
-# PIC10F320_VARIANT rather than VARIANT, and its programming goal must select
-# with the same name or it would flash an image it did not build. Accepted here,
-# and held to exactly the same requirement.
 reset_fixture
-sed -i 's|^make fixture-program VARIANT=\(.*\)$|make fixture-program PIC10F320_VARIANT=\1|' \
-	"$release/MANIFEST.md"
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program VARIANT=$source_variant VARIANT=not_the_variant"
+expect_fail "source-checkout command carrying conflicting selectors" \
+	"must carry exactly one variant selector"
+
+# A namespaced selector is legitimate only with the PIC10F320 goal and image.
+source_pic320=$flash_pic_victim
+source_pic320_variant=${source_pic320%.hex}
+source_pic320_variant=${source_pic320_variant##*-}
+reset_fixture
+replace_fixture_source_command "$source_pic320" \
+	"make pic10f320-program PIC10F320_VARIANT=$source_pic320_variant"
 reseal_provenance
-expect_pass "namespaced source-checkout selector naming its own variant"
+expect_pass "PIC10F320 source-checkout goal and selector pair"
 
 reset_fixture
-sed -i 's|^make fixture-program VARIANT=.*$|make fixture-program PIC10F320_VARIANT=not_the_variant|' \
-	"$release/MANIFEST.md"
+replace_fixture_source_command "$source_pic320" \
+	"make pic10f320-program VARIANT=$source_pic320_variant"
+expect_fail "PIC10F320 source-checkout command using the foreign selector" \
+	"must use the exact PIC10F320_VARIANT selector"
+
+reset_fixture
+replace_fixture_source_command "$source_pic320" \
+	"make pic10f320-program PIC10F320_VARIANT=not_the_variant"
 expect_fail "namespaced source-checkout selector naming another variant" \
 	"does not select its own variant"
 
@@ -1702,7 +1835,7 @@ expect_fail "manifest soak-count mismatch" "soak count does not match"
 
 [ "${#soak_names[@]}" -eq 18 ] \
 	|| fail "canonical release soak set has ${#soak_names[@]} entries, expected 18"
-overridden=$(make -s --no-print-directory -C "$ROOT" \
+overridden=$(make -s --no-print-directory -C "$ROOT" CC=: \
 	RELEASE_SOAK_NAMES=bad print-RELEASE_SOAK_NAMES)
 [ "$overridden" = "${soak_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_SOAK_NAMES"
@@ -1726,7 +1859,7 @@ for retired in pic12f675-test.log pic12f675-test-target-variants.log; do
 	[[ " ${evidence_names[*]} " != *" $retired "* ]] \
 		|| fail "canonical release evidence set still retains split PIC12F675 log $retired"
 done
-overridden=$(make -s --no-print-directory -C "$ROOT" \
+overridden=$(make -s --no-print-directory -C "$ROOT" CC=: \
 	RELEASE_EVIDENCE_FILES=bad print-RELEASE_EVIDENCE_FILES)
 [ "$overridden" = "${evidence_names[*]}" ] \
 	|| fail "command-line override changed canonical RELEASE_EVIDENCE_FILES"
@@ -2139,6 +2272,59 @@ checks=$((checks + 1))
 # The renderer's own refusals. The producer checks these rows in far more
 # detail, but a page rendered from rows nobody checked would still be wrong,
 # and each shape below reached a published release or nearly did.
+write_renderer_source_fixture() {
+	local image=$1 command=$2
+	printf '%s\t%s\t%s\n' "$image" make-source "$command" \
+		"$image" avrdude-isp \
+		"avrdude -c fixture -p fixture -U flash:w:$image:i" \
+		> "$flashing_fixture"
+}
+
+render_source_accept() {
+	local label=$1 image=$2 command=$3
+	write_renderer_source_fixture "$image" "$command"
+	release_render_flashing "$flashing_fixture" v0.9.9 \
+		test-programmer serialupdi /dev/ttyUSB0 >/dev/null \
+		|| fail "assembled flashing renderer rejected $label"
+	checks=$((checks + 1))
+}
+
+render_source_reject() {
+	local label=$1 image=$2 command=$3
+	write_renderer_source_fixture "$image" "$command"
+	if release_render_flashing "$flashing_fixture" v0.9.9 \
+			test-programmer serialupdi /dev/ttyUSB0 >/dev/null 2>&1; then
+		fail "assembled flashing renderer accepted $label"
+	fi
+	checks=$((checks + 1))
+}
+
+for source_route in "${source_route_cases[@]}"; do
+	read -r source_part source_goal source_selector <<<"$source_route"
+	source_image="bypass-$source_part-cd4053_simple.hex"
+	source_command="make $source_goal $source_selector=cd4053_simple"
+	[ "$source_part" != attiny202 ] \
+		|| source_command+=" XT_UPDI_PORT=/dev/ttyACM0"
+	render_source_accept "the exact $source_part goal/selector pair" \
+		"$source_image" "$source_command"
+done
+
+source_image=bypass-pic10f322-cd4053_simple.hex
+prefixed_selector=WRONGVARIANT
+render_source_reject "a prefixed source selector" "$source_image" \
+	"make pic10f322-program $prefixed_selector=cd4053_simple"
+render_source_reject "another MCU's source goal" "$source_image" \
+	'make attiny202-program VARIANT=cd4053_simple'
+render_source_reject "a foreign source selector" "$source_image" \
+	'make pic10f322-program PIC10F320_VARIANT=cd4053_simple'
+render_source_reject "a duplicated source selector" "$source_image" \
+	'make pic10f322-program VARIANT=cd4053_simple VARIANT=cd4053_simple'
+render_source_reject "conflicting source selectors" "$source_image" \
+	'make pic10f322-program VARIANT=cd4053_simple VARIANT=tq2_l2_5v_relay'
+render_source_reject "the generic selector on PIC10F320" \
+	bypass-pic10f320-cd4053_simple.hex \
+	'make pic10f320-program VARIANT=cd4053_simple'
+
 render_flash_reject() {
 	local label=$1 image=$2 profile=$3 command=$4
 	printf '%s\t%s\t%s\n' "$image" "$profile" "$command" > "$flashing_fixture"
@@ -2160,8 +2346,8 @@ render_flash_reject "a download command that needs a checkout" \
 render_flash_reject "a command filed under an image it does not name" \
 	bypass-attiny13a-cd4053_simple.hex avrdude-isp \
 	'avrdude -c usbtiny -p t13 -U flash:w:bypass-attiny45-cd4053_simple.hex:i'
-render_flash_reject "a source-checkout command for another variant" \
-	bypass-pic10f322-cd4053_simple.hex make-source \
+render_source_reject "a source-checkout command for another variant" \
+	bypass-pic10f322-cd4053_simple.hex \
 	'make pic10f322-program VARIANT=tq2_l2_5v_relay'
 render_flash_reject "an unknown programming profile" \
 	bypass-pic10f322-cd4053_simple.hex ipecmd-pk3 \
@@ -2188,7 +2374,7 @@ checks=$((checks + 1))
 # Every directory handed to the verifier must have a corresponding build in the
 # rendered recipe. Pin the five independent build roots so adding a sixth
 # RELEASE_IMAGE_DIRS entry cannot leave the public procedure incomplete.
-canonical_release_dirs_text=$(make -s --no-print-directory -C "$ROOT" \
+canonical_release_dirs_text=$(make -s --no-print-directory -C "$ROOT" CC=: \
 	print-RELEASE_IMAGE_DIRS) \
 	|| fail "could not read canonical RELEASE_IMAGE_DIRS"
 read -r -a canonical_release_dirs <<<"$canonical_release_dirs_text"
@@ -2197,7 +2383,7 @@ read -r -a canonical_release_dirs <<<"$canonical_release_dirs_text"
 expected_canonical_dirs=()
 for variable in AVR_BUILD_DIR XT_BUILD_DIR PIC10F322_BUILD_DIR \
 		PIC10F320_BUILD_DIR PIC12F675_BUILD_DIR; do
-	dir=$(make -s --no-print-directory -C "$ROOT" print-"$variable") \
+	dir=$(make -s --no-print-directory -C "$ROOT" CC=: print-"$variable") \
 		|| fail "could not read $variable"
 	expected_canonical_dirs+=("$dir")
 	[[ " ${canonical_release_dirs[*]} " == *" $dir "* ]] \

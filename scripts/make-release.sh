@@ -2774,6 +2774,55 @@ img_row() {
 	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "$used" "$fuses" "$sha"
 }
 
+# This validator is deliberately separate from img_row's command generator. It
+# derives the one allowed goal/selector pair from the image MCU, then parses
+# whole shell words; agreement with text generated from the same table would not
+# catch a generator that paired an image with another MCU's programming route.
+release_producer_source_command_valid() {
+	[ "$#" -eq 2 ] || return 2
+	local image=$1 command=$2 part variant expected_goal expected_selector word name
+	local goal="" selector_name="" selector_value=""
+	local goal_count=0 selector_count=0
+	local -a words=()
+
+	part=${image#*-}
+	part=${part%%-*}
+	variant=${image%.hex}
+	variant=${variant##*-}
+	case "$part" in
+		attiny13a) expected_goal=attiny13a-program; expected_selector=VARIANT ;;
+		attiny45)  expected_goal=attiny45-program;  expected_selector=VARIANT ;;
+		attiny85)  expected_goal=attiny85-program;  expected_selector=VARIANT ;;
+		attiny202) expected_goal=attiny202-program; expected_selector=VARIANT ;;
+		pic10f322) expected_goal=pic10f322-program; expected_selector=VARIANT ;;
+		pic10f320) expected_goal=pic10f320-program; expected_selector=PIC10F320_VARIANT ;;
+		*) return 1 ;;
+	esac
+
+	read -r -a words <<<"$command"
+	[ "${#words[@]}" -ge 3 ] && [ "${words[0]}" = make ] || return 1
+	for word in "${words[@]:1}"; do
+		case "$word" in
+			*=*)
+				name=${word%%=*}
+				[[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+				case "$name" in
+					*VARIANT)
+						selector_name=$name
+						selector_value=${word#*=}
+						selector_count=$((selector_count + 1)) ;;
+				esac ;;
+			*)
+				goal=$word
+				goal_count=$((goal_count + 1)) ;;
+		esac
+	done
+	[ "$goal_count" -eq 1 ] && [ "$goal" = "$expected_goal" ] \
+		&& [ "$selector_count" -eq 1 ] \
+		&& [ "$selector_name" = "$expected_selector" ] \
+		&& [ "$selector_value" = "$variant" ]
+}
+
 # Every published programming command, checked before it is rendered. What is
 # checked is not spelling: it is that a reader who pastes a line writes the
 # exact image the line is filed under, with the fuse bytes their own Images row
@@ -2782,10 +2831,9 @@ img_row() {
 check_flash_commands() {
 	local file=$1 image profile command stem variant fuse name value block
 	local pk2_command pk2_arg pk2_image pk2_image_count
-	local source_selector source_selector_count source_word
 	local pinned tag_var cmd_var hex_var published
 	local -A download_seen=()
-	local -a download_cmds=() pk2_args=() source_words=()
+	local -a download_cmds=() pk2_args=()
 
 	while IFS=$'\t' read -r image profile command; do
 		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
@@ -2827,33 +2875,8 @@ check_flash_commands() {
 					'make '*) ;;
 					*) die "the source-checkout command for $image is not a make invocation: $command" ;;
 				esac
-				# The variant is not a question to ask the reader: the image
-				# they picked already answered it. The release published
-				# <selector>=<v> beside a basename ending in that very variant.
-				#
-				# Matched as a WHOLE WORD and compared for equality, not tested
-				# as a substring. Two selectors are legitimately in play --
-				# VARIANT for the ATtiny and PIC10F322 lanes, PIC10F320_VARIANT
-				# for the 320, because that is the name each lane's build goal
-				# reads -- so the assignment is located by name and its value is
-				# then required to BE the variant. A substring test accepts
-				# `VARIANT=cd4053_simple_and_more` under a `-cd4053_simple.hex`
-				# image, and accepts a second, contradicting assignment appended
-				# after the first.
-				read -r -a source_words <<<"$command"
-				source_selector=""
-				source_selector_count=0
-				for source_word in "${source_words[@]}"; do
-					case "$source_word" in
-						*VARIANT=*)
-							source_selector=${source_word#*VARIANT=}
-							source_selector_count=$((source_selector_count + 1)) ;;
-					esac
-				done
-				[ "$source_selector_count" -eq 1 ] \
-					|| die "the source-checkout command for $image must carry exactly one variant selector: $command"
-				[ "$source_selector" = "$variant" ] \
-					|| die "the source-checkout command for $image does not select its own variant $variant: $command"
+				release_producer_source_command_valid "$image" "$command" \
+					|| die "the source-checkout command for $image does not use its exact programming goal, selector and variant: $command"
 				;;
 		esac
 		# Both writers verify what they wrote -- avrdude unless -V turns it

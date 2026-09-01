@@ -1492,11 +1492,59 @@ release_render_pic12f675_flashing() {
 		''
 }
 
+# Re-derive the source-checkout route here rather than trusting the producer's
+# validation. The retained-manifest verifier has its own copy of the relation as
+# a third opinion over the bytes that are eventually committed.
+_release_source_command_valid() {
+	[ "$#" -eq 2 ] || return 2
+	local image=$1 command=$2 part variant expected_goal expected_selector word name
+	local goal="" selector_name="" selector_value=""
+	local goal_count=0 selector_count=0
+	local -a words=()
+
+	part=${image#*-}
+	part=${part%%-*}
+	variant=${image%.hex}
+	variant=${variant##*-}
+	case "$part" in
+		attiny13a) expected_goal=attiny13a-program; expected_selector=VARIANT ;;
+		attiny45)  expected_goal=attiny45-program;  expected_selector=VARIANT ;;
+		attiny85)  expected_goal=attiny85-program;  expected_selector=VARIANT ;;
+		attiny202) expected_goal=attiny202-program; expected_selector=VARIANT ;;
+		pic10f322) expected_goal=pic10f322-program; expected_selector=VARIANT ;;
+		pic10f320) expected_goal=pic10f320-program; expected_selector=PIC10F320_VARIANT ;;
+		*) return 1 ;;
+	esac
+
+	read -r -a words <<<"$command"
+	[ "${#words[@]}" -ge 3 ] && [ "${words[0]}" = make ] || return 1
+	for word in "${words[@]:1}"; do
+		case "$word" in
+			*=*)
+				name=${word%%=*}
+				[[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+				case "$name" in
+					*VARIANT)
+						selector_name=$name
+						selector_value=${word#*=}
+						selector_count=$((selector_count + 1)) ;;
+				esac ;;
+			*)
+				goal=$word
+				goal_count=$((goal_count + 1)) ;;
+		esac
+	done
+	[ "$goal_count" -eq 1 ] && [ "$goal" = "$expected_goal" ] \
+		&& [ "$selector_count" -eq 1 ] \
+		&& [ "$selector_name" = "$expected_selector" ] \
+		&& [ "$selector_value" = "$variant" ]
+}
+
 release_render_flashing() {
 	[ "$#" -eq 5 ] || return 2
 	local flash_commands=$1 release_tag=$2
 	local isp_programmer=$3 updi_programmer=$4 updi_port=$5
-	local image profile command stem variant have_download=0
+	local image profile command have_download=0
 	[ -s "$flash_commands" ] && [ -f "$flash_commands" ] \
 		&& [ ! -L "$flash_commands" ] || return 2
 	[ -n "$isp_programmer" ] && [ -n "$updi_programmer" ] \
@@ -1514,13 +1562,9 @@ release_render_flashing() {
 		case "$command" in
 			*'<'*|*'>'*|*'(or:'*) return 2 ;;
 		esac
-		stem=${image%.hex}; variant=${stem##*-}
 		case "$profile" in
 			make-source)
-				case "$command" in
-					'make '*"VARIANT=$variant"*) ;;
-					*) return 2 ;;
-				esac ;;
+				_release_source_command_valid "$image" "$command" || return 2 ;;
 			avrdude-isp|avrdude-updi|pk2cmd)
 				case "$command" in
 					*'make '*) return 2 ;;

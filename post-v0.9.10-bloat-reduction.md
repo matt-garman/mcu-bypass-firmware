@@ -4519,7 +4519,7 @@ qualification and plan deletion.
   The local-routing contract rejects either gate in the hosted inventories and
   exercises PIC-only, ATtiny202-only and combined skip modes under strict mode.
 
-- [ ] **BR-RVW2-02 -- HIGH -- bind every source-checkout programming command to
+- [x] **BR-RVW2-02 -- HIGH -- bind every source-checkout programming command to
   its image's exact Make goal and selector name.** The producer and verifier
   currently accept any assignment word whose name ends in `VARIANT`, and the
   renderer accepts the same relation as a substring. A command such as
@@ -4531,6 +4531,17 @@ qualification and plan deletion.
   selector name, a correct selector on the wrong MCU goal, a foreign selector,
   and duplicate or conflicting assignments in the producer, renderer and
   retained-manifest verifier paths.
+
+  **Resolved:** The producer, renderer and retained-manifest verifier now each
+  independently map an image MCU to its exact programming goal and selector.
+  Each path parses whole command words, requires one `make` goal, exactly one
+  assignment whose name ends in `VARIANT`, the expected selector spelling and
+  the image's complete variant; unrelated assignment words remain available for
+  inputs such as `XT_UPDI_PORT`. The generic per-image path explicitly excludes
+  PIC12F675, whose guarded transaction remains its only release route. Focused
+  fixtures cover all six direct-program MCU mappings and reject prefixed and
+  foreign selectors, another MCU's goal, duplicate assignments and conflicting
+  assignments through all three validation boundaries.
 
 - [ ] **BR-RVW2-03 -- HIGH -- order prereleases before their corresponding
   final release.** `versions()` in
