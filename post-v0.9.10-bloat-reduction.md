@@ -3289,7 +3289,7 @@ hosted log is not a release asset or a dependency of the qualification claim.
 
 ## BR-REL-04 - Define prospective hosted-asset retention and mirroring policy
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-REL-01, BR-REL-02 (partially satisfied -- see below)
 
@@ -3297,9 +3297,9 @@ hosted log is not a release asset or a dependency of the qualification claim.
 below is already met, by BR-REL-07 rather than by this item: every published
 evidence file is recorded by digest in `test/published_release_digests.txt`, so
 hashes stay in Git whatever happens to the payloads. The **offline archive**
-requirement is NOT met and no longer has a planned mechanism, because BR-REL-02
-declined the archive on measurement. If evidence is ever removed from `main`,
-this item has to name its own durable mirror; it can no longer inherit one.
+requirement is NOT met, because BR-REL-02 declined the archive on measurement.
+This item must therefore keep the evidence in Git or require a new durable
+mirror before any removal; it can no longer inherit one.
 
 **Caveat:** The initial review was performed offline and could not inspect hosted
 release assets or repository tag-protection settings. Verify actual hosted state
@@ -3307,13 +3307,41 @@ before migration.
 
 **Work:**
 
-- [ ] Inventory which historical evidence currently exists only in Git.
-- [ ] Verify exactly what each hosted release publishes.
-- [ ] Define asset replacement/deletion protections and operational ownership.
-- [ ] Retain signed hashes in Git even if payloads move to hosted assets.
-- [ ] Define at least one durable independent mirror or offline archive for
+- [x] Inventory which historical evidence currently exists only in Git.
+- [x] Verify exactly what each hosted release publishes, or refuse migration
+  when that verification is unavailable. The latter is the selected policy.
+- [x] Define asset replacement/deletion protections and operational ownership.
+- [x] Retain signed hashes in Git even if payloads move to hosted assets.
+- [x] Define at least one durable independent mirror or offline archive for
   evidence removed from development `main`.
-- [ ] Define recovery if the hosting service or release asset disappears.
+- [x] Define recovery if the hosting service or release asset disappears.
+
+**Decision:** Retain all release evidence in Git. Do not perform the hosted-asset
+migration this item was written to guard.
+
+The local inventory covers twelve annotated, signed cuts and 576 files under
+`release/v*/`. Their own `SHA256SUMS` lists authenticate 215 files; the retained
+digest registry accounts for the other 361. Historical tag workflows intended
+to publish 258 top-level assets in total, but no locally retained signed receipt
+proves what the hosting service accepted or still holds. All 306 `evidence/`
+members and all twelve per-release `README.md` files were outside those workflow
+asset sets, so 318 files must be treated as Git-only; `v0.9.10` is known to have
+no hosted release at all. Workflow intent is not rewritten as hosted fact.
+
+The durable policy is now `release/README.md`'s "Evidence retention and hosted
+assets" section. Git remains the authority and hosted assets are dissemination
+copies. The release maintainer owns byte-identical recovery from the retained
+tag/tree and may not silently replace an asset with corrected bytes. If a future
+proposal removes payloads from the development branch, it must reopen this
+decision with an exact hosted inventory, explicit operational ownership, an
+authenticated full Git mirror or offline archive under independent control, and
+a demonstrated restoration. `test/published_release_digests.txt` keeps the
+hashes but is explicitly not mistaken for that archive.
+
+This disposition makes the unavailable hosted-state inspection non-blocking
+without weakening either acceptance criterion: no evidence moves, and no URL or
+hosting setting participates in provenance. Historical directories and tags are
+unchanged.
 
 **Acceptance:**
 
@@ -4873,7 +4901,7 @@ coverage.
 
 ## BR-FINAL-06 - Measure the result
 
-**Status:** DONE `<commit>`
+**Status:** DONE `bc1fe73`
 
 **Work:**
 
@@ -5048,7 +5076,7 @@ dependencies and acceptance criteria.
 | BR-REL-01 | Define canonical signed release index | DONE `bb5ba13` + `b5704f7` |
 | BR-REL-02 | Index evidence; bind the 13 unchecked logs | DONE `f401507` |
 | BR-REL-03 | Clarify full test-long retention | DONE `463aa2f` |
-| BR-REL-04 | Define hosted retention/mirroring | TODO |
+| BR-REL-04 | Define hosted retention/mirroring | DONE `<commit>` |
 | BR-REL-05 | Keep releases self-contained | DONE `a636400` |
 | BR-REL-06 | Consider tag-only artifact commits | TODO |
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
@@ -5063,5 +5091,5 @@ dependencies and acceptance criteria.
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | TODO |
 | BR-FINAL-05 | Run complete qualification | TODO |
-| BR-FINAL-06 | Measure outcome | DONE `<commit>` |
+| BR-FINAL-06 | Measure outcome | DONE `bc1fe73` |
 | BR-FINAL-07 | Delete this working document | TODO |

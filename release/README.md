@@ -173,6 +173,31 @@ validation suite — backs these binaries, through two mechanisms:
    unavoidable interval between that check and GitHub's separate create-release
    API operation.
 
+### Evidence retention and hosted assets
+
+Git is the retention authority. Keep every `release/vX.Y.Z/` file, its commit
+and its annotated tag in repository history; a hosted release body or asset is
+a distribution copy, not immutable provenance and never the only retained copy.
+Do not remove evidence from the development branch merely because a hosting
+service currently serves the same bytes.
+
+No locally retained, signed receipt proves the exact hosted asset set or body
+bytes for the historical releases. Their signed workflows prove what they
+intended to upload, not what the service accepted or still holds; `v0.9.10` is
+known not to have been published at all. Asset replacement or deletion settings
+therefore do not enlarge any release claim. The release maintainer may restore a
+missing hosted asset only byte-for-byte from the retained Git release after
+checking the tag, detached checksum signature, applicable retained digest and
+any recorded post-publication amendment; corrected bytes require a new release
+or an explicit recorded erratum, not a silent replacement.
+
+Any future proposal to remove retained payloads from the development branch must
+first inventory the hosted release and body bytes, name the maintainer who owns
+recovery, backfill an authenticated full Git mirror or offline archive under
+independent control, and demonstrate restoration from it. Retained hashes alone
+are not an archive. Until those steps are complete, loss of the hosting service
+is recovered from Git and authorizes no repository cleanup.
+
 2. **Reproducibility.** The Intel-HEX images are byte-deterministic for a fixed
    toolchain — `objcopy` ihex output contains only the program's code/data
    bytes, with no embedded timestamps or build paths. `SHA256SUMS` pins those
