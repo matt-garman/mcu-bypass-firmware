@@ -76,7 +76,12 @@ historical records and are not retroactively compacted by this policy.
   per-release authorities.** Maintained design documentation keeps stable
   capacities, reviewed ceilings and their enforcing gates, while exact resource
   results come from source- and toolchain-bound release evidence. Reader guides
-  no longer duplicate release image, profile, evidence or soak inventories.
+  no longer duplicate release target, image, profile, evidence or soak
+  inventories. Transient simavr watchdog timing, PIC loop-cycle/current and XC8
+  optimization results are no longer maintained as current design/toolchain
+  facts; the historical PIC10F320 fit experiment remains with its exact source
+  commit, compiler and device-pack binding. The live documentation contract
+  rejects representative unbound measurements and numeric topology copies.
 
 - **Retained qualification evidence is now bound to what each operation
   produced.** Build and target-test logs bind their payload, source commit, role

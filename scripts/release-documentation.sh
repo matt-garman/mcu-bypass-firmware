@@ -700,8 +700,9 @@ release_validate_hardware_claims() {
 #     reproducibility" -- the two sentences that keep reproducibility from being
 #     read as qualification, and retention from being read as endorsement.
 #
-# Both directions, because a bound can be lost by deletion or overwritten by a
-# stronger claim:
+# Three directions, because a bound can be lost by deletion, overwritten by a
+# stronger claim, or weakened by making a live specification own a changing
+# inventory or source-dependent result:
 #
 #   1. PRESENCE. Each bounded claim is required verbatim of the document that
 #      owns it, matched against flowed text so rewrapping stays editorial.
@@ -716,6 +717,13 @@ release_validate_hardware_claims() {
 #      claim. The adjective-plus-noun form has no negated spelling, which is
 #      what makes it decidable. It is a floor, not a proof: prose can still
 #      overclaim in words this does not enumerate.
+#   3. CURRENT FACTS. DESIGN_DOCUMENTATION.adoc retains architecture, capacities,
+#      reviewed ceilings and enforcing gates; TOOLCHAIN.adoc retains tool
+#      requirements and behavior. Numeric release topology belongs only in the
+#      bounded declaration in release/README.md, while current timing, size and
+#      current-draw results belong to build output or source/toolchain-bound
+#      release evidence. Focused lexical rules reject the concrete result and
+#      inventory forms removed from those two live specifications.
 #
 # The ban is conditional on the sentinel, so it lifts by itself. When a part
 # does complete controlled qualification the sentinel goes, and calling that
@@ -731,7 +739,7 @@ release_validate_claim_boundaries() {
 	local repo_root=$1
 	local log="$repo_root/HARDWARE_VALIDATION_LOG.md"
 	local sentinel='**No controlled hardware-qualification record exists for any part.**'
-	local document label flowed entry required find_pid rc=0
+	local document label flowed entry required pattern description find_pid rc=0
 	local -a claim_offenders=()
 	# Adjective-plus-noun only; see the ABSENCE note above for why.
 	local attributive_claim='hardware[-[:space:]](qualified|validated) (firmware|images?|binaries|parts?|releases?)'
@@ -741,8 +749,18 @@ release_validate_claim_boundaries() {
 		"DESIGN_DOCUMENTATION.adoc|the general output-**latch** match was not, because in every formulation that preserves its meaning it overruns 256 words on two of the three variants."
 		"DESIGN_DOCUMENTATION.adoc|The general output-latch check is absent, as above."
 		"DESIGN_DOCUMENTATION.adoc|The seam remains a seam: everything above is a behavioural assurance argument, and however thorough it is, it is a different kind of statement from \"the verified code is the shipped code\"."
+		"DESIGN_DOCUMENTATION.adoc|Measured 2026-06-26 at source commit \`0b44c0d\` with free-tier XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189"
 		"release/README.md|That check is the public attestation that *these binaries are exactly what the tested source compiles to*"
 		"release/README.md|These images are retained only for historical integrity and reproducibility."
+	)
+	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
+	# alternation available without inventing an escaping convention.
+	local -a current_fact_rules=(
+		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+(MCU[[:space:]]+)?release[[:space:]]+(targets|parts)\trestates current release topology outside release/README.md'
+		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+targets[[:space:]]+use[[:space:]]+the[[:space:]]+modular[[:space:]]+architecture|all[[:space:]]+[0-9]+[[:space:]]+images|([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+shell[[:space:]]+source[[:space:]]+files\trestates current release topology outside release/README.md'
+		$'TOOLCHAIN.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)-part,[[:space:]]*[0-9]+-image,[[:space:]]*[0-9]+-soak-combination[[:space:]]+product[[:space:]]+set|build(s|ing)?[[:space:]]+(its[[:space:]]+)?([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+images[[:space:]]+into[[:space:]]+the[[:space:]]+published[[:space:]]+product[[:space:]]+set\trestates current release topology outside release/README.md'
+		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
+		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
 	)
 
 	for entry in "${bounded_claims[@]}"; do
@@ -756,6 +774,17 @@ release_validate_claim_boundaries() {
 			*"$required"*) ;;
 			*) _release_documentation_error "$label no longer states its bounded claim: $required" || rc=1 ;;
 		esac
+	done
+
+	for entry in "${current_fact_rules[@]}"; do
+		IFS=$'\t' read -r label pattern description <<<"$entry"
+		document="$repo_root/$label"
+		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+			|| { _release_documentation_error "current-fact document is not a regular nonempty file: $label" || rc=1; continue; }
+		flowed=$(_release_flowed_text "$document") || return
+		if grep -Eiq -- "$pattern" <<<"$flowed"; then
+			_release_documentation_error "$label $description" || rc=1
+		fi
 	done
 
 	[ -f "$log" ] && [ -s "$log" ] && [ ! -L "$log" ] \

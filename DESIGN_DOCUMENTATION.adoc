@@ -142,10 +142,11 @@ adverse conditions:
 
 
 == Caveats and Limitations
-    * Six targets use a nominal 1ms timer-derived sample cadence. PIC12F675 uses
-      1.024ms: four unprescaled 256us TMR0 rollovers counted in software. The two
-      AVR generations sample in timer ISRs, while all three PIC implementations
-      poll their timer flags. Under the conservative +/-10% frequency envelope,
+    * Every implementation except PIC12F675 uses a nominal 1ms timer-derived
+      sample cadence. PIC12F675 uses 1.024ms: four unprescaled 256us TMR0
+      rollovers counted in software. The AVR implementations sample in timer
+      ISRs, while the PIC implementations poll their timer flags. Under the
+      conservative +/-10% frequency envelope,
       the 1ms targets span roughly 0.909-1.111ms per sample and PIC12F675 spans
       roughly 0.931-1.138ms. The algorithm counts samples and still holds; the
       resulting wall-time variation is not perceptible to the user.
@@ -173,7 +174,7 @@ adverse conditions:
       rollover observations. These are conservative qualification budgets, not
       exact physical minima. Noise and old switches lengthen recognition, while
       oscillator tolerance moves wall time in either direction.
-    * On all three PIC parts, the footswitch loop is polled (Model B: a polled
+    * On the PIC parts, the footswitch loop is polled (Model B: a polled
       hardware timer tick with the watchdog kept as a pure fault watchdog,
       no timer interrupt; the decision and its alternatives are in
       <<pic-model-b>>), so while a blocking
@@ -520,32 +521,23 @@ directions, and requires the result to fit the same budget the
 firmware compiled against -- not merely to fit under the watchdog
 floor, which a badly derived constant would also do.
 
-.Table Measured worst pet-to-pet interval, real image in simavr
-|===
-| Part | Simple | Mute | Relay | Budget (simple / mute / relay)
+The exact Classic-AVR intervals are results of the source, compiler and simavr
+run, so the harness emits them and any durable result belongs in release
+evidence rather than this design document maintaining a second current table.
+The reviewed budget above and the gate that compares each built image with it
+are the stable contract.
 
-| ATtiny13A (1.2 MHz) | 1.377 | 6.402 | 14.002 | 2 / 9 / 18
-| ATtiny85 (1.0 MHz)  | 1.464 | 7.004 | 15.003 | 2 / 9 / 18
-|===
-
-The two AVR-classic clock rates bracket the measurement because the
-ISR term is worst at the lower one: the tick ISR is 142 cycles, which
-is 11.8% of a 1.2 MHz tick and 14.2% of a 1.0 MHz tick, against the
-25% wall-time duty the map declares.  The worse measurement converts
-to 14.2/85.8 = 16.6% additive delay stretch, below the configured
-25/75 = 33 1/3% bound.  The ATtiny202 runs the same code at 2 MHz;
-this interval is measured between consecutive `wdr` executions, which
-needs cycle-granular instruction stepping -- precisely the mode the
-pinned yasimavr's unpatched `SimLoop.run(n)` rewind makes
-untrustworthy, even though the pin edges it timestamps from a signal
-hook are exact (see the yasimavr note in `test/README.md`).  Its term
-is therefore bounded from the built image instead -- the TCB0 ISR and
-its callees are 84 instructions.  Charging every instruction four
-cycles and reserving another 16 cycles for interrupt entry and vector
-dispatch bounds the complete response at 352 of the 2000 cycles in a
-1 ms tick (17.6% duty, or at most 21.4% additive stretch).
-`attiny202-delay-oracle` recovers the sole `reti` handler and its direct
-call tree from every built image and enforces that 84-instruction
+The ATtiny202 runs the same code at 2 MHz. Measuring consecutive `wdr`
+executions needs cycle-granular instruction stepping -- precisely the mode the
+pinned yasimavr's unpatched `SimLoop.run(n)` rewind makes untrustworthy, even
+though the pin edges it timestamps from a signal hook are exact (see the
+yasimavr note in `test/README.md`). Its term is therefore bounded from the built
+image instead. The reviewed ceiling is 84 instructions for the TCB0 ISR and its
+callees; charging every instruction four cycles and reserving another 16 cycles
+for interrupt entry and vector dispatch bounds the complete response at 352 of
+the 2000 cycles in a 1 ms tick (17.6% duty, or at most 21.4% additive stretch).
+`attiny202-delay-oracle` recovers the sole `reti` handler and its direct call
+tree from every built image and enforces that 84-instruction
 ceiling; recursion, unresolved or indirect transfers, and control-flow cycles
 fail closed rather than being undercounted; acyclic branches to earlier shared
 epilogues remain countable.  Its compiled delay-body oracle and delivered-pulse
@@ -607,7 +599,7 @@ user.  The release-debounce, or lock-out period, is longer so as to
       nominal 33ms
       qualification budget; physical press-onset-to-re-arm timing is roughly
       32-33 tick periods because 33 sample instants span 32 intervals and the
-      first sample has arbitrary phase. For all three polled PIC implementations,
+      first sample has arbitrary phase. For the polled PIC implementations,
       conservative qualification adds the full blocking output actuation after
       the toggle. The PIC10F32x nominal simple/mute/relay budgets are
       33ms/38ms/45ms; PIC12F675's are approximately 33.8ms/38.8ms/45.8ms. A
@@ -1287,7 +1279,7 @@ Every ceiling below is declared once, in the `Makefile`, and enforced on every
 build of the part it bounds, so an overshoot fails the build rather than
 reaching hardware. `make test-resource-tables` measures every image the tree has
 already built against those declarations; the production release runs its strict
-form over all 21 images and the complete RAM/stack logs, retains its
+form over the complete canonical image set and RAM/stack logs, retains its
 source-commit-bound result, and refuses to stage otherwise.
 
 To see what the working tree currently occupies, build it and read the build's
@@ -1460,14 +1452,14 @@ flash is the reason the modular architecture fits here at all.
 
 == Multi-MCU Architecture: Shared Core, Per-MCU Shell
 
-The firmware has seven MCU release targets across four core generations -- AVR
-Classic, AVR-XT, enhanced mid-range PIC10F32x, and classic mid-range PIC12F675 --
-that share one debounce design but differ at the register level. Six targets use
-the modular architecture through four shell source files:
+The implementations span four core generations -- AVR Classic, AVR-XT,
+enhanced mid-range PIC10F32x, and classic mid-range PIC12F675 -- that share one
+debounce design but differ at the register level. Most use the modular
+architecture, with shell ownership separated by peripheral family:
 `src/bypass_mcu_avr_classic.c` serves ATtiny13a/45/85,
 `src/bypass_mcu_avr_xt.c` serves ATtiny202,
 `src/bypass_mcu_pic10f322.c` serves PIC10F322, and
-`src/bypass_mcu_pic12f675.c` serves PIC12F675. PIC10F320 is the seventh,
+`src/bypass_mcu_pic12f675.c` serves PIC12F675. PIC10F320 is the
 self-contained implementation described below. The modular split has two rules.
 
 **The modular targets share one compiled core.** `src/bypass_pure.c` is
@@ -1477,15 +1469,15 @@ formal proofs exercise it directly. Nothing about it is per-MCU. PIC10F320 does
 not compile it into its image; equivalence and lock-step compare the
 self-contained firmware with this same core.
 
-**The main loop is NOT shared.** Each of the four modular shell files owns its
-own `main()`, tick mechanism and watchdog-liveness model; the self-contained
-PIC10F320 file owns a fifth. Only the modular output-driver leaf operations are
+**The main loop is NOT shared.** Each modular shell file owns its own `main()`,
+tick mechanism and watchdog-liveness model; the self-contained PIC10F320 file
+owns its own. Only the modular output-driver leaf operations are
 abstracted. This is deliberate: one portable `main()` parameterized by an
 interface looks cleaner and is wrong here.
 
 The AVR Classic design samples the footswitch *inside* the 1 ms Timer0 ISR
 while `main()` sleeps, and proves liveness through the `timer_isr_called_`
-ISR-to-main handshake. All three PIC implementations use a fundamentally
+ISR-to-main handshake. The PIC implementations use a fundamentally
 different model: no tick ISR, but a polled loop that waits on a timer flag,
 samples, updates and pets the watchdog, where reaching `CLRWDT` *is* the
 liveness proof. The PIC10F322 and PIC12F675 versions are modular shells;
@@ -1502,9 +1494,9 @@ entirely different peripherals: the tick is TCB0 in periodic-interrupt mode
 IDLE via `SLPCTRL`, and the watchdog is fuse-locked by `WDTCFG` so `hw_wdt_pet()`
 is a bare `wdr` with nothing to arm. Because it integrates in the ISR, it
 shares the classic lane's blocking-actuation timing property: the ISR keeps
-sampling through a blocking relay or mute pulse, so no ticks are lost. The two
-AVR generations and three polled PIC
-implementations therefore have different release/re-arm timing on the blocking
+sampling through a blocking relay or mute pulse, so no ticks are lost. The AVR
+generations and polled PIC implementations therefore have different
+release/re-arm timing on the blocking
 mute and relay variants (see Asymmetric Debounce Timing); PIC12F675's 1.024ms
 tick separately lengthens every sample-count-derived wall-time figure. This is
 the clearest illustration of why the modular shells are separate: AVR-XT and AVR
@@ -1512,7 +1504,7 @@ Classic share a *model* and none of their register code.
 
 So `main()`, the tick source, `init()` as orchestrator and the reset path stay
 file-static inside each implementation. The consequences are visible elsewhere
-in this document: all three polled PIC implementations pause sampling during a
+in this document: the polled PIC implementations pause sampling during a
 blocking output actuation while both ISR-driven AVR generations continue (see
 Asymmetric Debounce Timing), PIC12F675 has the distinct 1.024ms cadence, and no
 PIC carries a `timer_isr_called_` byte (see Resource Utilization).
@@ -1559,15 +1551,15 @@ remains unequal.
 [[pic-architecture]]
 == PIC Architecture
 
-Three of the seven release parts are PICs, and they are not three
-configurations of one shell. PIC10F322 and PIC10F320 are enhanced mid-range
+The PIC implementations are not configurations of one shell. PIC10F322 and
+PIC10F320 are enhanced mid-range
 cores from a single datasheet family (DS40001585); PIC12F675 is a classic
 mid-range core (DS41190G) whose register set differs from theirs at nearly
 every point this firmware touches. PIC10F320 then differs from PIC10F322 not
 in silicon generation but in capacity, and that one number changes its
 software architecture rather than its register code.
 
-What the three do share is one behavioural model. This section states that
+What they do share is one behavioural model. This section states that
 model once, then states what each part does differently and why, so that every
 target-specific difference has exactly one normative explanation.
 
@@ -1583,7 +1575,7 @@ belong to retained release evidence rather than to prose.
 [[pic-model-b]]
 === The shared model: polled tick, pure fault watchdog
 
-All three PIC implementations use the model this project calls **Model B**: a
+The PIC implementations use the model this project calls **Model B**: a
 polled hardware timer tick, with the watchdog kept as a pure fault watchdog
 and no timer interrupt. `init()` configures the part, applies the bypass
 output state and starts the tick timer; the loop then waits on the timer flag,
@@ -1732,27 +1724,21 @@ necessarily means staying awake. The design spends that power to buy a
 timer-derived nominal cadence and a high-margin, independent watchdog; a
 deep-sleep scheme would have to give up one or both.
 
-Because the loop is always awake, the clock frequency sets the current draw. The
-core is clocked at 2 MHz rather than the part's 16 MHz maximum: the debounce plus
-per-tick sanity work is only ~210 instruction cycles, so 2 MHz (500 cycles/ms)
-runs it at ~42% utilisation — comfortable headroom — while roughly *halving* the
-supply current.
+Because the loop is always awake, the clock frequency sets active current. The
+core is clocked at 2 MHz rather than the part's 16 MHz maximum, leaving 500
+instruction cycles in each nominal millisecond. Exact loop cost depends on the
+source and compiler, so the image timing and watchdog gates prove the required
+headroom instead of this document maintaining a current cycle count. Datasheet
+DS40001585 parameters D017-D019 establish that the lower clock also lowers
+typical active supply current; no bench current measurement is claimed here. A
+lower clock also emits less high-frequency switching noise into the analog
+audio path.
 
-|===
-| FOSC | active IDD @ 5 V (typ) | ~ power | per-tick headroom
-
-| 16 MHz   | ~0.85 mA | ~4.25 mW | 19x
-| *2 MHz*  | *~0.43 mA* | *~2.1 mW* | *2.4x*
-|===
-
-(IDD interpolated from DS40001585 D017–D019; the 16 MHz row is the tabulated
-figure.) A lower clock also emits less high-frequency switching noise into the
-analog audio path.
-
-This firmware is **not** battery-optimised, and the table should not be read as
-if it were: in a typical pedal the always-on status LED and the analog signal
-path dominate the supply, so the MCU's sub-milliamp draw is usually negligible.
-The 2 MHz choice is simply "no reason to burn 4 mW when 2 does the same job."
+This firmware is **not** battery-optimised: in a typical pedal the always-on
+status LED and the analog signal path dominate the supply, so the MCU's active
+draw is usually not the binding battery load. The 2 MHz choice avoids
+unnecessary active current while retaining the timer and watchdog margins the
+executable gates enforce.
 
 **The PIC12F675 makes the same trade with different numbers.** It is also always
 awake, but its oscillator is fixed at 4 MHz in silicon by `FOSC=INTRCIO` — there
@@ -1768,7 +1754,7 @@ it moves every physical timing figure — see <<pic12f675-architecture>>.
 === PIC10F322: the reference PIC shell
 
 The PIC10F322 carries the full defensive layer, and it is the shell the other
-two PIC targets are described against. It is a modular target:
+PIC implementations are described against. It is a modular target:
 `src/bypass_mcu_pic10f322.c` and `src/bypass_pins_pic10f322.h` sit on top of
 the shared output drivers and compile and link `src/bypass_pure.c` unchanged.
 
@@ -1845,8 +1831,9 @@ this design, with the same peripherals and the same CONFIG posture -- and
 one number.
 
 **The modular architecture does not fit, and that is measured rather
-than assumed.** Measured 2026-06-26 on the pinned free-tier XC8 and PIC10-12Fxxx
-device pack of the day, the modular firmware built for this part at 356, 386 and
+than assumed.** Measured 2026-06-26 at source commit `0b44c0d` with free-tier
+XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189, the modular firmware for this part
+built at 356, 386 and
 381 words for the simple, mute and relay variants -- roughly 100 words over 256
 in every case, and hard link failures rather than near misses. Three
 source-level reductions were then priced rather than estimated. Packed enums

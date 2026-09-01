@@ -76,8 +76,11 @@ XC8 is used unlicensed.  The free tier runs the portable, IR-level
 optimizations -- inlining, dead-code elimination, GVN -- but gates the
 PIC-specific machine-level passes behind a PRO license, so `-Os` is accepted
 and then downgraded with advisory 2051: *"the current license does not permit
-the selected optimization level, using optimization level 2"*.  Measured on one
-source, `-O0` gave 397 words and `-O1`, `-O2` and `-Os` all gave 356.
+the selected optimization level, using optimization level 2"*. Exact image size
+is source-dependent and belongs in retained release evidence. The historical
+fit experiment that selected PIC10F320's self-contained architecture is bound
+to its source commit, XC8 version and device pack in "PIC10F320: the constrained
+target" in DESIGN_DOCUMENTATION.adoc.
 
 This is worth stating because the obvious workarounds do not exist.  The passes
 that would shrink 8-bit PIC code -- compiled-stack overlay, bank and page
@@ -347,14 +350,14 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 simavr for the classic parts and gpsim for the PIC: simavr 1.6
                 and QEMU do not model the AVR8X core, so the ATtiny202 shell
                 would otherwise have no simulated target-output transition,
-                soak, fault, or lock-step coverage. The four
-                targets are STANDALONE and skip cleanly when the venv is absent,
+                soak, fault, or lock-step coverage. These simulator targets are
+                STANDALONE and skip cleanly when the venv is absent,
                 exactly like the PIC gpsim targets, so the AVR `make test` is
                 unaffected if yasimavr is not built.
   status:       ATtiny202 is a RELEASE-SUPPORTED target. Normal CI builds it,
                 gates cppcheck/MISRA, and runs the yasimavr gates; release
-                creation and release CI additionally build its three images into
-                the published product set, re-run attiny202-test and
+                creation and release CI additionally build its canonical images,
+                re-run attiny202-test and
                 attiny202-test-target with STRICT_TOOLS=1, soak one combination
                 per output stage for the full release duration, and reproduce
                 the images bit-for-bit from the tag. Both inputs below are
@@ -581,9 +584,8 @@ and 7.3.0.1 do not satisfy the 7.3.0 pin, and XC8 V3.100 and V13.10 do not
 satisfy the V3.10 pin -- as is a banner carrying no version token at all, or
 more than one. Until v0.9.10 these three checks were shell substring patterns,
 which accepted the first three of those four drifted versions.
-* *Production release identity.* A release always means the reviewed
-  seven-part, 21-image, 18-soak-combination product set under one basename
-  convention. The Makefile pins that identity as literal `override` text
+* *Production release identity.* The Makefile pins the complete product identity
+  and basename convention as literal `override` text
   (`RELEASE_IDENTITY_PINNED` and the image/soak sets beside it), and both a
   `make release` goal and `scripts/make-release.sh` itself refuse to start if
   the values the run actually selected differ from it -- before any clean,
@@ -598,9 +600,10 @@ which accepted the first three of those four drifted versions.
   compile/link-flag, and validation-control overrides; assignment-bearing
   `MAKEFLAGS`/`GNUMAKEFLAGS`; GNU Make `--eval`; noncanonical/injected makefiles;
   and dollar-bearing values before a selected tool or release recipe runs. The
-  canonical and pinned image/soak inventories must each have exactly 21/18
-  unique members before their sets are compared; sorting cannot hide a
-  duplicate. The separately selectable `PIC12F675_PYTHON` is executable- and
+  canonical and pinned image/soak inventories must contain unique members before
+  their complete sets are compared; sorting cannot hide a duplicate. The sole
+  live human-readable topology is the bounded current-release declaration in
+  `release/README.md`. The separately selectable `PIC12F675_PYTHON` is executable- and
   minimum-version-checked, passed to qualification, and recorded in the signed
   manifest.
 * *XC8 + PIC10-12Fxxx_DFP provenance and cache integrity.*

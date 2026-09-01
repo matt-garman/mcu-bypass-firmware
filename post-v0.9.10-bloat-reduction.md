@@ -4589,7 +4589,7 @@ qualification and plan deletion.
   `test-reference-contract` parses that table and rejects a missing authority,
   duplicate classification or whole-release-directory overlap.
 
-- [ ] **BR-RVW2-05 -- MEDIUM -- finish the current-fact boundary.** The current
+- [x] **BR-RVW2-05 -- MEDIUM -- finish the current-fact boundary.** The current
   target/image/soak topology is still restated in the Multi-MCU design prose and
   the toolchain release-identity prose despite `release/README.md` being its sole
   live human authority. Mutable, source-dependent measurements also remain in
@@ -4599,6 +4599,18 @@ qualification and plan deletion.
   changing inventories to the bounded release declaration and bind any
   historically necessary measurement to the source/toolchain that produced it.
   Extend the focused current-fact audit so these classes cannot silently return.
+
+  **Resolved:** Numeric target/image/soak topology now stays in the bounded
+  declaration in `release/README.md`; the design and toolchain documents retain
+  only architecture, ownership, canonical-set enforcement and links to that
+  authority. The unbound Classic-AVR simavr timing table, PIC loop-cycle/current
+  estimate and XC8 optimization-size comparison were removed while their
+  reviewed watchdog ceilings, clock decision, tool behavior and executable gates
+  remain. The historically necessary PIC10F320 modular-fit experiment is now
+  bound to source commit `0b44c0d`, XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189.
+  The live claim-boundary validator rejects representative numeric topology
+  copies and all three removed unbound measurement forms, and requires the
+  historical source/toolchain binding to survive.
 
 - [ ] **BR-RVW2-06 -- MEDIUM -- give the PIC12F675 source-checkout transaction
   one maintained semantic owner.** `TOOLCHAIN.adoc` carries most of the baseline,

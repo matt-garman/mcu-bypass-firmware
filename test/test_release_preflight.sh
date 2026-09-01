@@ -2134,6 +2134,7 @@ write_boundaries_fixture() {
 	mkdir -p "$boundaries_root/release"
 	cp "$ROOT/README.md" "$boundaries_root/README.md"
 	cp "$ROOT/DESIGN_DOCUMENTATION.adoc" "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+	cp "$ROOT/TOOLCHAIN.adoc" "$boundaries_root/TOOLCHAIN.adoc"
 	cp "$ROOT/release/README.md" "$boundaries_root/release/README.md"
 	cp "$ROOT/HARDWARE_VALIDATION_LOG.md" "$boundaries_root/HARDWARE_VALIDATION_LOG.md"
 }
@@ -2199,6 +2200,11 @@ drop_claim_line DESIGN_DOCUMENTATION.adoc 'The seam remains a seam'
 assert_boundaries_rejects 'a design document that drops the inlining-seam limit' \
 	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
 
+write_boundaries_fixture
+drop_claim_line DESIGN_DOCUMENTATION.adoc 'Measured 2026-06-26 at source commit'
+assert_boundaries_rejects 'a historical sizing result that drops its source/toolchain binding' \
+	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+
 # Reproducing an image proves the bytes match the tested source. It does not
 # qualify the firmware, and the sentence that says so is the only thing standing
 # between the two claims for a reader of the release documentation.
@@ -2213,7 +2219,39 @@ drop_claim_line release/README.md 'These images are retained only for historical
 assert_boundaries_rejects 'release documentation that drops the retention limit' \
 	'release/README.md no longer states its bounded claim'
 
-# 2. ABSENCE. The claim the sentinel forbids, in each way it can arrive.
+# 2. CURRENT FACTS. Stable design/tool behavior remains in these documents;
+# changing release topology and source-dependent results do not.
+write_boundaries_fixture
+printf '\nThe firmware has eight MCU release targets.\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'a design guide restating the current target count' \
+	'DESIGN_DOCUMENTATION.adoc restates current release topology outside release/README.md'
+
+write_boundaries_fixture
+printf '\nA release is the eight-part, 24-image, 20-soak-combination product set.\n' \
+	>> "$boundaries_root/TOOLCHAIN.adoc"
+assert_boundaries_rejects 'a toolchain guide restating the current product shape' \
+	'TOOLCHAIN.adoc restates current release topology outside release/README.md'
+
+write_boundaries_fixture
+printf '\n.Table Measured worst pet-to-pet interval, real image in simavr\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'an unbound live-image watchdog measurement' \
+	'DESIGN_DOCUMENTATION.adoc carries an unbound source-dependent measurement'
+
+write_boundaries_fixture
+printf '\nThe per-tick sanity work is only ~211 instruction cycles.\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'an unbound PIC loop-cycle measurement' \
+	'DESIGN_DOCUMENTATION.adoc carries an unbound source-dependent measurement'
+
+write_boundaries_fixture
+printf '\nMeasured on one source, -O0 used more words than -O2.\n' \
+	>> "$boundaries_root/TOOLCHAIN.adoc"
+assert_boundaries_rejects 'an unbound compiler optimization comparison' \
+	'TOOLCHAIN.adoc carries an unbound source-dependent measurement'
+
+# 3. ABSENCE. The claim the sentinel forbids, in each way it can arrive.
 write_boundaries_fixture
 printf '\nEvery release ships hardware-qualified firmware.\n' \
 	>> "$boundaries_root/README.md"

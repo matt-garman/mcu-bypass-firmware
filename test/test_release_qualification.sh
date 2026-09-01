@@ -110,12 +110,12 @@ fi
 checks=$((checks + 1))
 
 # Pin the safety-relevant multi-MCU distinctions: PIC12F675's longer sample
-# period, all three polled PIC implementations, and the fixed low BOD threshold.
+# period, the polled PIC architecture, and the fixed low BOD threshold.
 # Normalize wrapping so AsciiDoc line breaks remain editorial rather than API.
 design_contract=$(tr '\n' ' ' < "$DESIGN_DOCUMENTATION" | tr -s ' ')
 for required in \
-		'Six targets use a nominal 1ms timer-derived sample cadence. PIC12F675 uses 1.024ms' \
-		'all three PIC implementations poll their timer flags' \
+		'Every implementation except PIC12F675 uses a nominal 1ms timer-derived sample cadence. PIC12F675 uses 1.024ms' \
+		'the PIC implementations poll their timer flags' \
 		'the 1ms targets span roughly 0.909-1.111ms per sample and PIC12F675 spans roughly 0.931-1.138ms' \
 		'8 * 1.138ms = 9.11ms on PIC12F675' \
 		'the PIC12F675 counterpart is 7 * 0.931ms = 6.52ms' \
@@ -125,9 +125,9 @@ for required in \
 		'this part has no `BORV` selection' \
 		'It therefore cannot enforce the >4v peripheral-safe floor either' \
 		'External supply supervision is required' \
-		'seven MCU release targets across four core generations' \
-		'Six targets use the modular architecture through four shell source files' \
-		'all three polled PIC implementations pause sampling during a blocking output actuation'; do
+		'The implementations span four core generations' \
+		'Most use the modular architecture, with shell ownership separated by peripheral family' \
+		'the polled PIC implementations pause sampling during a blocking output actuation'; do
 	grep -Fq "$required" <<<"$design_contract" \
 		|| fail "design documentation omits PIC12F675 safety/topology semantics: $required"
 done
