@@ -204,6 +204,21 @@ pic_partial_stress+="$resource_args"
 xt_partial_stress+="$resource_args"
 both_partial_stress+="$resource_args"
 
+# The skip-mode calls below are safe only while both hosted inventories exclude
+# the target-toolchain gates. The workflow contract separately follows the full
+# transitive Make graph and binds each gate to its provisioned CI job.
+mapfile -t host_gate_sets < <("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
+	print-TEST_GATES print-TEST_LONG_GATES CC="$fakebin/avr-gcc")
+[ "${#host_gate_sets[@]}" -eq 2 ] || fail "could not read hosted gate inventories"
+for gates in "${host_gate_sets[@]}"; do
+	for gate in test-attiny202-guard-mutations test-pic-guard-mutations; do
+		case " $gates " in
+			*" $gate "*) fail "hosted aggregate includes target-toolchain gate $gate" ;;
+		esac
+	done
+done
+checks=$((checks + 4))
+
 if ! output=$(run_ci); then
 	fail "push without skips failed: $output"
 fi

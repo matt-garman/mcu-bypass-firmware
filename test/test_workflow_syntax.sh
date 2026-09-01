@@ -40,6 +40,7 @@ ROOT="$ROOT" python3 - <<'PY'
 import os
 import re
 import shlex
+import subprocess
 import sys
 
 import yaml
@@ -1075,6 +1076,108 @@ if isinstance(ci_jobs, dict):
                     ci_make_invocations.append(
                         (job_id, idx, step, len(commands), parsed, tokens)
                     )
+
+# Compare workflow provisioning with Make's real transitive prerequisite graph.
+# A `needs: pic` edge orders jobs but does not copy the PIC runner's filesystem,
+# so checking only visible workflow commands misses a target-only prerequisite
+# concealed inside `make test` or `make stress`.
+worktree = os.stat(root)
+worktree_id = f"{worktree.st_dev}:{worktree.st_ino}"
+make_db = subprocess.run(
+    ["make", "-pRrq", f"_MAKE_SERIAL_LOCK_HELD={worktree_id}"],
+    cwd=root,
+    capture_output=True,
+    text=True,
+    check=False,
+)
+make_edges = {}
+if check(
+        make_db.returncode <= 1,
+        f"Make prerequisite database failed with status {make_db.returncode}"):
+    in_files = False
+    for line in make_db.stdout.splitlines():
+        if line == "# Files":
+            in_files = True
+            continue
+        if line == "# files hash-table stats:":
+            in_files = False
+        if not in_files or not line or line[0].isspace() or line.startswith("#"):
+            continue
+        fields = line.split()
+        if not fields or not fields[0].endswith(":") or "=" in line:
+            continue
+        target = fields[0][:-1]
+        if target.startswith("."):
+            continue
+        prereqs = fields[1:fields.index("|")] if "|" in fields else fields[1:]
+        make_edges.setdefault(target, set()).update(prereqs)
+
+
+def target_reaches(target, wanted):
+    pending = [target]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current == wanted:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(make_edges.get(current, ()))
+    return False
+
+
+def prior_job_steps(job_id, step_index):
+    job = ci_jobs.get(job_id) if isinstance(ci_jobs, dict) else None
+    steps = job.get("steps", []) if isinstance(job, dict) else []
+    return [step for step in steps[:step_index - 1] if isinstance(step, dict)]
+
+
+def provisions_pic(job_id, step_index):
+    return any(
+        "scripts/assert_pic_toolchain.sh --github-actions" in str(step.get("run", ""))
+        for step in prior_job_steps(job_id, step_index)
+    )
+
+
+def provisions_attiny202(job_id, step_index):
+    required = (
+        "command -v cppcheck",
+        "third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202",
+        "third_party/attiny_dfp/include/avr/iotn202.h",
+    )
+    return any(
+        step.get("name") == "Assert ATtiny202 build + analysis inputs present"
+        and all(fragment in str(step.get("run", "")) for fragment in required)
+        for step in prior_job_steps(job_id, step_index)
+    )
+
+
+target_gate_routes = {
+    "test-pic-guard-mutations": ("pic", provisions_pic),
+    "test-attiny202-guard-mutations": ("attiny202", provisions_attiny202),
+}
+for gate, (expected_job, provisioned) in target_gate_routes.items():
+    routes = [
+        invocation for invocation in ci_make_invocations
+        if any(target_reaches(goal, gate) for goal in invocation[4][0])
+    ]
+    check(
+        len(routes) == 1,
+        f"ci.yml: target-toolchain gate '{gate}' is reached by {len(routes)} "
+        "Make invocations, expected 1",
+    )
+    if len(routes) == 1:
+        job_id, idx, _, _, _, _ = routes[0]
+        check(
+            job_id == expected_job,
+            f"ci.yml: target-toolchain gate '{gate}' is owned by job "
+            f"'{job_id}', expected '{expected_job}'",
+        )
+        check(
+            provisioned(job_id, idx),
+            f"ci.yml: job '{job_id}' does not provision {gate}'s inputs before use",
+        )
 
 check_resource_routes(
     [invocation[4] for invocation in ci_make_invocations],

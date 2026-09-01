@@ -1677,10 +1677,11 @@ pic10f322-coverage-check-fw: host-compiler-valid
 	@HOSTCC="$(HOSTCC)" GCOV="$(GCOV)" COVERAGE_DIR="$(abspath $(COVERAGE_DIR))" \
 		test/pic/fw_coverage/run_fw_coverage.sh pic10f322
 
-# Aggregate: every PIC pre-hardware check (build+budget, CONFIG word, static
-# analysis, shipping-source coverage, gpsim functional). Standalone -- NOT part
-# of `make test`, which is the AVR pre-hardware gate (XC8/gpsim may be absent in
-# CI). Each external-tool sub-target skips cleanly when its tool is missing.
+# Aggregate: every PIC10F322 pre-hardware check (build+budget, CONFIG word,
+# static analysis, shipping-source coverage, gpsim functional), plus the shared
+# PIC job's once-per-run compile-guard mutations for all three PIC shells.
+# Standalone -- NOT part of `make test`, whose hosted runner has no XC8/DFP.
+# Each external-tool sub-target skips cleanly when its tool is missing.
 #
 # One lane is the exception and is listed here anyway: this aggregate keeps
 # running pic10f322-coverage-check-fw even though `make test` now runs it too.
@@ -1689,7 +1690,7 @@ pic10f322-coverage-check-fw: host-compiler-valid
 # pre-hardware evidence rather than a set of leftovers.
 .PHONY: pic10f322-test
 pic10f322-test: pic10f322-test-config pic10f322-analyze pic10f322-coverage-check-fw pic10f322-test-gpsim \
-          pic10f322-test-stack-bound
+          pic10f322-test-stack-bound test-pic-guard-mutations
 	@echo "=== all PIC10F322 pre-hardware checks complete ==="
 
 # --- PIC hardware return-stack depth (all three targets) ----------------------
@@ -2909,11 +2910,13 @@ attiny202-delay-oracle: attiny202
 	OBJDUMP=$(OBJDUMP) python3 test/avr/test_attiny202_delay_oracle.py $$elves
 
 # Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budgets +
-# stack + analysis + coil-pulse width oracle). It is not part of `make test` because the
-# vendored DFP may be absent; each sub-target skips cleanly for developers, while
-# release qualification invokes this aggregate with STRICT_TOOLS=1.
+# stack + analysis + coil-pulse width oracle + compile-guard mutations). It is
+# not part of `make test` because the vendored DFP may be absent; each sub-target
+# skips cleanly for developers, while release qualification invokes this
+# aggregate with STRICT_TOOLS=1.
 .PHONY: attiny202-test
-attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-test-stack-bound attiny202-analyze attiny202-delay-oracle
+attiny202-test: test-fuses attiny202-smoke attiny202 attiny202-test-stack-bound \
+          attiny202-analyze attiny202-delay-oracle test-attiny202-guard-mutations
 	@echo "=== all ATtiny202 pre-hardware checks complete ==="
 
 # The yasimavr target-level aggregate, over EVERY variant: functional + physical
@@ -3117,10 +3120,13 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # `stress` and `test-long` select the FULL workload sizing, while test-long
 # additionally runs test-mutation.
 #
-# Listing the inventory ONCE is what keeps that true. Two hand-maintained
+# Listing the host-tool inventory ONCE is what keeps that true. Two hand-maintained
 # prerequisite lines invite a new gate landing in only one aggregate,
 # and the aggregate it misses is usually test-long -- the release gate, where
 # the omission surfaces as a green run rather than as a failure.
+# Gates that compile with a target-only toolchain instead belong to that
+# toolchain's standalone aggregate below; hosted `test` and `stress` do not
+# inherit tools from the PIC or ATtiny202 jobs that they depend on in CI.
 #
 # The EARLY/LATE split exists only so test-mutation keeps its test-long position
 # between the PIC10F320 host lanes and the simulator lanes; run order affects
@@ -3171,7 +3177,6 @@ TEST_GATES_LATE = \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
         test-clean-contract test-fuse-injection-contract \
-        test-attiny202-guard-mutations test-pic-guard-mutations \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -8470,8 +8475,8 @@ help:
 	@echo "  test-fuse-injection-contract  every fuse byte survives -D injection into the checker (included in test)"
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-deliberate-duplication  the duplications that are second opinions are still two (included in test)"
-	@echo "  test-attiny202-guard-mutations  the ATtiny202 shell's pin/clock/tick/watchdog guards fire under avr-gcc (included in test)"
-	@echo "  test-pic-guard-mutations  the three PIC shells' pin/clock/watchdog guards fire under XC8 (included in test)"
+	@echo "  test-attiny202-guard-mutations  the ATtiny202 shell's pin/clock/tick/watchdog guards fire under avr-gcc (included in attiny202-test)"
+	@echo "  test-pic-guard-mutations  the three PIC shells' pin/clock/watchdog guards fire under XC8 (included in pic10f322-test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
 	@echo "  test-pic-build-rebuild  PIC harness rebuild + image/sidecar routing checks"

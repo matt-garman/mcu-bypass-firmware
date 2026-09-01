@@ -4494,7 +4494,7 @@ qualification and plan deletion.
 
 **Required pre-merge findings:**
 
-- [ ] **BR-RVW2-01 -- HIGH -- restore hosted and local aggregate toolchain
+- [x] **BR-RVW2-01 -- HIGH -- restore hosted and local aggregate toolchain
   routing.** `TEST_GATES_LATE` now puts
   `test-attiny202-guard-mutations` and `test-pic-guard-mutations` in every
   `make test` and `make stress`. Under `STRICT_TOOLS=1`, their missing DFP/XC8
@@ -4508,6 +4508,16 @@ qualification and plan deletion.
   job's actual provisioning and to exercise both skip modes. The correction
   must preserve fail-closed release qualification without making ordinary
   host-only development require every target toolchain.
+
+  **Resolved:** Removed both real-toolchain compile-guard mutation gates from
+  the shared hosted `test`/`stress`/`test-long` inventory. The ATtiny202 gate is
+  now a prerequisite of `attiny202-test`, and the once-per-PIC-job gate is a
+  prerequisite of `pic10f322-test`; normal CI, local CI and both release paths
+  already run those aggregates only after provisioning their corresponding
+  toolchains. The workflow contract follows Make's transitive prerequisite
+  graph and requires each gate to have exactly one correctly provisioned job.
+  The local-routing contract rejects either gate in the hosted inventories and
+  exercises PIC-only, ATtiny202-only and combined skip modes under strict mode.
 
 - [ ] **BR-RVW2-02 -- HIGH -- bind every source-checkout programming command to
   its image's exact Make goal and selector name.** The producer and verifier
