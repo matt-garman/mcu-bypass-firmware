@@ -4466,6 +4466,178 @@ review.
 - The resulting implementation is simpler in maintained authorities and does
   not merely exchange documentation bloat for parallel release/test machinery.
 
+## BR-REVIEW-02 - Resolve pre-merge readiness review findings
+
+**Status:** TODO
+
+**Depends on:** All implementation through `7dd4840`
+
+**Review baseline:** `7dd4840` on 2026-09-01, with a clean worktree and no
+local/remote divergence. `main` and signed tag `v0.9.11` both resolve to
+`760f5fd`; that commit is the merge base, and this branch is 91 commits ahead
+and zero commits behind it. The review compared `main...HEAD`, inspected every
+changed path by documentation, release and build/test responsibility, and
+performed the focused read-only validation recorded below.
+
+**Conclusion:** The branch's direction materially improves the project. It
+removes completed journals and duplicate current facts, gives stable PIC design
+material one normative home, generates release resource and programming views,
+binds substantially more retained evidence, and preserves the independent
+oracles that make intentional duplication valuable. It is not yet merge-ready
+or ready to execute the `v0.9.12` release. Three executable defects and several
+authority/lifecycle gaps must be closed in addition to the already-planned final
+qualification and plan deletion.
+
+**Required pre-merge findings:**
+
+- [ ] **BR-RVW2-01 -- HIGH -- restore hosted and local aggregate toolchain
+  routing.** `TEST_GATES_LATE` now puts
+  `test-attiny202-guard-mutations` and `test-pic-guard-mutations` in every
+  `make test` and `make stress`. Under `STRICT_TOOLS=1`, their missing DFP/XC8
+  inputs are fatal. The independent hosted `verify` and `stress` runners install
+  only host/Classic-AVR tools; `needs: pic` orders jobs but does not share the
+  PIC runner's filesystem. The same mismatch defeats `ci-local.sh`'s
+  `--skip-pic` and `--skip-attiny202` modes after strict mode is exported.
+  Route each target-toolchain mutation gate through a runner that provisions
+  its inputs, or provision every aggregate that owns it. Extend the workflow and
+  local-routing contract tests to compare aggregate prerequisites with each
+  job's actual provisioning and to exercise both skip modes. The correction
+  must preserve fail-closed release qualification without making ordinary
+  host-only development require every target toolchain.
+
+- [ ] **BR-RVW2-02 -- HIGH -- bind every source-checkout programming command to
+  its image's exact Make goal and selector name.** The producer and verifier
+  currently accept any assignment word whose name ends in `VARIANT`, and the
+  renderer accepts the same relation as a substring. A command such as
+  `WRONGVARIANT=cd4053_with_mute` therefore passes the check while Make ignores
+  it and may program the default image. The checks also do not bind the Make
+  goal to the image's MCU. Keep the independent validator separate from the
+  command generator and require the exact per-MCU goal/selector pair, one
+  selector, and the image's exact variant. Add negative cases for a prefixed
+  selector name, a correct selector on the wrong MCU goal, a foreign selector,
+  and duplicate or conflicting assignments in the producer, renderer and
+  retained-manifest verifier paths.
+
+- [ ] **BR-RVW2-03 -- HIGH -- order prereleases before their corresponding
+  final release.** `versions()` in
+  `test/test_published_release_immutability.py` parses only dot-separated
+  integers; a name such as `v0.9.12-rc.1` falls through to the final fallback and
+  sorts after `v0.9.12`. `image_continuity_is_declared()` exempts only the last
+  sorted release, so an RC followed by its final release can make the final
+  artifact-only publication impossible under the policy the gate explains.
+  Implement deterministic release ordering with explicit prerelease
+  precedence, reject or deliberately classify malformed release directory
+  names, and add a complete synthetic RC-then-final publication fixture. The
+  test must prove both ordering and the continuity-declaration handoff.
+
+- [ ] **BR-RVW2-04 -- MEDIUM -- make the release lifecycle policy agree with
+  retained history.** `README.md` and `release/README.md` say retained release
+  records are never edited after a tag and bundles are preserved exactly as
+  published. The changelog, release policy and retained `v0.9.0` through
+  `v0.9.2` trees instead record an exceptional post-publication safety
+  amendment. Distinguish immutable tag/original signed payload identity from an
+  explicitly registered amendment to the current-tree copy. Make the lifecycle
+  table's claim that every durable document has exactly one class true: include
+  the omitted durable authorities and distinguish evidence files from shipped
+  artifacts instead of assigning an entire release directory to both classes.
+
+- [ ] **BR-RVW2-05 -- MEDIUM -- finish the current-fact boundary.** The current
+  target/image/soak topology is still restated in the Multi-MCU design prose and
+  the toolchain release-identity prose despite `release/README.md` being its sole
+  live human authority. Mutable, source-dependent measurements also remain in
+  the simavr watchdog table, the PIC loop-cycle/current argument and the XC8
+  optimization comparison without a release, commit and toolchain binding.
+  Keep the stable architecture, capacities, decisions and enforcing gates; send
+  changing inventories to the bounded release declaration and bind any
+  historically necessary measurement to the source/toolchain that produced it.
+  Extend the focused current-fact audit so these classes cannot silently return.
+
+- [ ] **BR-RVW2-06 -- MEDIUM -- give the PIC12F675 source-checkout transaction
+  one maintained semantic owner.** `TOOLCHAIN.adoc` carries most of the baseline,
+  immediate-read, reservation, result, temporary-storage and ipecmd limitations
+  that `release/README.md` also maintains for the exact transaction. Retain in
+  the toolchain document only installation, pinning and tool-behavior facts it
+  owns; link to the release-policy procedure for the operator transaction. If
+  any duplicated safety statement must remain at both sites, classify it as a
+  deliberate independent boundary and add the witness that prevents drift.
+
+- [ ] **BR-RVW2-07 -- MEDIUM -- include the live release policy in the durable
+  reference gate.** `test/test_reference_contract.py` skips every path under
+  `release/` to avoid rewriting immutable historical bundles, but that also
+  skips the actively maintained `release/README.md` authority. Exclude only the
+  per-version historical directories, scan the live policy, and add a negative
+  fixture proving that a broken path or anchor there fails.
+
+- [ ] **BR-RVW2-08 -- LOW -- close direct PIC harness dependency gaps.** The
+  direct PIC10F322 and PIC12F675 fault/lock-step binary targets derive `CTX_ADDR`
+  from generated assembly/symbol sidecars, but the sidecars and
+  `test/check_pic_context_layout.sh` are not prerequisites. The authoritative
+  phony lanes remove and rebuild the binaries, so current aggregate qualification
+  avoids the stale case; direct file-target use does not. Add the actual image,
+  sidecar and helper dependencies with a rebuild regression, or explicitly
+  remove/decline unsupported direct build-only targets.
+
+- [ ] **BR-RVW2-09 -- LOW -- reconcile plan bookkeeping before deleting the
+  plan.** BR-STATE-01, BR-REL-02 and BR-REL-07 retain unchecked work inside DONE
+  tasks, even where their result text says the work was deferred or moved.
+  BR-REL-08 has no commit in its DONE status, contrary to the status vocabulary.
+  Convert each to an explicit completed, declined or durably transferred
+  disposition. BR-FINAL-06 is correctly commit-bound to `cc2ff7a`; either keep
+  that endpoint explicit or refresh the final metric after later corrective
+  commits rather than presenting it as an unqualified tip measurement.
+
+**Measured branch shape:** At the review baseline, `main...7dd4840` changes 92
+paths with 19,963 insertions and 18,636 deletions, including all 5,172 lines of
+this branch-only plan. Excluding the plan gives 91 paths, 14,791 insertions and
+18,636 deletions, net -3,845 lines. The maintained documentation-facing set
+(durable root documents, `docs/`, `test/README.md` and `release/README.md`) is
+2,555 insertions and 14,728 deletions, net -12,173. This is a material reduction
+in active prose and mutable authority, but it is accompanied by substantial
+release/test machinery growth. That growth is justified only where it supplies
+an independent executable witness; the three high findings demonstrate why the
+new machinery still requires the full final audit.
+
+**Focused validation performed:**
+
+- `git diff --check main...HEAD` passed; the worktree remained clean.
+- Release history: 92 checks, 0 failures.
+- Release images: 222 checks, 0 failures.
+- Release qualification: 335 checks, 0 failures.
+- Release provenance: 77 checks, 0 failures.
+- Published-release immutability: 2,764 checks, 0 failures.
+- Release preflight: 238 checks and 98 Make queries, 0 failures.
+- Workflow syntax/structure: 470 checks, 0 failures through the installed YAML
+  adapter.
+- Reference contract: 10 checks across 227 files and 14 documents, 0 failures.
+- Shell syntax for the changed shell surface and Python syntax for the changed
+  Python surface passed.
+
+These green results do not contradict the findings: the missing cases are
+precisely transitive hosted-job provisioning, prefixed/wrong-goal source
+commands, RC-followed-by-final ordering, and a live document excluded from the
+reference scan.
+
+**Validation limits:** The complete pinned target-toolchain qualification,
+image/resource comparison, long suite and soak run remain BR-FINAL-05 work.
+This host did not provide every target compiler/device pack, Asciidoctor or the
+tag-signing public key, and the air-gapped review could not inspect hosted CI,
+repository settings or published assets. Controlled hardware qualification
+remains intentionally a `1.x.y` requirement rather than a `v0.9.12` blocker.
+
+**Acceptance:**
+
+- Every high and medium finding is closed by a focused negative test and the
+  aggregate or release verifier that owns the invariant.
+- Each low finding is corrected or explicitly declined with a durable reason.
+- The ordinary hosted jobs, fully provisioned target jobs and documented local
+  skip modes agree about which toolchains each aggregate requires.
+- A synthetic source command cannot select the wrong image while passing, and a
+  synthetic prerelease can be followed by its final release under the declared
+  history/publication policy.
+- BR-FINAL-04 and BR-FINAL-05 rerun after the corrective commits, BR-SRC-02 is
+  completed or explicitly deferred, and source finalization can then update the
+  `v0.9.12` release state and delete this plan under BR-FINAL-07.
+
 ## BR-FINAL-01 - Run a complete current-reference audit
 
 **Status:** DONE `880d28b`
@@ -4930,6 +5102,9 @@ already thought about.
 
 **Status:** TODO
 
+**Depends on:** BR-REVIEW-02 corrective implementation, plus each earlier
+implementation chunk whose focused result must be reconciled
+
 Use focused gates after each task rather than deferring every failure to the end.
 The exact target list may change as cleanup lands; preserve the underlying
 coverage.
@@ -4954,7 +5129,8 @@ coverage.
 
 **Status:** TODO
 
-**Depends on:** All implementation tasks intended for the release
+**Depends on:** All implementation tasks intended for the release, including
+BR-REVIEW-02
 
 **Work:**
 
@@ -5163,6 +5339,7 @@ dependencies and acceptance criteria.
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
 | BR-REVIEW-01 | Resolve completed-item review findings | DONE `cc2ff7a` |
+| BR-REVIEW-02 | Resolve pre-merge readiness review findings | TODO |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
