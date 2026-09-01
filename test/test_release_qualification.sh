@@ -181,6 +181,56 @@ for wiring in \
 done
 checks=$((checks + 1))
 
+# Every part whose per-image programmer command the release PUBLISHES must have
+# a declared Makefile authority to check it against. Stated as a set equality
+# over what the producer actually emits, not as a list of today's two parts: the
+# PIC10F320 shipped a published `pk2cmd` line for four releases with nothing to
+# compare it with, because the arm that emits the command and the block that
+# pins commands were written at different times and no rule related them. A
+# third PIC arm added tomorrow fails here until it is pinned.
+mapfile -t published_pk2_tags < <(awk '
+	# A case arm of img_row. Reset first: an arm naming no _TAG variable
+	# (the ATtiny literals) must not inherit the previous arm s tag.
+	/^[[:space:]]*\$\{FW_BASE\}-/ {
+		arm = ""
+		if (match($0, /[A-Z0-9_]+_TAG/)) arm = substr($0, RSTART, RLENGTH)
+		next
+	}
+	/flash_row "\$base" pk2cmd/ { print (arm == "" ? "UNNAMED_ARM" : arm) }
+' "$RELEASE" | sort -u)
+mapfile -t pinned_pk2_tags < <(grep -oE \
+	'"[A-Z0-9_]+_TAG[[:space:]]+[A-Z0-9_]+_PROG_CMD[[:space:]]+[A-Z0-9_]+_PROG_HEX"' \
+	"$RELEASE" | tr -d '"' | awk '{ print $1 }' | sort -u)
+[ "${#published_pk2_tags[@]}" -ge 2 ] \
+	|| fail "release producer emits ${#published_pk2_tags[@]} pk2cmd image arms; the scan stopped matching"
+[ "${published_pk2_tags[*]}" = "${pinned_pk2_tags[*]}" ] \
+	|| fail "published pk2cmd parts and pinned Makefile authorities disagree: published '${published_pk2_tags[*]}' vs pinned '${pinned_pk2_tags[*]}'"
+# ... and each row must pin a part against ITS OWN variables. These parts differ
+# by one digit and share a pinout, a programmer and a command dialect, so a row
+# that reads PIC10F320_TAG and then compares against PIC10F322_PROG_CMD would
+# report agreement about the wrong part and pass every other check here.
+while read -r pinned_row; do
+	pinned_tag=${pinned_row%% *}
+	pinned_rest=${pinned_row#* }
+	pinned_prefix=${pinned_tag%_TAG}
+	[ "$pinned_rest" = "$pinned_prefix"'_PROG_CMD '"$pinned_prefix"'_PROG_HEX' ] \
+		|| fail "release producer pins $pinned_tag against another part's authority: $pinned_row"
+	grep -Fq "$pinned_prefix"'_PROG_CMD=$(mkv '"$pinned_prefix"'_PROG_CMD)' "$RELEASE" \
+		|| fail "release producer never reads ${pinned_prefix}_PROG_CMD from the Makefile"
+	grep -Fq "$pinned_prefix"'_PROG_HEX=$(mkv '"$pinned_prefix"'_PROG_HEX)' "$RELEASE" \
+		|| fail "release producer never reads ${pinned_prefix}_PROG_HEX from the Makefile"
+	# The host's own programmer preferences must not reach a release query.
+	for pinned_scrubbed in PART PROG PROG_TOOL PROG_CMD; do
+		grep -Eq "(^|[[:space:]])${pinned_prefix}_${pinned_scrubbed}([[:space:]]|\\\\|$)" \
+			<(sed -n '/^unset MAKE GPSIM_TIMEOUT_SECONDS/,/^$/p' "$RELEASE") \
+			|| fail "release producer does not clear ${pinned_prefix}_${pinned_scrubbed} from the release query environment"
+	done
+done < <(printf '%s\n' "${pinned_pk2_tags[@]}" | while read -r pinned_tag; do
+	grep -oE "\"${pinned_tag}[[:space:]]+[A-Z0-9_]+_PROG_CMD[[:space:]]+[A-Z0-9_]+_PROG_HEX\"" \
+		"$RELEASE" | tr -d '"' | head -n 1
+done)
+checks=$((checks + 1))
+
 mapfile -t test_long_run_lines < <(grep -nF \
 	'make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 PIC12F675_FLASH_IMAGES=build' \
 	"$RELEASE")
@@ -1045,6 +1095,31 @@ reset_fixture
 sed -i 's|^make fixture-program VARIANT=|fixture-program VARIANT=|' "$release/MANIFEST.md"
 expect_fail "source-checkout command that is not a make invocation" \
 	"is not a make invocation"
+
+# Two selectors in one command. The first may name the right variant and the
+# second a different one, so "the correct assignment appears somewhere in this
+# line" is not the question being asked; which variant the command SELECTS is.
+reset_fixture
+sed -i 's|^\(make fixture-program VARIANT=.*\)$|\1 PIC10F320_VARIANT=not_the_variant|' \
+	"$release/MANIFEST.md"
+expect_fail "source-checkout command carrying two variant selectors" \
+	"must carry exactly one variant selector"
+
+# A namespaced selector is legitimate: the PIC10F320 build lane reads
+# PIC10F320_VARIANT rather than VARIANT, and its programming goal must select
+# with the same name or it would flash an image it did not build. Accepted here,
+# and held to exactly the same requirement.
+reset_fixture
+sed -i 's|^make fixture-program VARIANT=\(.*\)$|make fixture-program PIC10F320_VARIANT=\1|' \
+	"$release/MANIFEST.md"
+reseal_provenance
+expect_pass "namespaced source-checkout selector naming its own variant"
+
+reset_fixture
+sed -i 's|^make fixture-program VARIANT=.*$|make fixture-program PIC10F320_VARIANT=not_the_variant|' \
+	"$release/MANIFEST.md"
+expect_fail "namespaced source-checkout selector naming another variant" \
+	"does not select its own variant"
 
 reset_fixture
 sed -i 's/^version=.*/version=v99.0.1/' "$release/QUALIFICATION"

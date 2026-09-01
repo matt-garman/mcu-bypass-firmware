@@ -135,6 +135,15 @@ CLI readme documents the short form.
 documentation and community usage, not from a session logged in this
 repository. Confirm them on the first PICkit 3 run and correct this file.
 
+From a source checkout, `make pic10f322-program VARIANT=<variant>` and
+`make pic10f320-program PIC10F320_VARIANT=<variant>` build the selected image,
+run its budget gates, and then write it. They issue `pk2cmd … -M -Y -R` by
+default, and the `-M -Y -OL` form above when `PIC10F322_PROG` or
+`PIC10F320_PROG` is set to `ipecmd`; `PIC10F322_PROG_TOOL` and
+`PIC10F320_PROG_TOOL` pick `PK3`, `PK4` or `PK5`. They never add `-W5`: those
+goals assume the board supplies its own power, which is the arrangement a pedal
+is in. Neither route has been run against a part under a written procedure.
+
 
 ## PIC12F675 — not a raw write target
 

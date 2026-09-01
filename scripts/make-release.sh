@@ -478,7 +478,8 @@ unset MAKE GPSIM_TIMEOUT_SECONDS PIC12F675_PART PIC12F675_PROG \
 	PIC12F675_PROG_KIND PIC12F675_PROG_TOOL PIC12F675_READ_PROG \
 	PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT PIC12F675_RELEASE_TAG \
 	AVRDUDE AVR_PROGRAMMER XT_PROGRAMMER XT_UPDI_PORT \
-	PIC10F322_PART PIC10F322_PROG PIC10F322_PROG_TOOL PIC10F322_PROG_CMD
+	PIC10F322_PART PIC10F322_PROG PIC10F322_PROG_TOOL PIC10F322_PROG_CMD \
+	PIC10F320_PART PIC10F320_PROG PIC10F320_PROG_TOOL PIC10F320_PROG_CMD
 
 # This is the first Make query. The corresponding parse guard rejects
 # unsupported release overrides, injected makefiles, and malformed canonical
@@ -638,6 +639,13 @@ PIC10F322_TAG=$(mkv PIC10F322_TAG)             # pic10f322
 # supposed to catch, so they are compared after the row is composed.
 PIC10F322_PROG_CMD=$(mkv PIC10F322_PROG_CMD)
 PIC10F322_PROG_HEX=$(mkv PIC10F322_PROG_HEX)
+# The PIC10F320 twin, read for the same purpose and never combined with the pair
+# above. The two parts share a pinout and a programmer dialect and differ by one
+# digit, which is exactly why one is not derived from the other: a release that
+# built its PIC10F320 instruction out of PIC10F322 truth would publish a correct
+# looking command for whichever part was re-pinned second.
+PIC10F320_PROG_CMD=$(mkv PIC10F320_PROG_CMD)
+PIC10F320_PROG_HEX=$(mkv PIC10F320_PROG_HEX)
 PIC10F322_XTAL=$(mkv PIC10F322_XTAL)           # 2000000UL  (_XTAL_FREQ; drives __delay_ms)
 # The manifest clock string is derived after preflight validates the selected
 # AWK, so it cannot drift from this firmware clock source.
@@ -2699,10 +2707,14 @@ img_row() {
 			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			# -M programs the whole device, -Y verifies it afterwards, -R
 			# releases reset so the pedal runs on unplugging the programmer.
-			# The PIC10F320 has no Makefile programming target and no
-			# PIC10F320_PROG* variables, so this arm -- alone among the five --
-			# has nothing to be checked against. Filed as BR-FLASH-04.
-			flash_row "$base" pk2cmd "pk2cmd -PPIC10F320 -F$base -M -Y -R" ;;
+			# Checked against PIC10F320_PROG_CMD below, exactly as the 322 arm
+			# is checked against its own. The source-checkout route selects the
+			# output stage with PIC10F320_VARIANT rather than VARIANT, because
+			# that is the selector its build goal reads; passing VARIANT here
+			# would build the default stage and flash a different one.
+			flash_row "$base" pk2cmd "pk2cmd -PPIC10F320 -F$base -M -Y -R"
+			flash_row "$base" make-source \
+				"make pic10f320-program PIC10F320_VARIANT=$variant" ;;
 		${FW_BASE}-${PIC10F322_TAG}-*.hex)
 			mcu="PIC10F322"; clk="${PIC10F322_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
 			# Checked against PIC10F322_PROG_CMD below; the source-checkout
@@ -2770,9 +2782,10 @@ img_row() {
 check_flash_commands() {
 	local file=$1 image profile command stem variant fuse name value block
 	local pk2_command pk2_arg pk2_image pk2_image_count
-	local pic322_published=""
+	local source_selector source_selector_count source_word
+	local pinned tag_var cmd_var hex_var published
 	local -A download_seen=()
-	local -a download_cmds=() pk2_args=()
+	local -a download_cmds=() pk2_args=() source_words=()
 
 	while IFS=$'\t' read -r image profile command; do
 		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
@@ -2816,11 +2829,31 @@ check_flash_commands() {
 				esac
 				# The variant is not a question to ask the reader: the image
 				# they picked already answered it. The release published
-				# VARIANT=<v> beside a basename ending in that very variant.
-				case "$command" in
-					*"VARIANT=$variant"*) ;;
-					*) die "the source-checkout command for $image does not select its own variant $variant: $command" ;;
-				esac
+				# <selector>=<v> beside a basename ending in that very variant.
+				#
+				# Matched as a WHOLE WORD and compared for equality, not tested
+				# as a substring. Two selectors are legitimately in play --
+				# VARIANT for the ATtiny and PIC10F322 lanes, PIC10F320_VARIANT
+				# for the 320, because that is the name each lane's build goal
+				# reads -- so the assignment is located by name and its value is
+				# then required to BE the variant. A substring test accepts
+				# `VARIANT=cd4053_simple_and_more` under a `-cd4053_simple.hex`
+				# image, and accepts a second, contradicting assignment appended
+				# after the first.
+				read -r -a source_words <<<"$command"
+				source_selector=""
+				source_selector_count=0
+				for source_word in "${source_words[@]}"; do
+					case "$source_word" in
+						*VARIANT=*)
+							source_selector=${source_word#*VARIANT=}
+							source_selector_count=$((source_selector_count + 1)) ;;
+					esac
+				done
+				[ "$source_selector_count" -eq 1 ] \
+					|| die "the source-checkout command for $image must carry exactly one variant selector: $command"
+				[ "$source_selector" = "$variant" ] \
+					|| die "the source-checkout command for $image does not select its own variant $variant: $command"
 				;;
 		esac
 		# Both writers verify what they wrote -- avrdude unless -V turns it
@@ -2895,17 +2928,31 @@ check_flash_commands() {
 	# path inside a build tree, and the release's, which names a downloaded
 	# file. Substitute the one part that legitimately differs and require
 	# everything else -- part name, mode, verify, reset -- to be identical.
-	while IFS=$'\t' read -r image profile command; do
-		case "$profile:$image" in
-			pk2cmd:*-"$PIC10F322_TAG"-*)
-				pic322_published=${command/ -F$image / -F$PIC10F322_PROG_HEX }
-				break ;;
-		esac
-	done < "$file"
-	[ -n "$pic322_published" ] \
-		|| die "no PIC10F322 programming command was generated to check against the Makefile"
-	[ "$pic322_published" = "$PIC10F322_PROG_CMD" ] \
-		|| die "the published PIC10F322 command and the Makefile's PIC10F322_PROG_CMD disagree: '$pic322_published' vs '$PIC10F322_PROG_CMD'"
+	#
+	# Both PIC10F32x parts are pinned, each against its OWN variable family, and
+	# the table below is read rather than the block being copied per part. That
+	# is not tidiness. These two parts differ by one digit and share a pinout, a
+	# programmer and a dialect; a hand-copied second block is precisely how a
+	# release ends up comparing the 320's published command against the 322's
+	# authority and reporting agreement.
+	for pinned in "PIC10F322_TAG PIC10F322_PROG_CMD PIC10F322_PROG_HEX" \
+			"PIC10F320_TAG PIC10F320_PROG_CMD PIC10F320_PROG_HEX"; do
+		read -r tag_var cmd_var hex_var <<<"$pinned"
+		[ -n "${!tag_var:-}" ] && [ -n "${!cmd_var:-}" ] && [ -n "${!hex_var:-}" ] \
+			|| die "no Makefile programming authority was read for $tag_var"
+		published=""
+		while IFS=$'\t' read -r image profile command; do
+			case "$profile:$image" in
+				pk2cmd:*-"${!tag_var}"-*)
+					published=${command/ -F$image / -F${!hex_var} }
+					break ;;
+			esac
+		done < "$file"
+		[ -n "$published" ] \
+			|| die "no ${!tag_var} programming command was generated to check against the Makefile"
+		[ "$published" = "${!cmd_var}" ] \
+			|| die "the published ${!tag_var} command and the Makefile's $cmd_var disagree: '$published' vs '${!cmd_var}'"
+	done
 }
 
 # Soak evidence summary table.

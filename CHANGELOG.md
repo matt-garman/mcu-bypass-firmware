@@ -62,6 +62,14 @@ historical records and are not retroactively compacted by this policy.
   selectors and foreign driver selectors remain unsupported configurations that
   are not yet rejected uniformly. Firmware behavior is unchanged.
 
+- **`make pic10f320-program` flashes a built PIC10F320.** It mirrors
+  `pic10f322-program` with its own `PIC10F320_PROG*` variables, and selects the
+  output stage with `PIC10F320_VARIANT` -- the name its build goal reads, so the
+  image flashed is the image built. Release manifests publish a source-checkout
+  command for this part too, and each published PIC10F32x command is now pinned
+  byte for byte to the Makefile command it names. No PIC10F32x programming
+  command has been run against silicon under a written procedure.
+
 ### Changed
 
 - **Changing measurements and inventories now stay with their executable or
@@ -114,6 +122,14 @@ historical records and are not retroactively compacted by this policy.
   immutability gate are separate historical controls, not retroactive signature
   coverage. The immutability baseline also records the prior safety-errata
   amendment to v0.9.0-v0.9.2 rather than claiming published files never changed.
+
+- **The Makefile's `ipecmd` route now reads the device back.** Under
+  `PIC10F322_PROG=ipecmd`, and its new PIC10F320 equivalent, the command
+  programmed the device without verifying it and left the part in reset. It is
+  now `-F<hex> -M -Y -OL`, matching both `FLASHING.md`'s published PICkit 3
+  procedure and the PIC12F675 helper's validated write. `PIC10F322_PROG_TOOL`
+  defaults to `PK3` rather than `PK4` for the same reason. Releases publish no
+  `ipecmd` command line, before or after this change.
 
 ## [0.9.11] - 2026-08-29
 

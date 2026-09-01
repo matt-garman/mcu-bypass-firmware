@@ -386,12 +386,13 @@ mismatch fails loudly and names the count, exactly as it did this time.
 
 ### T25-program-argv - Cross-check published commands against executed argv
 
-A release now pins its published PIC10F322 command to `PIC10F322_PROG_CMD` byte
-for byte, and every published command's fuse bytes to the manifest's own image
-table. The AVR side is still two independent constructions: the Makefile writes
-fuses and flash as separate `avrdude` invocations while the release renders one
-combined invocation, so the two can disagree in everything but the fuse values
-and part name they share.
+A release now pins its published PIC10F322 command to `PIC10F322_PROG_CMD` and
+its PIC10F320 command to `PIC10F320_PROG_CMD`, byte for byte, and every
+published command's fuse bytes to the manifest's own image table. The AVR side
+is still two independent constructions: the Makefile writes fuses and flash as
+separate `avrdude` invocations while the release renders one combined
+invocation, so the two can disagree in everything but the fuse values and part
+name they share.
 
 Put fake `avrdude`, `pk2cmd` and `ipecmd` executables on `PATH`, run the real
 program goals against them, capture the actual argument vectors and compare
@@ -603,17 +604,6 @@ substitute a fragile URL shortener. Firmware edits must be made by the owner.
 Dependencies: per-image flash budgets and final-HEX string verification.
 Effort: about 1-2 hours. Risk: Low; provenance polish only.
 
-### T3-pic320-program - Add `make pic10f320-program` convenience target <!-- name-contract: exempt (documents an absent goal) -->
-
-Mirror the existing PIC10F322 programmer interface with separately namespaced
-`PIC10F320_PROG*` variables, update help and release flashing instructions, and
-validate the exact command against a real programmer and part before removing
-the current manual `pk2cmd` guidance. Do not add an untested hardware-programming
-surface merely for symmetry.
-
-Dependencies: programmer and PIC10F320 hardware. Effort: about 1 hour plus bench
-time. Risk: Low; the documented direct command already provides the function.
-
 ### T3-programming-guide - Publish a flash-first release landing page
 
 `MANIFEST.md` is the GitHub Release body (`notes="$dir/MANIFEST.md"` in
@@ -808,7 +798,6 @@ The stable ID in each row matches exactly one open section above.
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |
-| T3-pic320-program | `make pic10f320-program` target <!-- name-contract: exempt (documents an absent goal) --> | 3 | 1 h + bench | Low |
 | T3-programming-guide | Flash-first release landing page | 3 | 3-4 h | Medium - first-run experience |
 | T3-release-bundle | Self-verifiable downloaded release | 3 | 4-6 h | Medium |
 | T4-manufacturing-scope | Name manufacturing deliverables as out of scope | 4 | Small | Completeness |

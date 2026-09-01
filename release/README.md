@@ -437,10 +437,14 @@ writes the fuses, then flashes, so a failed build reaches no programmer at all:
 `make attiny85-program VARIANT=<variant>` (ATtiny85), and so on. `<variant>` is
 the output-stage name from the table above.
 
-**The PIC10F32x parts need no fuse step**, so
-`make pic10f322-program VARIANT=<variant>` is the whole source-tree equivalent of
-the programmer command; the PIC10F320 lane has no such convenience goal, so flash
-that part with the command `MANIFEST.md` gives for its image.
+**The PIC10F32x parts need no fuse step**, so a single goal is the whole
+source-tree equivalent of the programmer command:
+`make pic10f322-program VARIANT=<variant>` and
+`make pic10f320-program PIC10F320_VARIANT=<variant>`. The selector name differs
+because each goal reads the one its own build lane reads, and passing the wrong
+one would build the default output stage and flash a different one.
+`MANIFEST.md` publishes both beside the downloaded-image commands, and a release
+checks each against the Makefile command it names, byte for byte.
 
 **PIC12F675 is not a raw write target, on either route**, and the board must be
 externally powered for both. Programming a downloaded image needs no source

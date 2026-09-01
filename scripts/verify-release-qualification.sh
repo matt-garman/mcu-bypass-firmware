@@ -1021,11 +1021,28 @@ if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 			'make '*) ;;
 			*) die "the source-checkout command for $flash_current is not a make invocation: $flash_line" ;;
 		esac
+		# The variant assignment is found by name and then compared for
+		# equality, not tested as a substring of the whole line. Two selector
+		# names are legitimately in use -- VARIANT for the ATtiny and PIC10F322
+		# goals, PIC10F320_VARIANT for the PIC10F320, each being the name its
+		# own build lane reads -- and a substring test would also accept a
+		# longer variant name that merely starts with this image's, or a second
+		# assignment appended after a correct first one.
 		flash_stem=${flash_current%.hex}
-		case "$flash_line" in
-			*"VARIANT=${flash_stem##*-}"*) ;;
-			*) die "the source-checkout command for $flash_current does not select its own variant: $flash_line" ;;
-		esac
+		read -r -a flash_words <<<"$flash_line"
+		flash_selector=""
+		flash_selector_count=0
+		for flash_word in "${flash_words[@]}"; do
+			case "$flash_word" in
+				*VARIANT=*)
+					flash_selector=${flash_word#*VARIANT=}
+					flash_selector_count=$((flash_selector_count + 1)) ;;
+			esac
+		done
+		[ "$flash_selector_count" -eq 1 ] \
+			|| die "the source-checkout command for $flash_current must carry exactly one variant selector: $flash_line"
+		[ "$flash_selector" = "${flash_stem##*-}" ] \
+			|| die "the source-checkout command for $flash_current does not select its own variant: $flash_line"
 		flash_current=""
 	done < "$flash_source"
 fi

@@ -1499,7 +1499,9 @@ Three of twenty-one were runnable. Behind that:
   The guidance stays in `MANIFEST.md`, which is already signed and already
   published. BR-FLASH-03 carried both forward as `TODO.md`
   `T3-programming-guide` and `T3-release-bundle`.
-- No `ipecmd` command line. See BR-FLASH-04.
+- No `ipecmd` command line. BR-FLASH-04 kept it that way, and changed the
+  reason: the form now verifies, so what the release says is that it
+  publishes the commands it pins to the Makefile's default.
 
 ## BR-FLASH-03 - Retire the flashing-simplicity work journal
 
@@ -1533,7 +1535,8 @@ only the gate that existed to keep its banner honest.
   `T3-release-bundle` (§4.4, §7.5, G5) and `T25-program-argv` (§4.2, §4.5, and
   §7.2's residual choice of AVR operation shape) -- and two declined entries,
   the static README command block (§4.6) and the general-purpose interactive
-  helper (§4.6, §8). `T3-pic320-program` already carried §7.6.
+  helper (§4.6, §8). `T3-pic320-program` already carried §7.6; BR-FLASH-04
+  built the goal it described and retired the entry.
 - [x] Remove branch-era current-state/proposal interleaving. It leaves with the
   file; the 10 unresolvable `§N` citations counted under BR-FINAL-01 leave with
   it too.
@@ -1570,13 +1573,14 @@ itself deletes is still caught.
 
 ## BR-FLASH-04 - Close the two PIC10F32x programming-authority gaps
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Depends on:** BR-FLASH-02
 
 Both were found while binding the published programming commands to the
-Makefile, and both are left to the user: they change what a programmer is told
-to do to hardware.
+Makefile, and both were left to the user, because they change what a programmer
+is told to do to hardware. The user decided all three questions below; what
+follows the work items is what those decisions built.
 
 - **The PIC10F320 has no programming authority.** There is no
   `pic10f320-program` target and no `PIC10F320_PROG*` variables, so its three
@@ -1596,23 +1600,105 @@ to do to hardware.
 
 **Work:**
 
-- [ ] Decide whether the PIC10F320 gains its own `PIC10F320_PROG*` variables and
+- [x] Decide whether the PIC10F320 gains its own `PIC10F320_PROG*` variables and
   a `pic10f320-program` target, or whether the release says plainly that its
-  PIC10F320 command is unpinned.
-- [ ] Decide whether the Makefile's `ipecmd` form gains `-Y`, and whether
+  PIC10F320 command is unpinned. **Decision: the target.**
+- [x] Decide whether the Makefile's `ipecmd` form gains `-Y`, and whether
   `PIC10F322_PROG_TOOL` should default to `PK3` or `PK4` given that `FLASHING.md`
-  leads with the PICkit 3 and MPLAB X 6.25 dropped support for it.
-- [ ] If the `ipecmd` form gains a verify pass, publish it beside the `pk2cmd`
-  command. The gate is in place first: `check_flash_commands` and the
-  qualification verifier already require every published PIC command to verify,
-  and both fail closed on a programming tool they do not recognise -- so
-  publishing `ipecmd` means teaching both about it in the same change.
+  leads with the PICkit 3 and MPLAB X 6.25 dropped support for it. **Decision:
+  `-M -Y -OL` and `PK3`,** which is the spelling `FLASHING.md` and
+  `scripts/flash-pic12f675.py` already agree on.
+- [x] If the `ipecmd` form gains a verify pass, publish it beside the `pk2cmd`
+  command. **Decision: do not.** The gate reasoning still holds -- publishing it
+  means teaching `check_flash_commands` and the qualification verifier a dialect
+  they both fail closed on -- and the release's stated reason for withholding it
+  had to change anyway, because that reason was "it performs no verify pass".
 
 **Acceptance:**
 
 - Every published programming command is checkable against one declared
   authority, or is published as explicitly unpinned.
 - No published command writes a device without reading it back.
+
+**What the first decision built.** `PIC10F320_PART`, `PIC10F320_PROG`,
+`PIC10F320_PROG_TOOL`, `PIC10F320_PROG_HEX` and `PIC10F320_PROG_CMD`, plus a
+`pic10f320-program` goal that builds the selected image and its budget and
+return-stack gates before it writes anything. `scripts/make-release.sh` reads
+the new `PROG_CMD` and `PROG_HEX` through `mkv`, scrubs the four new names out
+of the release query environment, and pins the published PIC10F320 command to
+`PIC10F320_PROG_CMD` byte for byte -- the check the 322 already had.
+
+One difference from `pic10f322-program`, and it is the point rather than a
+detail. The PIC10F320 lane selects its output stage with `PIC10F320_VARIANT`,
+not `VARIANT`; that is what `pic10f320` and every PIC10F320 test, soak and
+coverage goal read. So `PIC10F320_PROG_HEX` is `$(PIC10F320_HEX)` itself, the
+path the build wrote, and the published source-checkout command spells
+`PIC10F320_VARIANT=<v>`. Had the goal taken `VARIANT`, `make pic10f320-program
+VARIANT=tq2_l2_5v_relay` would have built the default output stage and written a
+different one to a pedal.
+
+That selector split is also why two variant checks were tightened rather than
+extended. Both the producer and `scripts/verify-release-qualification.sh` asked
+whether the string `VARIANT=<v>` appeared anywhere in the command -- which
+accepts `PIC10F320_VARIANT=<v>` by accident rather than by rule, accepts a
+longer variant name that merely begins with this image's, and accepts a second,
+contradicting assignment appended after a correct first one. Both now split the
+command into words, require exactly one variant selector however it is spelled,
+and require its value to BE the variant the image names.
+
+**What the second decision built.** One line in each part's `ifeq`:
+`-TP<tool> -P<part> -F<hex> -M -Y -OL`, and `PK3` as the default tool. The old
+form wrote the whole device and returned without reading a byte back, which is
+the one thing every other write path in this repository is not allowed to do --
+`check_flash_commands` and the qualification verifier both reject a published
+`pk2cmd` line missing `-Y`, and `scripts/flash-pic12f675.py`'s `write_argv()`
+has carried `-M -Y -OL` all along. It also disagreed with `FLASHING.md`, which
+publishes `-TPPK3 ... -M -Y -OL` for these very parts. Three spellings of one
+transaction, one of them unsafe; there is now one.
+
+`-OL` is a behaviour change on the bench: the part runs when the write
+completes instead of staying in reset. That is what `-R` already did on the
+`pk2cmd` path, so the two dialects now end in the same state rather than in two.
+
+**What the third decision changed.** The release's published paragraph gave a
+reason that this change falsifies -- "the invocation this repository defines for
+that tool performs no verify pass". It now says what is true after the change:
+every command published is pinned byte for byte to the Makefile's default
+programming command, `ipecmd` is a non-default override of the same goals, and
+its reset-release flag and part-name spelling have not been confirmed against a
+part, so that procedure stays in `FLASHING.md` where the caveat travels with it.
+
+**What is enforced, and what is not.** The new gate is a completeness rule, not
+a third entry in a list: `test/test_release_qualification.sh` harvests every
+`img_row` arm that emits a `pk2cmd` command and every row of the producer's
+pinning table, and requires the two sets to be equal -- so a fourth PIC arm
+added later fails until it is pinned. It also requires each row to pin a part
+against its OWN variables, which is the failure these two parts invite: they
+differ by one digit, share a pinout, a programmer and a dialect, and a row that
+read `PIC10F320_TAG` and compared against `PIC10F322_PROG_CMD` would report
+agreement about the wrong part and pass every other check in the file.
+
+What is not enforced is the hardware. No PICkit has run either command against
+either part under a written procedure with retained measurements;
+`HARDWARE_VALIDATION_LOG.md` says that of every part here, and `T3-hw-procedure`
+is the item it waits on. `TODO.md`'s `T3-pic320-program` -- which asked for
+exactly this target, and warned against adding an untested hardware-programming
+surface merely for symmetry -- is retired, because what it asked for exists;
+its bench half was never separable from the project-wide one. Retiring it also
+removed the two name-contract exemption markers it carried -- each declaring
+that the entry documented an absent goal -- which the marker-expiry rule would
+have failed on the moment that goal started resolving.
+
+- Verified: `make test` green, 0 failures across 101 summaries.
+  `test-release-qualification` 175 -> 179 checks (the completeness rule, and
+  three source-checkout selector cases: two selectors, a namespaced selector
+  naming another variant, and a namespaced selector naming its own).
+  `test-release-preflight` 238 checks, 0 failures, 96 -> 98 Makefile queries --
+  the two new `mkv` reads, which is the pin that caught them.
+  `test-makefile-name-contract` 48 checks, axis B 521 -> 525 commands and axis D
+  153 -> 166 mentions. `test-todo-index` 102 -> 99 checks, three fewer for the
+  retired entry. `make print-PIC10F320_PROG_CMD` and its `ipecmd` override read
+  back the two intended commands.
 
 ---
 
@@ -2052,8 +2138,11 @@ pins in this section is unchanged.
 Every artifact named by every remaining item was checked against the tree --
 each source file, script, test, patch, Makefile variable and absent goal
 resolves, so no item reads as open on the strength of a stale reference.
-`T3-pic320-program` still documents an absent goal, which is what keeps its
-exemption marker suppressing something.
+At the time of this audit `T3-pic320-program` still documented an absent goal,
+which is what kept its exemption marker suppressing something. BR-FLASH-04 has
+since built `pic10f320-program`; the entry and both of its markers are gone,
+which is the same rule read from the other end -- an exemption stops being
+earned the moment the name it covers resolves.
 
 Deliberately kept at full length: the six safety obligations under
 `T3-nonblocking-actuation`, which are the concise extraction BR-DOC-03 produced
@@ -4849,7 +4938,7 @@ dependencies and acceptance criteria.
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
 | BR-FLASH-02 | Generate release programming guide | DONE `23eac73` |
 | BR-FLASH-03 | Delete flashing proposal journal | DONE `fc11171` |
-| BR-FLASH-04 | Close PIC10F32x programming authority gaps | TODO |
+| BR-FLASH-04 | Close PIC10F32x programming authority gaps | DONE `<commit>` |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |

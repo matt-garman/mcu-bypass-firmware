@@ -2106,13 +2106,24 @@ pic10f322-test-target-variants:
 # The full command is PIC10F322_PROG_CMD; override it wholesale for any other tool.
 # Power defaults are CONSERVATIVE: the programmer does NOT source Vdd (safe for an
 # externally-powered pedal board). For a bare chip powered by the programmer, add
-# the power flag: pk2cmd `-T` (and `-A<volts>`), ipecmd `-W`.
+# the power flag: pk2cmd `-T` (and `-A<volts>`), ipecmd `-W5`.
+#
+# BOTH dialects read the device back. `-M -Y -R` and `-M -Y -OL` are the same
+# transaction in two vocabularies: program the whole device, verify it, release
+# it from reset so the pedal runs when the programmer is unplugged. An ipecmd
+# form without `-Y` reports success without reading back a single byte, and it
+# would disagree with the two places that already spell this dialect: the
+# FLASHING.md PICkit 3 procedure published for these very parts, and
+# scripts/flash-pic12f675.py's write_argv(), the one validated ipecmd write this
+# project defines. PK3 is the default for the same reason -- FLASHING.md leads
+# with the PICkit 3 and the helper pins PK3, and MPLAB X 6.25 dropped PICkit 3
+# support, so a reader following that file is on 6.20 or earlier.
 PIC10F322_PART      ?= PIC10F322
 PIC10F322_PROG      ?= pk2cmd
-PIC10F322_PROG_TOOL ?= PK4
+PIC10F322_PROG_TOOL ?= PK3
 PIC10F322_PROG_HEX   = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(VARIANT),$(PIC10F322_TAG)).hex
 ifeq ($(PIC10F322_PROG),ipecmd)
-PIC10F322_PROG_CMD ?= $(PIC10F322_PROG) -TP$(PIC10F322_PROG_TOOL) -P$(PIC10F322_PART) -M -F$(PIC10F322_PROG_HEX)
+PIC10F322_PROG_CMD ?= $(PIC10F322_PROG) -TP$(PIC10F322_PROG_TOOL) -P$(PIC10F322_PART) -F$(PIC10F322_PROG_HEX) -M -Y -OL
 else
 PIC10F322_PROG_CMD ?= $(PIC10F322_PROG) -P$(PIC10F322_PART) -F$(PIC10F322_PROG_HEX) -M -Y -R
 endif
@@ -4880,6 +4891,61 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 	fi; \
 	echo "OK:   $$hex : $$dec words ($${pct}%) of $$budget; return stack validated"; \
 	image_complete=1
+
+# --- PIC10F320 device programming (hardware) ---------------------------------
+# The PIC10F322 interface above, separately namespaced. The two variable
+# families are deliberately independent -- which is also why make-release.sh
+# refuses to derive one part's published command from the other's -- so that
+# re-pinning one part cannot silently re-pin the other.
+#
+# ONE difference from pic10f322-program, and it is deliberate: this lane selects
+# its output stage with PIC10F320_VARIANT, not VARIANT, exactly as `pic10f320`
+# and every PIC10F320 test, soak and coverage goal does. PIC10F320_PROG_HEX is
+# therefore $(PIC10F320_HEX) itself -- the one path the build above wrote, and
+# the one the flash-budget comparison and the return-stack oracle accepted.
+# Spelling it any other way would let `make pic10f320-program VARIANT=<v>` build
+# the default output stage and then write a different one to silicon.
+#
+# NOT HARDWARE-VALIDATED. No PICkit has run this command against a PIC10F320
+# under a written procedure with retained measurements; HARDWARE_VALIDATION_LOG.md
+# states that for every part in this repository, and TODO `T3-hw-procedure` is
+# the procedure it waits on. What this target does add is an authority: a release
+# publishes the pk2cmd spelling of this command and checks it against
+# PIC10F320_PROG_CMD byte for byte, so the published instruction and the one a
+# developer runs cannot drift apart.
+PIC10F320_PART      ?= PIC10F320
+PIC10F320_PROG      ?= pk2cmd
+PIC10F320_PROG_TOOL ?= PK3
+PIC10F320_PROG_HEX   = $(PIC10F320_HEX)
+ifeq ($(PIC10F320_PROG),ipecmd)
+PIC10F320_PROG_CMD ?= $(PIC10F320_PROG) -TP$(PIC10F320_PROG_TOOL) -P$(PIC10F320_PART) -F$(PIC10F320_PROG_HEX) -M -Y -OL
+else
+PIC10F320_PROG_CMD ?= $(PIC10F320_PROG) -P$(PIC10F320_PART) -F$(PIC10F320_PROG_HEX) -M -Y -R
+endif
+
+# Builds the selected variant (and its flash-budget and return-stack gates)
+# first, so the image is fresh and proven to fit, then flashes it. Like
+# pic10f322-program this is an intentional bench action: it FAILS LOUDLY rather
+# than skipping when the HEX or the programmer is missing, and echoes the exact
+# command before it touches silicon.
+.PHONY: pic10f320-program
+pic10f320-program: variant-selectors-valid pic10f320
+	@hex="$(PIC10F320_PROG_HEX)"; \
+	if [ ! -f "$$hex" ]; then \
+		echo "ERROR: $$hex not found -- 'make pic10f320' produced no HEX (XC8 installed?)."; \
+		echo "       select an output stage with PIC10F320_VARIANT=<$(PIC10F320_VARIANTS_SUPPORTED)>"; \
+		echo "       (default $(PIC10F320_VARIANT))."; \
+		exit 1; \
+	fi; \
+	if ! command -v $(PIC10F320_PROG) >/dev/null 2>&1; then \
+		echo "ERROR: PIC programmer '$(PIC10F320_PROG)' not found on PATH."; \
+		echo "       install pk2cmd (PICkit 2), or set PIC10F320_PROG=ipecmd (PICkit 3/4/5),"; \
+		echo "       or override the whole command with PIC10F320_PROG_CMD=..."; \
+		exit 1; \
+	fi; \
+	echo "Programming PIC10F320 (variant $(PIC10F320_VARIANT)) via $(PIC10F320_PROG):"; \
+	echo "  $(PIC10F320_PROG_CMD)"; \
+	$(PIC10F320_PROG_CMD)
 
 # Build every supported variant, fail-closed on the matrix itself.
 #
@@ -8228,7 +8294,7 @@ help:
 	@echo "  pic10f322-test-io     libgpsim GPIO transition + pulse timing check (PIC10F322_IO_VARIANT)"
 	@echo "  pic10f322-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
-	@echo "  pic10f322-program     flash one PIC variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
+	@echo "  pic10f322-program     flash one PIC10F322 variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
 	@echo "PIC12F675 (classic mid-range, 1024 words; release-supported, built by all/release):"
 	@echo "  Full CI-gated pre-hardware validation, plus a bench-programming workflow with trim evidence."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
@@ -8284,6 +8350,8 @@ help:
 	@echo "  pic10f320-test-target  fail-closed fault + lock-step + target-I/O for one variant"
 	@echo "                     (PIC10F320_TARGET_VARIANT); pic10f320-test-target-variants runs all"
 	@echo "  pic10f320-test-soak  libgpsim soak (PIC10F320_SOAK_VARIANT, PIC10F320_SOAK_DURATION_MS)"
+	@echo "  pic10f320-program  flash one PIC10F320 variant to hardware"
+	@echo "                     (PIC10F320_VARIANT=, PIC10F320_PROG=pk2cmd|ipecmd)"
 	@echo "  pic10f320-clean    remove build_pic10f320/ (build + coverage artifacts)"
 	@echo "ATtiny202 release-supported target (AVR-XT / avrxmega3):"
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
@@ -8414,6 +8482,7 @@ help:
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
 	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
+	@echo "               PIC10F320_PROG=pk2cmd|ipecmd, PIC10F320_PROG_TOOL=PK3|PK4|PK5, PIC10F320_PROG_CMD="
 	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5,"
 	@echo "               PIC12F675_READ_PROG=pk2cmd, PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT=,"
 	@echo "               PIC12F675_RELEASE_TAG=vX.Y.Z (pic12f675-release-program, and pic12f675-finalize"

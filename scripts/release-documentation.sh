@@ -1564,9 +1564,13 @@ release_render_flashing() {
 	printf '\n'
 	printf '%s\n' \
 		'PICkit 3/4/5 program the PIC10F32x parts through MPLAB IPE'"'"'s `ipecmd` rather' \
-		'than `pk2cmd`. This release publishes no `ipecmd` command line, because the' \
-		'invocation this repository defines for that tool performs no verify pass,' \
-		'and every command published here is verified after it is written.' \
+		'than `pk2cmd`. Every command published here is pinned, byte for byte, to the' \
+		'programming command this project'"'"'s Makefile defines by default, and that' \
+		'default is `pk2cmd`. The `ipecmd` form is a non-default override of the same' \
+		'goals and writes and verifies the same way, but its reset-release flag and' \
+		'part-name spelling have not been confirmed against a part; that procedure' \
+		'therefore stays in the source tree'"'"'s `FLASHING.md`, which carries the caveat' \
+		'with it, rather than being published here as a complete command.' \
 		'' \
 		'### Per-image commands' \
 		'' \
