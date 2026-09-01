@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Host-only rebuild-determinism regression for the PIC soak binaries -- the PIC
+# Host-only rebuild regression for the direct PIC harness binaries -- the PIC
 # counterpart of test-workload-rebuild / test-avr-build-rebuild.
 #
 # THE PROPERTY
@@ -28,7 +28,7 @@ set -euo pipefail
 # inside `make test` on any host. The recipe under test is the file rule itself,
 # which carries no tool guards -- only the surrounding lane does.
 #
-# Parameterized so ONE regression covers both chips.
+# Parameterized so ONE regression covers all three chips.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-${HOME:?HOME is required when TMPDIR is unset}}/test-pic-rebuild.XXXXXX")
@@ -162,8 +162,9 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$out" ] || exit 2
 printf '%s\n' ':020000000028D6' ':02400E009E38DA' ':00000001FF' > "$out"
-printf 'fake assembly\n' > "${out%.hex}.s"
-printf '_gpio_shadow_ 0020\n' > "${out%.hex}.sym"
+printf '_ctx_:\n ds 3\n' > "${out%.hex}.s"
+printf '%s\n' '_ctx_ 0021 0023 BANK0 0' '_gpio_shadow_ 0020 0020 BANK0 0' \
+       '%segments' > "${out%.hex}.sym"
 printf 'Program space used 2Ah (42) of 400h words (4.1%%)\n'
 printf 'Data space used 20h (32) of 40h bytes (50.0%%)\n'
 EOF
@@ -329,6 +330,68 @@ for spec in cd4053_with_mute:5 tq2_l2_5v_relay:12; do
 	checks=$((checks + 1))
 done
 
+# --- direct fault/lock-step artifacts ----------------------------------------
+# Each binary consumes an XC8 image, the matching assembly/symbol sidecars and
+# the context-layout checker. Build once, delete those generated inputs beneath
+# the still-current binary, and require the direct target to restore them and
+# recompile. This is the stale direct-file use that the phony run lanes mask by
+# deleting their binaries inline.
+check_direct_harness() {
+	local label=$1 target=$2 image=$3 asm=$4 sym=$5
+	local before after args
+
+	rm -f "$repo/$target" "$repo/$image" "$repo/$asm" "$repo/$sym"
+	: > "$log"
+	build "$target" PIC_CC="$tools/xc8" PIC_SOAK_CXX="$tools/cxx" \
+		HOSTCC="$tools/cxx" PIC12F675_PYTHON="$tools/timing-python" \
+		|| fail "$label: clean direct build failed: $(cat "$mklog")"
+	for artifact in "$target" "$image" "$asm" "$sym"; do
+		[ -s "$repo/$artifact" ] \
+			|| fail "$label: clean direct build did not produce $artifact"
+	done
+	args=$(tail -1 "$log")
+	[[ "$args" == *"-DCTX_ADDR=0x0021"* ]] \
+		|| fail "$label: compile did not carry the validated context address: $args"
+	case "$label" in
+		PIC12F675-fault)
+			[[ "$args" == *"-DPIC_SHADOW_ADDR=0x0020"* ]] \
+				|| fail "$label: compile did not carry the symbol-derived shadow address: $args"
+			;;
+	esac
+	checks=$((checks + 1))
+
+	before=$(compiles)
+	rm -f "$repo/$image" "$repo/$asm" "$repo/$sym"
+	build "$target" PIC_CC="$tools/xc8" PIC_SOAK_CXX="$tools/cxx" \
+		HOSTCC="$tools/cxx" PIC12F675_PYTHON="$tools/timing-python" \
+		|| fail "$label: generated-input rebuild failed: $(cat "$mklog")"
+	after=$(compiles)
+	[ "$after" -gt "$before" ] \
+		|| fail "$label: deleting generated inputs did not rebuild the harness"
+	for artifact in "$image" "$asm" "$sym"; do
+		[ -s "$repo/$artifact" ] \
+			|| fail "$label: generated-input rebuild did not restore $artifact"
+	done
+	checks=$((checks + 1))
+}
+
+check_direct_harness PIC10F322-fault test/pic/test_fault_pic \
+	build_pic10f322/bypass-pic10f322-cd4053_simple.hex \
+	build_pic10f322/bypass-pic10f322-cd4053_simple.s \
+	build_pic10f322/bypass-pic10f322-cd4053_simple.sym
+check_direct_harness PIC10F322-lockstep test/pic/test_lockstep_pic \
+	build_pic10f322/bypass-pic10f322-cd4053_simple.hex \
+	build_pic10f322/bypass-pic10f322-cd4053_simple.s \
+	build_pic10f322/bypass-pic10f322-cd4053_simple.sym
+check_direct_harness PIC12F675-fault test/pic/test_fault_pic12f675 \
+	build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex \
+	build_pic12f675/bypass-pic12f675-cd4053_simple.s \
+	build_pic12f675/bypass-pic12f675-cd4053_simple.sym
+check_direct_harness PIC12F675-lockstep test/pic/test_lockstep_pic12f675 \
+	build_pic12f675/simcal/bypass-pic12f675-cd4053_simple_simcal.hex \
+	build_pic12f675/bypass-pic12f675-cd4053_simple.s \
+	build_pic12f675/bypass-pic12f675-cd4053_simple.sym
+
 # A zero-XC8 skip must not leave a stale binary that no longer reflects the
 # requested duration/variant.
 #
@@ -398,4 +461,4 @@ checks=$((checks + 1))
 	|| fail "expected a separate soak binary per chip"
 checks=$((checks + 1))
 
-printf 'PIC soak rebuild determinism: %d checks, 0 failures\n' "$checks"
+printf 'PIC harness rebuild validation: %d checks, 0 failures\n' "$checks"

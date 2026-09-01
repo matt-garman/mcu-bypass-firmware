@@ -4562,7 +4562,8 @@ qualification and plan deletion.
   deliberate independent boundary and add the witness that prevents drift.
 
 - [x] **BR-RVW2-07 -- MEDIUM -- include the live release policy in the durable
-  reference gate.** `test/test_reference_contract.py` skips every path under
+  reference gate (`4f8ebb5`).** `test/test_reference_contract.py` skips every
+  path under
   `release/` to avoid rewriting immutable historical bundles, but that also
   skips the actively maintained `release/README.md` authority. Exclude only the
   per-version historical directories, scan the live policy, and add a negative
@@ -4575,7 +4576,7 @@ qualification and plan deletion.
   15 documents; the added document and three negative checks account for the
   change from the review baseline.
 
-- [ ] **BR-RVW2-08 -- LOW -- close direct PIC harness dependency gaps.** The
+- [x] **BR-RVW2-08 -- LOW -- close direct PIC harness dependency gaps.** The
   direct PIC10F322 and PIC12F675 fault/lock-step binary targets derive `CTX_ADDR`
   from generated assembly/symbol sidecars, but the sidecars and
   `test/check_pic_context_layout.sh` are not prerequisites. The authoritative
@@ -4583,6 +4584,14 @@ qualification and plan deletion.
   avoids the stale case; direct file-target use does not. Add the actual image,
   sidecar and helper dependencies with a rebuild regression, or explicitly
   remove/decline unsupported direct build-only targets.
+
+  **Resolved:** All four direct binary rules now name the selected image,
+  assembly, symbol file and context-layout checker they consume. Selected
+  artifacts route through the existing all-variant shipping and simulator-image
+  producers, preserving matrix validation instead of adding a second build
+  path. The host-only fake-tool regression deletes those generated inputs under
+  an existing binary and requires the direct target to restore them and
+  recompile; `test-pic-build-rebuild` passes 42 checks with no target toolchain.
 
 - [ ] **BR-RVW2-09 -- LOW -- reconcile plan bookkeeping before deleting the
   plan.** BR-STATE-01, BR-REL-02 and BR-REL-07 retain unchecked work inside DONE

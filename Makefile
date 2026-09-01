@@ -1962,7 +1962,9 @@ PIC10F322_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 
 $(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) $(PIC_PIN_LOOKUP_HDR) \
                   $(PIC_GPSIM_BOOTSTRAP_HDR) $(PIC10F32X_REGS_HDR) \
-                  $(PIC10F32X_FAULT_MATRIX_HDR)
+                  $(PIC10F32X_FAULT_MATRIX_HDR) $(PIC10F322_FAULT_HEX) \
+                  $(PIC10F322_FAULT_SYM) $(PIC10F322_FAULT_ASM) \
+                  $(PIC_CONTEXT_LAYOUT_CHECK)
 	@rm -f $(PIC10F322_FAULT_BIN) || exit 1; \
 	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F322_FAULT_ASM)" "$(PIC10F322_FAULT_SYM)"` || exit 1; \
 	$(PIC10F322_FAULT_COMPILE)
@@ -1991,6 +1993,12 @@ PIC10F322_LOCKSTEP_MODEL_OBJ = $(PIC10F322_BUILD_DIR)/bypass_pure_lockstep.o
 PIC10F322_LOCKSTEP_HEX = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(PIC10F322_LOCKSTEP_VARIANT),$(PIC10F322_TAG)).hex
 PIC10F322_LOCKSTEP_SYM = $(PIC10F322_LOCKSTEP_HEX:.hex=.sym)
 PIC10F322_LOCKSTEP_ASM = $(PIC10F322_LOCKSTEP_HEX:.hex=.s)
+
+# XC8 emits each selected image and its sidecars only through the all-variant
+# producer. These file targets let direct harness builds express the artifacts
+# they consume while preserving that fail-closed matrix build.
+$(sort $(PIC10F322_FAULT_HEX) $(PIC10F322_FAULT_SYM) $(PIC10F322_FAULT_ASM) \
+       $(PIC10F322_LOCKSTEP_HEX) $(PIC10F322_LOCKSTEP_SYM) $(PIC10F322_LOCKSTEP_ASM)): pic10f322
 PIC10F322_LOCKSTEP_COMPILE = \
 		$(HOSTCC) $(HOST_CFLAGS) $(PURE_HOST_CFLAGS) -Itest -Isrc \
 			-c $(PURE_HOST_SRC) -o $(PIC10F322_LOCKSTEP_MODEL_OBJ) && \
@@ -2001,7 +2009,9 @@ PIC10F322_LOCKSTEP_COMPILE = \
 			$(PIC10F322_LOCKSTEP_SRC) $(PIC10F322_LOCKSTEP_MODEL_OBJ) -o $(PIC10F322_LOCKSTEP_BIN) -lgpsim
 
 $(PIC10F322_LOCKSTEP_BIN): $(PIC10F322_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
-                     $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP)
+                     $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) $(PURE_HOST_DEP) \
+                     $(PIC10F322_LOCKSTEP_HEX) $(PIC10F322_LOCKSTEP_SYM) \
+                     $(PIC10F322_LOCKSTEP_ASM) $(PIC_CONTEXT_LAYOUT_CHECK)
 	@rm -f $(PIC10F322_LOCKSTEP_BIN) || exit 1; \
 	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC10F322_LOCKSTEP_ASM)" "$(PIC10F322_LOCKSTEP_SYM)"` || exit 1; \
 	$(PIC10F322_LOCKSTEP_COMPILE)
@@ -5596,6 +5606,10 @@ override PIC12F675_CHIP := 12F675
 PIC12F675_TAG   ?= pic12f675
 PIC12F675_XTAL  ?= 4000000UL
 PIC12F675_BUILD_DIR ?= build_pic12f675
+# Simulator images stay below the target build directory so shipping-image
+# globs cannot select calibration-injected derivatives. Declared before the
+# direct harness rules because Make expands their prerequisite paths as read.
+override PIC12F675_SIMCAL_DIR := $(PIC12F675_BUILD_DIR)/simcal
 override PIC12F675_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC12F675_BUILD_DIR)/$(call fw_image,$(v),$(PIC12F675_TAG)).hex)
 override PIC12F675_ASSEMBLIES := $(PIC12F675_HEXES:.hex=.s)
 override PIC12F675_SYMBOLS := $(PIC12F675_HEXES:.hex=.sym)
@@ -6032,6 +6046,7 @@ PIC12F675_LOCKSTEP_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_LOCKSTEP_STEM)_simc
 # assembly of its own.
 PIC12F675_LOCKSTEP_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_LOCKSTEP_STEM).sym
 PIC12F675_LOCKSTEP_ASM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_LOCKSTEP_STEM).s
+
 # The mkdir is not ceremony: the model object lands in the target build
 # directory, which only the `pic12f675` build target creates, and this recipe is
 # also reachable as a plain file target.
@@ -6050,7 +6065,10 @@ PIC12F675_LOCKSTEP_COMPILE = \
 
 $(PIC12F675_LOCKSTEP_BIN): $(PIC12F675_LOCKSTEP_SRC) $(PIC_TARGET_LOCKSTEP_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                      $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
-                     $(PIC12F675_REGS_HDR) $(PURE_HOST_DEP) | variant-selectors-valid
+                     $(PIC12F675_REGS_HDR) $(PURE_HOST_DEP) \
+                     $(PIC12F675_LOCKSTEP_HEX) $(PIC12F675_LOCKSTEP_SYM) \
+                     $(PIC12F675_LOCKSTEP_ASM) $(PIC_CONTEXT_LAYOUT_CHECK) \
+                     | variant-selectors-valid
 	@rm -f $(PIC12F675_LOCKSTEP_BIN) || exit 1; \
 	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC12F675_LOCKSTEP_ASM)" "$(PIC12F675_LOCKSTEP_SYM)"` || exit 1; \
 	$(PIC12F675_LOCKSTEP_COMPILE)
@@ -6106,6 +6124,12 @@ PIC12F675_FAULT_HEX = $(PIC12F675_SIMCAL_DIR)/$(PIC12F675_FAULT_STEM)_simcal.hex
 # assembly of its own.
 PIC12F675_FAULT_SYM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_FAULT_STEM).sym
 PIC12F675_FAULT_ASM = $(PIC12F675_BUILD_DIR)/$(PIC12F675_FAULT_STEM).s
+
+# The simulator images and shipping sidecars come from different matrix
+# producers; keep that distinction visible in the direct file-target graph.
+$(sort $(PIC12F675_LOCKSTEP_HEX) $(PIC12F675_FAULT_HEX)): pic12f675-simcal
+$(sort $(PIC12F675_LOCKSTEP_SYM) $(PIC12F675_LOCKSTEP_ASM) \
+       $(PIC12F675_FAULT_SYM) $(PIC12F675_FAULT_ASM)): pic12f675
 # gpio_shadow_ remains a separate, part-specific fact. The shared context helper
 # validates only the common _ctx_ allocation and address contract.
 PIC12F675_FAULT_SHADOW_DEF = $(shell a=$$(awk '$$1=="_gpio_shadow_"{print $$2; exit}' $(PIC12F675_FAULT_SYM) 2>/dev/null); [ -n "$$a" ] && echo -DPIC_SHADOW_ADDR=0x$$a)
@@ -6121,7 +6145,10 @@ PIC12F675_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 
 $(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \
                   $(PIC_PIN_LOOKUP_HDR) $(PIC_GPSIM_BOOTSTRAP_HDR) \
-                  $(PIC12F675_REGS_HDR) $(PIC12F675_FAULT_MATRIX_HDR) | variant-selectors-valid
+                  $(PIC12F675_REGS_HDR) $(PIC12F675_FAULT_MATRIX_HDR) \
+                  $(PIC12F675_FAULT_HEX) $(PIC12F675_FAULT_SYM) \
+                  $(PIC12F675_FAULT_ASM) $(PIC_CONTEXT_LAYOUT_CHECK) \
+                  | variant-selectors-valid
 	@rm -f $(PIC12F675_FAULT_BIN) || exit 1; \
 	ctx_addr=`$(PIC_CONTEXT_LAYOUT_CHECK) "$(PIC12F675_FAULT_ASM)" "$(PIC12F675_FAULT_SYM)"` || exit 1; \
 	$(PIC12F675_FAULT_COMPILE)
@@ -6335,10 +6362,8 @@ override PIC12F675_MATRIX_EVIDENCE := test/pic/pic12f675_matrix_evidence.py
 override PIC12F675_MATRIX_MANIFEST := $(PIC12F675_BUILD_DIR)/.pic12f675-qualified-matrix.json
 override PIC12F675_MATRIX_STAGED := $(PIC12F675_MATRIX_MANIFEST).staged
 override PIC12F675_MAKE_COMMAND_TRUSTED := $(if $(filter default,$(origin MAKE_COMMAND)),1,0)
-# Not independently caller-overridable: simulator images must stay in this
-# dedicated subdirectory so no shipping-image glob can select them. Relocating
-# PIC12F675_BUILD_DIR still relocates the complete target artifact tree.
-override PIC12F675_SIMCAL_DIR := $(PIC12F675_BUILD_DIR)/simcal
+# The simulator directory is pinned with PIC12F675_BUILD_DIR above, before the
+# direct harness prerequisite paths that consume it.
 override PIC12F675_SIMCAL_HEXES := $(foreach v,$(CLASSIC_VARIANTS_SUPPORTED),$(PIC12F675_SIMCAL_DIR)/$(call fw_image,$(v),$(PIC12F675_TAG))_simcal.hex)
 # Derived images are build products: a `pic12f675` rebuild must not leave a stale
 # one behind for a lane to pick up. Appended rather than folded into the original
@@ -8449,7 +8474,7 @@ help:
 	@echo "  test-pic-guard-mutations  the three PIC shells' pin/clock/watchdog guards fire under XC8 (included in test)"
 	@echo "  test-strict-tools  required host-analysis skip/strict policy checks"
 	@echo "  test-workload-rebuild  workload/fuse rebuild regression checks"
-	@echo "  test-pic-build-rebuild  PIC soak rebuild + image/block-value routing checks"
+	@echo "  test-pic-build-rebuild  PIC harness rebuild + image/sidecar routing checks"
 	@echo "  test-soak       24-h soak test (standalone; AVR_SOAK_VARIANT, AVR_SOAK_CHIP,"
 	@echo "                  AVR_SOAK_DURATION_MS, AVR_SOAK_LIVENESS_INTERVAL_MS,"
 	@echo "                  AVR_SOAK_PROGRESS_INTERVAL_MS)"
