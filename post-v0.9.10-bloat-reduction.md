@@ -1573,7 +1573,7 @@ itself deletes is still caught.
 
 ## BR-FLASH-04 - Close the two PIC10F32x programming-authority gaps
 
-**Status:** DONE `<commit>`
+**Status:** DONE `c9aa9ae`
 
 **Depends on:** BR-FLASH-02
 
@@ -4938,7 +4938,7 @@ dependencies and acceptance criteria.
 | BR-FLASH-01 | Make FLASHING.md authoritative | DONE `a1633e0` |
 | BR-FLASH-02 | Generate release programming guide | DONE `23eac73` |
 | BR-FLASH-03 | Delete flashing proposal journal | DONE `fc11171` |
-| BR-FLASH-04 | Close PIC10F32x programming authority gaps | DONE `<commit>` |
+| BR-FLASH-04 | Close PIC10F32x programming authority gaps | DONE `c9aa9ae` |
 | BR-DOC-01 | Delete completed v0.9.6 journal | DONE `9b6dfc3` |
 | BR-DOC-02 | Reduce Makefile split decision | DONE `5ce3f59` |
 | BR-DOC-03 | Reduce non-blocking feasibility analysis | DONE `9c16f96` |
