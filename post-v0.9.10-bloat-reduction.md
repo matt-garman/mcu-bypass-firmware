@@ -3908,7 +3908,7 @@ last must match all three pinned image hashes. This completed slice does not
 claim the other optional candidates above are implemented, so BR-SRC-02 remains
 `NEEDS USER`.
 
-**Completed slice -- direct `<stdint.h>` dependency (`<commit>`):** The user
+**Completed slice -- direct `<stdint.h>` dependency (`98d912f`):** The user
 made `bypass_output_common.h` include the standard header that defines the
 `uint32_t` type used by its watchdog-budget arithmetic. The header no longer
 depends on whichever selected pin map it includes first to provide that type
