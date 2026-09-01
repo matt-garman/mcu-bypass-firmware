@@ -132,6 +132,15 @@
 #endif
 
 
+// ensure we select only *one* of OUTPUT_CD4053_SIMPLE,
+// OUTPUT_CD4053_WITH_MUTE, or OUTPUT_TQ2_RELAY
+#if ((defined(OUTPUT_CD4053_SIMPLE) + \
+            defined(OUTPUT_CD4053_WITH_MUTE) + \
+            defined(OUTPUT_TQ2_RELAY)) > 1)
+static_assert(0, "PIC10F320 output selectors are mutually exclusive");
+#endif
+
+
 // MCU-neutral threshold invariants.  This self-contained PIC10F320 shell
 // carries a local copy of the five invariants in bypass_compile_checks.h.
 // Evaluated at file scope (zero runtime cost); a violation fails this

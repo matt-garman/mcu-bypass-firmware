@@ -3525,8 +3525,8 @@ question below is answered: there is no archive to retain in the tagged commit.
   relationship.
 - How local cleanup and garbage-collection guidance changes.
 
-**Decision:** Declined. Keep dedicated artifact commits reachable from ordinary
-development history.
+**Decision:** Declined in `6e0e728`. Keep dedicated artifact commits reachable
+from ordinary development history.
 
 The proposal preserves the existing source-parent/artifact-child distinction but
 removes the child from the branch that supplies its durable reachability. That
@@ -3853,7 +3853,9 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Make `src/bypass_output_common.h` include its own `<stdint.h>` dependency.
 - Remove empty `src/bypass_output_cd4053_simple.h`, or give it a real driver
   contract such as selector validation.
-- Add one-hot backend/output selector guards.
+- Add one-hot backend/output selector guards. The PIC10F320 output-selector
+  slice is complete below; modular-shell and backend-selector guards remain
+  optional candidates.
 - Require each modular output driver translation unit's expected selector.
 - Correct stale MCU-neutral comments in `src/bypass_config.h`.
 - Replace deleted-document references after PIC consolidation.
@@ -3863,16 +3865,13 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Build/test recipes must pass explicit selectors consistently.
 - Static-analysis recipes must cover each expected selector.
 - Negative compile tests must be ready to prove new guards are load-bearing.
-  DONE by BR-SRC-03: `test/test_target_guard_mutations.sh` records the three
-  configurations the firmware currently accepts in silence -- two output
-  selectors on a modular shell, a driver compiled under a foreign selector, and
-  the PIC10F320's dual-scheme rejection that today comes from undeclared
-  identifiers rather than a guard -- and each row FAILS when the guard closing it
-  lands, demanding conversion to an explicit assertion on its message. Note for
-  the one-hot work: `bypass_mcu_pic10f320.c` selects its output scheme with two
-  different idioms, an `#if/#elif/#else` pin-map chain and standalone
-  `#if defined(OUTPUT_TQ2_RELAY)` blocks, which is why a conflicting definition
-  lands it in an inconsistent state instead of a diagnostic.
+  DONE by BR-SRC-03: `test/test_target_guard_mutations.sh` records two
+  configurations the modular firmware still accepts in silence -- two output
+  selectors on a shell and a driver compiled under a foreign selector. It also
+  retains the PIC10F320's former incidental dual-scheme rejection as an exact
+  assertion fixture now that the guard below has landed. An `UNGUARDED` or
+  `INCIDENTAL` row fails when its guard lands and demands conversion to the
+  project-owned message rather than deletion.
 - Pinned toolchains must be available for image/resource/timing comparison.
 
 **Acceptance:**
@@ -3882,6 +3881,31 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Expected preprocessor-only changes produce byte-identical images where
   intended.
 - Any generated-byte change is intentional, reviewed, and fully requalified.
+
+**Completed slice -- PIC10F320 output selectors (`<commit>`):** The user added
+one explicit file-scope guard for the three output-selector macros. More than
+one selector now fails on `PIC10F320 output selectors are mutually exclusive`
+before the shell's two selection idioms can disagree and produce unrelated
+undeclared-pin diagnostics. Exactly one selector preprocesses the guard away,
+so supported builds are expected to remain byte-identical; a changed
+expected-image hash is not to be rebaselined without investigation.
+
+The BR-SRC-03 handoff fixture was converted from `INCIDENTAL` to an exact
+`ASSERT:` expectation rather than deleted, proving under XC8 that the new guard
+is the reason the invalid configuration fails. The independent census moves the
+PIC10F320 shell from 18 to 19 declarations and the whole firmware from 79 to 80;
+the target-local group is now 53. Current comments in the mutation script and
+Makefile move with those counts.
+
+Local verification is necessarily structural because this host has no XC8,
+PIC device pack or AVR compiler: shell syntax, the 19-guard file census, the
+80-guard whole-source census and the exact source/fixture diagnostic agree;
+`test-deliberate-duplication` passes 350 checks. The focused full-toolchain
+checks are `make STRICT_TOOLS=1 test-pic-guard-mutations`, `make STRICT_TOOLS=1
+test-static-assert-guards` and `make STRICT_TOOLS=1 pic10f320-test-build`; the
+last must match all three pinned image hashes. This completed slice does not
+claim the other optional candidates above are implemented, so BR-SRC-02 remains
+`NEEDS USER`.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 

@@ -6,8 +6,8 @@
 # one input to a guard, the build must fail with that guard's own message. But it
 # compiles the classic-AVR lane only, with avr-gcc, and says so. Four MCU shells
 # sit outside it -- bypass_mcu_avr_xt.c, bypass_mcu_pic10f322.c,
-# bypass_mcu_pic12f675.c and bypass_mcu_pic10f320.c -- and they hold 52 of the
-# firmware's 79 static_assert guards. This file exercises selected predicates
+# bypass_mcu_pic12f675.c and bypass_mcu_pic10f320.c -- and they hold 53 of the
+# firmware's 80 static_assert guards. This file exercises selected predicates
 # from their pin, clock, layout, threshold and timing-budget families.
 #
 # Those target-local predicates cannot be proven with a shared compile. A pin
@@ -20,7 +20,7 @@
 # different expression, or does not preprocess at all.
 #
 # Until this file existed the census in test_static_assert_guards.sh was the only
-# check over those 52 declarations. The census still records only per-file
+# check over those 53 declarations. The census still records only per-file
 # counts: this mutation roster does not detect arbitrary weakening of an
 # unmutated predicate, and must not be represented as semantic coverage of all
 # 52 guards.
@@ -315,28 +315,24 @@ BUDGETS=(
 )
 
 # --------------------------------------------------------------------------
-# Configurations the firmware accepts and should not.
+# Invalid configurations handed off to source guards.
 # --------------------------------------------------------------------------
-# These rows FAIL when the missing guard is added. That is deliberate and is the
-# only thing that makes them worth having: BR-SRC-02 proposes one-hot output
-# selector guards and a required-selector assertion in each driver, and until
-# something records what today's behaviour actually is, "the guard works" and
-# "the guard was never reachable" look identical on the day it lands.
+# UNGUARDED and INCIDENTAL rows fail when their missing guard is added. That is
+# deliberate: until something records today's behaviour, "the guard works" and
+# "the guard was never reachable" look identical on the day it lands. Converted
+# ASSERT rows stay here as proof that the new diagnostic is load-bearing.
 #
-# When a guard here starts firing, do not delete the row -- change UNGUARDED to
-# ASSERT:<its message> and it becomes a proof that the new guard is load-bearing.
-UNGUARDED_FIXTURES=(
+# When a guard here starts firing, do not delete the row -- change UNGUARDED or
+# INCIDENTAL to ASSERT:<its message>, proving the new guard is load-bearing.
+GUARD_HANDOFF_FIXTURES=(
 	"xt shell accepts two output selectors|avr_xt:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_avr_xt.c|UNGUARDED"
 	"xt relay driver accepts a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
 	"322 shell accepts two output selectors|pic10f322:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_pic10f322.c|UNGUARDED"
 	"322 relay driver accepts a foreign selector|pic10f322:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
 	"675 relay driver accepts a foreign selector|pic12f675:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
-	# The self-contained shell is the one place two selectors are rejected -- but
-	# by accident. Its pin map uses an #if/#elif/#else chain (first arm wins) while
-	# two later blocks test OUTPUT_TQ2_RELAY on its own, so the two disagree and
-	# the relay code refers to pins the chain never defined. It fails on undeclared
-	# identifiers, not on anything this project wrote.
-	"320 rejects two output schemes only incidentally|pic10f320:cd4053_simple|add:-DOUTPUT_TQ2_RELAY|-|bypass_mcu_pic10f320.c|INCIDENTAL"
+	# This used to fail incidentally when two selection idioms chose different
+	# arms. Keep the invalid configuration and require its deliberate diagnostic.
+	"320 rejects two output schemes deliberately|pic10f320:cd4053_simple|add:-DOUTPUT_TQ2_RELAY|-|bypass_mcu_pic10f320.c|ASSERT:PIC10F320 output selectors are mutually exclusive"
 )
 
 row_in_lane() {
@@ -461,7 +457,7 @@ run_fixture() {
 	rows=$((rows + 1))
 }
 
-for row in "${FIXTURES[@]}" "${UNGUARDED_FIXTURES[@]}"; do
+for row in "${FIXTURES[@]}" "${GUARD_HANDOFF_FIXTURES[@]}"; do
 	IFS='|' read -r f_label f_config f_flags f_src f_tu f_outcome <<<"$row"
 	run_fixture "$f_label" "$f_config" "$f_flags" "$f_src" "$f_tu" "$f_outcome"
 done

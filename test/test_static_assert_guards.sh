@@ -237,7 +237,7 @@ done
 # predicates that have no mutation.
 #
 # EVERY shell is counted, not only the ones this file compiles. The four target
-# shells hold 52 of the 79 guards; their mutations live behind optional
+# shells hold 53 of the 80 guards; their mutations live behind optional
 # toolchains, and a census that skipped with them would leave the majority of
 # the firmware's compile-time invariants protected by nothing on a machine
 # without XC8.
@@ -250,7 +250,7 @@ GUARD_CENSUS=(
 	"bypass_compile_checks.h 5"
 	"bypass_mcu_avr_classic.c 17"
 	"bypass_mcu_avr_xt.c 11"
-	"bypass_mcu_pic10f320.c 18"
+	"bypass_mcu_pic10f320.c 19"
 	"bypass_mcu_pic10f322.c 8"
 	"bypass_mcu_pic12f675.c 15"
 	"bypass_output_cd4053_simple.c 1"
