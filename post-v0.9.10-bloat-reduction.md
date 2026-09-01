@@ -4060,7 +4060,7 @@ acceptance line above remains a rule for a reviewer.
 
 ## BR-REVIEW-01 - Resolve the completed-item review findings
 
-**Status:** TODO
+**Status:** DONE `<commit>`
 
 **Review baseline:** `23eac73` on 2026-08-31. The review covered every task
 marked `DONE`, its attributed commit or commits, later fixes affecting it, and
@@ -4973,7 +4973,7 @@ dependencies and acceptance criteria.
 | BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
-| BR-REVIEW-01 | Resolve completed-item review findings | TODO |
+| BR-REVIEW-01 | Resolve completed-item review findings | DONE `<commit>` |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
