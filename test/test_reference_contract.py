@@ -45,6 +45,11 @@ such entry in it names the document, so a reader can see at once what is being
 cited. Its links are still checked, because a dead hyperlink is dead whatever
 it describes. Branch-only working documents are excluded: they are deleted
 before a release and legitimately quote retired wording.
+
+DOCUMENT LIFECYCLES. README.md claims one lifecycle for every durable authority
+in its documentation map. That table is executable here: every mapped authority
+must occur in exactly one expected row, and per-release paths must name disjoint
+file roles rather than assigning a whole release directory to multiple labels.
 """
 
 import os
@@ -81,6 +86,33 @@ ADOC_ANCHOR = re.compile(r"^\[\[([^\],]+)", re.MULTILINE)
 ADOC_SHORT_ANCHOR = re.compile(r"^\[#([^\]\.]+)", re.MULTILINE)
 MD_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 HTML_ANCHOR = re.compile(r"<a\s+(?:id|name)=\"([^\"]+)\"")
+CODE_SPAN = re.compile(r"`([^`]+)`")
+
+LIFECYCLE_HEADING = "### Document lifecycle"
+LIFECYCLE_AUTHORITIES = {
+    "DESIGN_DOCUMENTATION.adoc": "Live specification",
+    "TOOLCHAIN.adoc": "Live specification",
+    "test/README.md": "Live specification",
+    "README.md": "Operator guidance",
+    "FLASHING.md": "Operator guidance",
+    "release/README.md": "Release policy and errata",
+    "MISRA_COMPLIANCE.md": "Compliance record",
+    "HARDWARE_VALIDATION_LOG.md": "Hardware validation record",
+    "CHANGELOG.md": "Change record",
+    "TODO.md": "Open-work register",
+    "docs/*.md": "Decision/safety record",
+    "AGENTS.md": "Contributor policy",
+    "CLAUDE.md": "Contributor policy",
+    "LICENSE": "Legal terms",
+    "release/<version>/QUALIFICATION": "Release result record",
+    "release/<version>/MANIFEST.md": "Release result record",
+    "release/<version>/README.md": "Release result record",
+    "release/<version>/evidence/*": "Release result record",
+    "release/<version>/*.hex": "Release payload artifact",
+    "release/<version>/flash-*.py": "Release payload artifact",
+    "release/<version>/SHA256SUMS": "Release authentication record",
+    "release/<version>/SHA256SUMS.asc": "Release authentication record",
+}
 
 failures = []
 checks = 0
@@ -189,6 +221,45 @@ def link_violations(name, text, anchors):
     return bad
 
 
+def lifecycle_violations(text):
+    """Return defects in README.md's durable-authority lifecycle table."""
+    lines = text.splitlines()
+    starts = [number for number, line in enumerate(lines)
+              if line == LIFECYCLE_HEADING]
+    if len(starts) != 1:
+        return ["expected one %r heading, found %d"
+                % (LIFECYCLE_HEADING, len(starts))]
+
+    start = starts[0] + 1
+    end = next((number for number in range(start, len(lines))
+                if lines[number].startswith("### ")), len(lines))
+    classified = {}
+    for line in lines[start:end]:
+        if not line.startswith("|"):
+            continue
+        cells = line.split("|")
+        if len(cells) < 5:
+            continue
+        label = cells[1].strip()
+        if label in ("Label", "---"):
+            continue
+        for authority in CODE_SPAN.findall(cells[3]):
+            classified.setdefault(authority, []).append(label)
+
+    violations = []
+    for authority, expected in LIFECYCLE_AUTHORITIES.items():
+        found = classified.get(authority, [])
+        if found != [expected]:
+            violations.append("%s must occur once under %s, found %s"
+                              % (authority, expected,
+                                 ", ".join(found) if found else "no row"))
+    broad = classified.get("release/<version>/", [])
+    if broad:
+        violations.append("release/<version>/ assigns every retained file to %s"
+                          % ", ".join(broad))
+    return violations
+
+
 def self_test():
     """Prove each rule rejects the exact defect it exists for."""
     check(section_violations("# see merge plan §5.6 for why\n") != [],
@@ -218,6 +289,22 @@ def self_test():
           "negative case -- a broken link in the live release policy was "
           "accepted")
 
+    readme = read_text("README.md") or ""
+    check(lifecycle_violations(readme) == [],
+          "control case -- the checked-in lifecycle table is malformed")
+    missing = readme.replace("`CHANGELOG.md` |", "`missing-change-record.md` |", 1)
+    check(any("CHANGELOG.md" in item for item in lifecycle_violations(missing)),
+          "negative case -- an omitted durable authority was accepted")
+    duplicate = readme.replace("`TODO.md` |", "`TODO.md`, `CHANGELOG.md` |", 1)
+    check(any("CHANGELOG.md" in item for item in lifecycle_violations(duplicate)),
+          "negative case -- one authority under two lifecycle labels was accepted")
+    broad = readme.replace(
+        "`release/<version>/QUALIFICATION`",
+        "`release/<version>/`, `release/<version>/QUALIFICATION`", 1)
+    check(any("assigns every retained file" in item
+              for item in lifecycle_violations(broad)),
+          "negative case -- overlapping whole-release classifications were accepted")
+
 
 def main():
     self_test()
@@ -245,6 +332,10 @@ def main():
         for number, target, reason in link_violations(name, text, anchors):
             check(False, "%s:%d links to '%s', which %s"
                   % (name, number, target, reason))
+
+    lifecycle = lifecycle_violations(documents.get("README.md", ""))
+    check(not lifecycle, "README.md lifecycle contract: %s"
+          % "; ".join(lifecycle))
 
     check(scanned > 0, "no tracked files were scanned")
     check(len(documents) > 0, "no durable documents were scanned")

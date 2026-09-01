@@ -8465,7 +8465,7 @@ help:
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
-	@echo "  test-reference-contract  every section citation, link and anchor in the live tree still resolves (included in test)"
+	@echo "  test-reference-contract  live references resolve and durable authorities have one lifecycle (included in test)"
 	@echo "  test-resource-tables  resource-document arithmetic/agreement + final-evidence contract regression (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"

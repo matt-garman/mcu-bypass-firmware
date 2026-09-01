@@ -21,8 +21,10 @@ checkout -- and both are under "Flash a chip" below.
 That block is the project's single live declaration of the release contract; no
 other document restates it. It describes the *source* contract this tree stands
 on. The measured results, the qualified source commit, and the image hashes for
-any given release are in that release's own retained record under `vX.Y.Z/`,
-which is written by the release cut and never edited afterwards.
+any given release are in that release's own retained record under `vX.Y.Z/`.
+The signed tag fixes that record's original publication identity. The copy on
+the development branch normally remains identical; the registered safety
+amendment described below is the explicit exception, not a rewrite of the tag.
 
 `v0.9.6` was the first unified 18-image release and introduced the first
 ATtiny202 and PIC10F320 images in this release line.
@@ -177,6 +179,29 @@ validation suite — backs these binaries, through two mechanisms:
 
 ### Evidence retention and hosted assets
 
+The signed annotated tag is the immutable identity of the original release
+tree, and `SHA256SUMS` plus `SHA256SUMS.asc` fixes the payload a recipient
+verifies. Do not move a release tag or replace a signed payload file. A payload
+correction is a new release.
+
+The retained copy on the development branch is normally byte-identical to that
+tag. An exceptional post-publication safety warning may be added to its result
+record only when all of these conditions hold:
+
+- the warning is needed by someone who enters through that release directory;
+- every changed path, the reason, and durable warning markers are registered in
+  `test/test_published_release_immutability.py`;
+- direct comparison with the tag proves that no other path changed and no file
+  covered by that release's `SHA256SUMS` was touched; and
+- the live release policy and changelog record the amendment.
+
+The warnings added to the unsigned `MANIFEST.md` and `README.md` files in
+`v0.9.0` through `v0.9.2` for the TMUX4053 polarity defect are the sole current
+example. They amend only the current-tree copies. The tags, images, checksums,
+signatures, and original publication identity remain unchanged. A registered
+amendment is therefore never evidence that the amended bytes were originally
+published.
+
 Git is the retention authority. Keep every `release/vX.Y.Z/` file, its commit
 and its annotated tag in repository history; a hosted release body or asset is
 a distribution copy, not immutable provenance and never the only retained copy.
@@ -190,10 +215,11 @@ bytes for the historical releases. Their signed workflows prove what they
 intended to upload, not what the service accepted or still holds; `v0.9.10` is
 known not to have been published at all. Asset replacement or deletion settings
 therefore do not enlarge any release claim. The release maintainer may restore a
-missing hosted asset only byte-for-byte from the retained Git release after
-checking the tag, detached checksum signature, applicable retained digest and
-any recorded post-publication amendment; corrected bytes require a new release
-or an explicit recorded erratum, not a silent replacement.
+missing hosted asset only byte-for-byte from the signed tag after checking the
+detached checksum signature and applicable retained digest. A current-tree file
+may stand in only when direct comparison proves it is not a registered amended
+copy. Corrected bytes require a new release; an erratum may accompany the
+original asset but must not silently replace it.
 
 Any future proposal to remove retained payloads from the development branch must
 first inventory the hosted release and body bytes, name the maintainer who owns

@@ -4566,7 +4566,7 @@ qualification and plan deletion.
   source supplies the RC declaration, and that removing that declaration after
   the final appears fails specifically on the RC-to-predecessor relation.
 
-- [ ] **BR-RVW2-04 -- MEDIUM -- make the release lifecycle policy agree with
+- [x] **BR-RVW2-04 -- MEDIUM -- make the release lifecycle policy agree with
   retained history.** `README.md` and `release/README.md` say retained release
   records are never edited after a tag and bundles are preserved exactly as
   published. The changelog, release policy and retained `v0.9.0` through
@@ -4576,6 +4576,18 @@ qualification and plan deletion.
   table's claim that every durable document has exactly one class true: include
   the omitted durable authorities and distinguish evidence files from shipped
   artifacts instead of assigning an entire release directory to both classes.
+
+  **Resolved:** The signed tag now explicitly owns the immutable original
+  release-tree identity, and the checksum list and signature own the payload
+  bytes a recipient verifies. The development-branch copy normally matches that
+  tag; the six unsigned TMUX safety-warning carriers in `v0.9.0` through
+  `v0.9.2` are documented as registered current-tree amendments, not original
+  published bytes. Restoration uses the tag and cannot silently substitute an
+  amended copy. The lifecycle table now includes release policy, hardware
+  records, changelog, open work, contributor policy and licensing, and assigns
+  disjoint result-record, payload and authentication paths within each release.
+  `test-reference-contract` parses that table and rejects a missing authority,
+  duplicate classification or whole-release-directory overlap.
 
 - [ ] **BR-RVW2-05 -- MEDIUM -- finish the current-fact boundary.** The current
   target/image/soak topology is still restated in the Multi-MCU design prose and

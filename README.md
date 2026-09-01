@@ -118,21 +118,33 @@ mean editing two documents, the fact is in the wrong place.
 | Scoped design decisions and per-part safety records | the topic documents under [docs/](docs) |
 | Historical implementation reasoning | Git history |
 | Contributor and agent working rules | [AGENTS.md](AGENTS.md), which `CLAUDE.md` includes |
+| Licensing terms | [LICENSE](LICENSE) |
 
 ### Document lifecycle
 
-Every durable document is exactly one of the following, and the label decides
-how it is edited and when it may be deleted.
+Every durable documentation authority named in the map above has exactly one
+label below. The label decides how it is edited and when it may be deleted;
+publication as a hosted asset is a distribution fact, not a second lifecycle.
 
 | Label | How it is treated | Where it lives |
 |---|---|---|
 | Live specification | Edited in place as the design changes; describes only the current state | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc`, `test/README.md` |
 | Operator guidance | Written for someone outside the project who must act safely | `README.md`, `FLASHING.md` |
+| Release policy and errata | Maintains the current release process, trust boundary, reproduction guidance, and historical safety notices | `release/README.md` |
 | Compliance record | A standing claim held to an external standard | `MISRA_COMPLIANCE.md` |
-| Decision/safety record | Explicitly scoped reasoning that stays useful after the work is finished | the topic documents under `docs/` |
-| Release evidence | Source-bound results retained for one release, never edited after its tag | each `release/<version>/` record |
-| Historical release artifact | A published release's shipped files, preserved exactly as published | each `release/<version>/` bundle |
-| Branch-only work plan | Coordinates work on one branch and is deleted before release source finalization; the release gate refuses any that survives | root-level working documents |
+| Hardware validation record | Accumulates field reports and controlled qualification records without conflating the two | `HARDWARE_VALIDATION_LOG.md` |
+| Change record | Adds prospective and dated release entries; existing release sections remain historical accounts | `CHANGELOG.md` |
+| Open-work register | Edited as work is opened, refined, or completed; it is not an archive of finished work | `TODO.md` |
+| Decision/safety record | Explicitly scoped reasoning that stays useful after the work is finished | the topic documents under `docs/*.md` |
+| Contributor policy | Maintained rules for people and coding agents working in this tree | `AGENTS.md`, `CLAUDE.md` |
+| Legal terms | Preserved licensing authority for the project | `LICENSE` |
+| Release result record | Source-bound provenance and observed evidence. The tag fixes the original bytes; a current-tree copy may differ only by the registered safety-amendment process in `release/README.md` | `release/<version>/QUALIFICATION`, `release/<version>/MANIFEST.md`, `release/<version>/README.md`, `release/<version>/evidence/*` |
+| Release payload artifact | Firmware and required programming helpers; their signed byte identity is never corrected in place | `release/<version>/*.hex`, `release/<version>/flash-*.py` |
+| Release authentication record | The checksum list and its detached signature; retained byte-for-byte | `release/<version>/SHA256SUMS`, `release/<version>/SHA256SUMS.asc` |
+
+Branch-only work plans are not durable authorities. They carry the required
+opening banner, coordinate one branch, and are deleted before release source
+finalization; the release gate refuses any that survives.
 
 ### Standing rules
 

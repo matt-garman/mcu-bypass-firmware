@@ -122,6 +122,9 @@ historical records and are not retroactively compacted by this policy.
   immutability gate are separate historical controls, not retroactive signature
   coverage. The immutability baseline also records the prior safety-errata
   amendment to v0.9.0-v0.9.2 rather than claiming published files never changed.
+  Release policy now distinguishes the immutable tag and signed payload from an
+  explicitly registered amendment to a current-tree result record, and assigns
+  each durable documentation authority one non-overlapping lifecycle.
 
 - **The Makefile's `ipecmd` route now reads the device back.** Under
   `PIC10F322_PROG=ipecmd`, and its new PIC10F320 equivalent, the command

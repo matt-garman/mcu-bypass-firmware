@@ -4,22 +4,21 @@
 
 """A published release is what its recipients already hold. This proves it.
 
-THE DEFECT CLASS is a retroactive edit. Every release under `release/` has been
-tagged, signed and handed out; the copies in this tree are not drafts of those
-releases, they are the same objects. Editing one here does not update anything
-a recipient has -- it makes this tree disagree with what was published, and
-says nothing about which of the two is the release. The prospective work on
-release layout (a canonical index, an evidence archive, artifact-only tagged
-commits, moving payloads to hosted assets) all operates on this directory, and
-every step of it is one bad path expansion away from rewriting history it is
-supposed to be preserving.
+THE DEFECT CLASS is a retroactive edit. Every release under `release/` has a
+signed tag that fixes its original publication identity. The copy in this tree
+is not a new draft: it must match that tag except for an amendment explicitly
+registered below. Editing it does not update anything a recipient already has;
+an unregistered edit only makes this tree disagree with the release. The
+prospective work on release layout (a canonical index, an evidence archive,
+artifact-only tagged commits, moving payloads to hosted assets) all operates on
+this directory, and every step of it is one bad path expansion away from
+rewriting history it is supposed to be preserving.
 
-Nothing caught that. A release signs SHA256SUMS over its images and programming
-helpers, so those stay verifiable from the release directory alone -- but that
-list covers 215 of the 576 published files. The other 361 are the evidence
-logs, QUALIFICATION, MANIFEST.md, README.md and SHA256SUMS.asc itself: the
-account of what was actually run, not reproducible from source, and until this
-gate existed, editable in silence.
+Nothing caught that. Each release signs SHA256SUMS over at least its images and
+programming helpers, so those stay verifiable from the release directory alone.
+Files outside that list include observed evidence and authentication metadata:
+the account of what was actually run, not reproducible from source, and until
+this gate existed, editable in silence.
 
 WHAT IT ASSERTS. Each release's own SHA256SUMS still verifies, so offline
 integrity holds today rather than being assumed from the fact it held once.
