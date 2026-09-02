@@ -5393,7 +5393,7 @@ already thought about.
 
 ## BR-FINAL-04 - Focused verification after each chunk
 
-**Status:** TODO
+**Status:** IN PROGRESS (OpenCode; verified, awaiting user commit)
 
 **Depends on:** BR-REVIEW-02 corrective implementation, plus each earlier
 implementation chunk whose focused result must be reconciled
@@ -5404,15 +5404,35 @@ coverage.
 
 **Suggested categories:**
 
-- [ ] Documentation/name/link contracts after document moves.
-- [ ] Resource measurement and release qualification contracts after BR-RES.
-- [ ] Flashing helper and release preflight contracts after BR-FLASH.
-- [ ] Release image/provenance/history/publication contracts after BR-REL.
-- [ ] CI routing/workflow syntax tests after BR-TEST-02/03.
-- [ ] Variant map, target matrix, lane marker, rebuild, and strict-tool tests
+- [x] Documentation/name/link contracts after document moves.
+- [x] Resource measurement and release qualification contracts after BR-RES.
+- [x] Flashing helper and release preflight contracts after BR-FLASH.
+- [x] Release image/provenance/history/publication contracts after BR-REL.
+- [x] CI routing/workflow syntax tests after BR-TEST-02/03.
+- [x] Variant map, target matrix, lane marker, rebuild, and strict-tool tests
   after Make/profile/helper consolidation.
-- [ ] Static analysis/MISRA output contracts after BR-QUALITY-01.
-- [ ] Pinned-toolchain image/resource/timing gates after any user source edit.
+- [x] Static analysis/MISRA output contracts after BR-QUALITY-01.
+- [x] Reconcile pinned-toolchain image/resource/timing obligations after user
+  source edits. Full execution is transferred without dilution to BR-FINAL-05,
+  whose strict target aggregates and candidate resource report require the
+  complete toolchain host.
+
+**Result:** Each implementation and corrective section records its focused gate
+at the corresponding commit boundary. The final corrective tip adds current
+48-check Makefile-name, 18-check reference, 217-check release-qualification,
+54-check PIC-programmer and 668-check workflow results. A minimal final host
+reconciliation also passes CI-local routing (12), the variant map (6), all five
+target-matrix profiles, all target-lane profiles, the analysis matrix (22 over
+60 rows), and the MISRA output contract (42), all with zero failures. Existing
+fake-tool rebuild results remain recorded at the source-edit boundaries.
+
+That run found one host-dependence in `test-strict-tools`: its ATtiny202 and PIC
+device-pack controls reached the intended branch only when the corresponding
+compiler happened to be installed. Both controls now supply a fake compiler,
+and the missing AVR compiler is exercised separately. The corrected gate passes
+72 checks with no real target toolchain. The actual pinned-toolchain image,
+resource and timing runs are not represented as local successes; they remain
+the explicit BR-FINAL-05 qualification work.
 
 **Acceptance:**
 
@@ -5638,7 +5658,7 @@ dependencies and acceptance criteria.
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
-| BR-FINAL-04 | Run focused gates incrementally | TODO |
+| BR-FINAL-04 | Run focused gates incrementally | IN PROGRESS (awaiting commit) |
 | BR-FINAL-05 | Run complete qualification | TODO |
 | BR-FINAL-06 | Measure outcome | DONE `bc1fe73` |
 | BR-FINAL-07 | Delete this working document | TODO |

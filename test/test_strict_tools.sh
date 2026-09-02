@@ -100,6 +100,7 @@ missing_xc8="$work/missing-xc8"
 missing_gpsim="$work/missing-gpsim"
 missing_cxx="$work/missing-cxx"
 missing_dfp="$work/missing-dfp"
+missing_avr_gcc="$work/missing-avr-gcc"
 
 expect_both test-cbmc "cbmc not installed" "CBMC=$missing_cbmc"
 expect_both analyze-cppcheck "cppcheck not installed" "CPPCHECK=$missing_cppcheck"
@@ -108,14 +109,19 @@ expect_both attiny202-analyze-cppcheck "cppcheck not installed" \
 expect_both attiny202-analyze-misra "cppcheck and/or python3 not available" \
 	"CPPCHECK=$missing_cppcheck"
 
-# The ATtiny202 compile-guard mutations are the one gate here whose optional
-# dependency is a vendored DATA set rather than a program: the device pack
-# supplies both the specs avr-gcc needs and the io header the pin guards are
-# pinned against. Its absence has to route through the same $(SKIP) as a missing
-# binary, and nothing else in this file exercises XT_DFP.
+# The ATtiny202 compile-guard mutations need both avr-gcc and a vendored device
+# pack. Exercise those decisions separately so the host's real compiler state
+# cannot hide the XT_DFP branch.
+expect_both test-attiny202-guard-mutations \
+	"$missing_avr_gcc not installed; skipping the ATtiny202 compile-guard mutations" \
+	"CC=$missing_avr_gcc"
+
+fake_avr_gcc="$work/fake-avr-gcc"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_avr_gcc"
+chmod 750 "$fake_avr_gcc"
 expect_both test-attiny202-guard-mutations \
 	"ATtiny_DFP device files not found under XT_DFP=$missing_dfp" \
-	"XT_DFP=$missing_dfp"
+	"CC=$fake_avr_gcc" "XT_DFP=$missing_dfp"
 
 # --- all three PIC parts' optional-tool recipes ------------------------------
 # The build directories are redirected into the scratch tree: `pic10f322`,
@@ -142,9 +148,13 @@ expect_both pic12f675 "XC8 not found at $missing_xc8" \
 # device pack below.
 expect_both test-pic-guard-mutations "XC8 not found at $missing_xc8" \
 	"PIC_CC=$missing_xc8"
+
+fake_xc8="$work/fake-xc8"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$fake_xc8"
+chmod 750 "$fake_xc8"
 expect_both test-pic-guard-mutations \
 	"PIC device pack not found at PIC_DFP=$missing_dfp" \
-	"PIC_DFP=$missing_dfp"
+	"PIC_CC=$fake_xc8" "PIC_DFP=$missing_dfp"
 
 expect_both pic10f322-analyze-cppcheck "cppcheck not installed" \
 	"CPPCHECK=$missing_cppcheck"
@@ -283,6 +293,6 @@ fi
 	|| fail "analyze-cppcheck omitted its per-profile execution diagnostics"
 checks=$((checks + 1))
 
-[ "$checks" -eq 70 ] \
-	|| fail "strict optional-tool inventory ran $checks checks, expected 70"
+[ "$checks" -eq 72 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 72"
 printf 'strict optional-tool validation (host + AVR-XT + all three PIC parts): %d checks, 0 failures\n' "$checks"
