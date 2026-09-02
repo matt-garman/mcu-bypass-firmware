@@ -3857,7 +3857,7 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Make `src/bypass_output_common.h` include its own `<stdint.h>` dependency.
   Complete below.
 - Remove empty `src/bypass_output_cd4053_simple.h`, or give it a real driver
-  contract such as selector validation.
+  contract such as selector validation. Removal complete below.
 - Add one-hot backend/output selector guards. The PIC10F320 output-selector
   slice is complete below; modular-shell and backend-selector guards remain
   optional candidates.
@@ -3929,14 +3929,14 @@ than accepted as part of this slice. No permanent regression was added for the
 presence of a single conventional dependency include. The other optional
 candidates remain, so BR-SRC-02 stays `NEEDS USER`.
 
-**Completed slice -- MCU-neutral configuration comments:** The user corrected
-five stale descriptions in `src/bypass_config.h`. The AVR-only block now names
-both AVR generations instead of calling itself Classic-only, its exclusion note
-names both modular PIC shells rather than only the PIC10F322, and the Classic-arm
-label no longer says `AVR Class`. The shared debounce thresholds now describe
-high/low footswitch-pin samples rather than the AVR Classic's `PB0` reads, and
-input noise is no longer described as an interrupt on firmware whose PIC shells
-poll the switch.
+**Completed slice -- MCU-neutral configuration comments (`6f02ae8`):** The user
+corrected five stale descriptions in `src/bypass_config.h`. The AVR-only block
+now names both AVR generations instead of calling itself Classic-only, its
+exclusion note names both modular PIC shells rather than only the PIC10F322, and
+the Classic-arm label no longer says `AVR Class`. The shared debounce thresholds
+now describe high/low footswitch-pin samples rather than the AVR Classic's `PB0`
+reads, and input noise is no longer described as an interrupt on firmware whose
+PIC shells poll the switch.
 
 Every changed line is a `//` comment or the comment suffix of a preprocessor
 line. Removing those suffixes from `HEAD` and the worktree gives the same
@@ -3945,6 +3945,24 @@ change is expected. `test-deliberate-duplication` passes 350 checks; the
 static-assert guard gate skipped cleanly because this host has no `avr-gcc`. No
 permanent regression was added for prose inside firmware source. The other
 optional candidates remain, so BR-SRC-02 stays `NEEDS USER`.
+
+**Completed slice -- remove the empty simple-CD4053 header:** The user removed
+`src/bypass_output_cd4053_simple.h`, which contained only an include guard and
+was not included by any firmware translation unit. The host shim no longer
+performs a no-op include for the non-blocking output variant; only the mute and
+relay variants include dedicated headers for their timing constants. Makefile
+dependency lists and rebuild-test sandboxes no longer invent or watch the deleted
+file, and the documented MISRA boundary is now the actual 14 authored headers
+without an explicit unparsed-header coverage limit.
+
+The deleted header contributed no preprocessor tokens beyond its unused guard,
+so firmware images are expected to remain byte-identical. The focused fake-tool
+rebuild gates pass 35 Classic-AVR checks, 48 PIC10F322 checks, 102 PIC10F320
+checks, 168 PIC12F675 checks, five PIC profile-request checks and 45 workload
+checks. The analyzer matrix passes 22 checks over its exact 60 rows, and
+`test-deliberate-duplication` passes its reduced 347-check inventory. The native
+golden model also passes 988 checks after the host shim stops including the
+header. The other optional candidates remain, so BR-SRC-02 stays `NEEDS USER`.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 

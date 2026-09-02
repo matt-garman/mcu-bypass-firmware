@@ -545,7 +545,7 @@ files=(
 	src/bypass_blocking_delay.h src/bypass_static_assert.h
 	src/bypass_compile_checks.h src/bypass_output_cd4053_simple.c
 	src/bypass_output_cd4053_with_mute.c src/bypass_output_tq2_l2_5v_relay.c
-	src/bypass_output_cd4053_simple.h src/bypass_output_cd4053_with_mute.h
+	src/bypass_output_cd4053_with_mute.h
 	src/bypass_output_tq2_l2_5v_relay.h
 	# An unlisted driver must not become a producer input merely by existing.
 	src/bypass_output_unlisted.c

@@ -112,20 +112,16 @@ The compliance boundary is **this project's authored firmware source**:
   `bypass_mcu_pic10f322.c`, `bypass_mcu_pic10f320.c`,
   `bypass_mcu_pic12f675.c`), the shared `bypass_pure.c` core, and the three
   `bypass_output_*.c` drivers.
-- Fifteen headers: `bypass_config.h`, `bypass_types.h`, `bypass_pure.h`,
+- Fourteen headers: `bypass_config.h`, `bypass_types.h`, `bypass_pure.h`,
   `bypass_hw_iface.h`, `bypass_output_common.h`, `bypass_blocking_delay.h`,
   `bypass_static_assert.h`, `bypass_compile_checks.h`, the four
-  `bypass_pins_*.h` maps, and the three `bypass_output_*.h` headers.
+  `bypass_pins_*.h` maps, and the two `bypass_output_*.h` timing headers.
 
 Cppcheck receives C files as its direct inputs; authored headers are analyzed
 only when parsed through an include path from those inputs. The Makefile's
 `FW_HEADERS`, `XT_HEADERS`, `PIC10F322_HEADERS`, and `PIC12F675_HEADERS` are
-rebuild dependency lists, not additional analyzer source arguments. In
-particular, `bypass_output_cd4053_simple.h` is in the authored boundary but is
-not currently included by an analyzed C file. The modular driver files are
-otherwise analyzed under every materially distinct modular target model. The
-unreferenced simple header is an explicit coverage limit, not a claim that the
-file is outside the boundary.
+rebuild dependency lists, not additional analyzer source arguments. The modular
+driver files are analyzed under every materially distinct modular target model.
 
 The PIC10F320 implementation is one self-contained C file: its debounce
 algorithm is written directly in `main()` and its output variants are

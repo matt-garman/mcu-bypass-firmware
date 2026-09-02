@@ -515,7 +515,6 @@ override MODULAR_FW_HEADERS := src/bypass_config.h src/bypass_types.h \
              src/bypass_hw_iface.h src/bypass_pure.h \
              src/bypass_output_common.h src/bypass_blocking_delay.h \
              src/bypass_static_assert.h src/bypass_compile_checks.h \
-             src/bypass_output_cd4053_simple.h \
              src/bypass_output_cd4053_with_mute.h \
              src/bypass_output_tq2_l2_5v_relay.h
 

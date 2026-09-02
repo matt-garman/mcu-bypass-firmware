@@ -1,12 +1,11 @@
 // Host-test shim for including the firmware's output (pin-assignment) headers
 // on a native (non-AVR) compiler.
 //
-// The firmware output headers (bypass_output_common.h and the per-variant
-// bypass_output_*.h) define the pin assignments (FOOTSW_PIN, LED_PIN, and the
-// variant-specific control pins) in terms of the AVR register-bit names
-// PB0..PB5. On the AVR target those names come from <avr/io.h>; the headers
-// guard that include behind #if defined(__AVR__), so on the host we must define
-// the names ourselves BEFORE including them.
+// The firmware's bypass_output_common.h selects the classic-AVR pin map below;
+// that map defines the numeric positions for FOOTSW_PIN, LED_PIN, and the
+// variant-specific control pins. The host harnesses also refer directly to the
+// AVR register-bit names PB0..PB5. Those names come from <avr/io.h> on target,
+// so native builds need the equivalent definitions below.
 //
 // The whole point: the sim tests pull the pin numbers from the SAME firmware
 // headers the firmware compiles against, so a pin reassignment can never
@@ -71,14 +70,11 @@ _Static_assert(PB2 == BYPASS_OUTPUT_HOST_PB2,
 #endif
 #include "../src/bypass_output_common.h"
 
-// Variant-specific control pins. Default to the CD4053 simple variant when no
-// selector is defined, matching the firmware's behavior.
+// Only the blocking variants have per-variant timing constants.
 #if defined(CD4053_WITH_MUTE)
 #  include "../src/bypass_output_cd4053_with_mute.h"
 #elif defined(TQ2_L2_5V_RELAY)
 #  include "../src/bypass_output_tq2_l2_5v_relay.h"
-#else
-#  include "../src/bypass_output_cd4053_simple.h"
 #endif
 
 #endif // BYPASS_OUTPUT_HOST_H__
