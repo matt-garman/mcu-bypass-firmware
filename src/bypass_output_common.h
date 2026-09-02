@@ -7,16 +7,21 @@
 #include <stdint.h>
 
 
-#if defined(BYPASS_MCU_PIC12F675)
+// Every modular build must select exactly one MCU pin-map backend explicitly.
+// In particular, __AVR__ identifies a compiler family, not Classic versus XT.
+#if ((defined(BYPASS_MCU_PIC12F675) + \
+            defined(BYPASS_MCU_PIC10F322) + \
+            defined(BYPASS_MCU_AVR_XT) + \
+            defined(BYPASS_MCU_AVR_CLASSIC)) != 1)
+#  error "exactly one modular MCU backend selector must be defined"
+#elif defined(BYPASS_MCU_PIC12F675)
 #  include "bypass_pins_pic12f675.h"
 #elif defined(BYPASS_MCU_PIC10F322)
 #  include "bypass_pins_pic10f322.h"
 #elif defined(BYPASS_MCU_AVR_XT)
 #  include "bypass_pins_avr_xt.h"
-#elif defined(__AVR__) || defined(BYPASS_MCU_AVR_CLASSIC)
+#elif defined(BYPASS_MCU_AVR_CLASSIC)
 #  include "bypass_pins_avr_classic.h"
-#else
-#  error "bypass: no pin map selected for this target"
 #endif
 
 

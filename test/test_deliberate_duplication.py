@@ -296,17 +296,21 @@ def pin_maps_are_per_part():
                     % (header, name, literal or "nothing"))
 
     # The selection chain is the other half: a map nothing selects is not in the
-    # build, and a shell whose arm has been dropped falls through to another
-    # part's pins instead of to the #error.
+    # build, and a missing or conflicting explicit identity must stop before one
+    # part's compiler-family macro can select another part's pins.
     common = SRC / "bypass_output_common.h"
     if counted(common.is_file(), identifier, "bypass_output_common.h is gone"):
         chain = code(common)
         for header in sorted(MODULAR_SHELLS.values()):
             counted(header in chain, identifier,
                     "bypass_output_common.h no longer selects %s" % header)
-        counted("no pin map selected for this target" in chain, identifier,
-                "bypass_output_common.h no longer refuses an unselected target; "
-                "an unmatched build would take whichever map is left")
+        counted("exactly one modular MCU backend selector must be defined" in chain,
+                identifier,
+                "bypass_output_common.h no longer refuses a missing or conflicting "
+                "backend identity")
+        counted("defined(__AVR__)" not in chain, identifier,
+                "bypass_output_common.h again treats __AVR__ as a Classic target "
+                "identity, so an AVR-XT build can fall through to the wrong map")
 
 
 @row("entry-point-per-shell",

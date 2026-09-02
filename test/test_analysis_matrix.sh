@@ -178,12 +178,14 @@ profile_policy = {
 required_config = {
     "classic_t13": {
         "-D__AVR__", "-D__AVR_ATtiny13A__", "-DF_CPU=1200000UL",
-        "-DBYPASS_CTX_CHECK", "-I" + str(work / "avr-libc"),
+        "-DBYPASS_MCU_AVR_CLASSIC", "-DBYPASS_CTX_CHECK",
+        "-I" + str(work / "avr-libc"),
         "-I" + str(work / "avr-gcc"),
     },
     "classic_x5": {
         "-D__AVR__", "-D__AVR_ATtiny85__", "-DF_CPU=1000000UL",
-        "-DBYPASS_CTX_CHECK", "-I" + str(work / "avr-libc"),
+        "-DBYPASS_MCU_AVR_CLASSIC", "-DBYPASS_CTX_CHECK",
+        "-I" + str(work / "avr-libc"),
         "-I" + str(work / "avr-gcc"),
     },
     "avr_xt": {
@@ -215,13 +217,14 @@ required_config = {
 }
 language_markers = {"-D__AVR__", "-D__XC8"}
 backend_markers = {
+    "-DBYPASS_MCU_AVR_CLASSIC",
     "-DBYPASS_MCU_AVR_XT",
     "-DBYPASS_MCU_PIC10F322",
     "-DBYPASS_MCU_PIC12F675",
 }
 expected_backend = {
-    "classic_t13": set(),
-    "classic_x5": set(),
+    "classic_t13": {"-DBYPASS_MCU_AVR_CLASSIC"},
+    "classic_x5": {"-DBYPASS_MCU_AVR_CLASSIC"},
     "avr_xt": {"-DBYPASS_MCU_AVR_XT"},
     "pic10f322": {"-DBYPASS_MCU_PIC10F322"},
     "pic10f320": set(),

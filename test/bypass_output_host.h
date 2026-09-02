@@ -61,10 +61,10 @@ _Static_assert(PB2 == BYPASS_OUTPUT_HOST_PB2,
 #  define PB5 5
 #endif
 
-// Select the classic-AVR pin map — the same map the firmware build uses (it
-// keys off __AVR__, which the host compiler does not define). The PBx shims
-// above stay for the sim harness's own register-bit references (e.g.
-// avr_io_getirq(..., PB2)); the firmware pin POSITIONS come from the pin map.
+// Select the classic-AVR pin map with the same explicit backend macro as the
+// firmware build. The PBx shims above stay for the sim harness's own register-
+// bit references (e.g. avr_io_getirq(..., PB2)); the firmware pin POSITIONS
+// come from the pin map.
 #ifndef BYPASS_MCU_AVR_CLASSIC
 #  define BYPASS_MCU_AVR_CLASSIC 1
 #endif

@@ -120,7 +120,9 @@ x5=build_avr_classic/bypass-attiny85-cd4053_simple
 
 run_make "$t13.hex" >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 1 && "$(objcopy_count "$t13.hex")" -eq 1 ]] \
-	|| { printf 'FAIL: initial ATtiny13a build did not run once\n' >&2; exit 1; }
+	&& grep -F "$t13.elf.tmp" "$cc_log" \
+		| grep -q -- '-DBYPASS_MCU_AVR_CLASSIC' \
+	|| { printf 'FAIL: initial ATtiny13a build did not carry its backend selector\n' >&2; exit 1; }
 checks=$((checks + 1))
 run_make "$t13.hex" >/dev/null
 [[ "$(cc_count "$t13.elf")" -eq 2 && "$(objcopy_count "$t13.hex")" -eq 2 ]] \
@@ -199,7 +201,9 @@ checks=$((checks + 1))
 
 run_make "$x5.hex" >/dev/null
 [[ "$(cc_count "$x5.elf")" -eq 1 ]] \
-	|| { printf 'FAIL: initial tinyx5 build did not run once\n' >&2; exit 1; }
+	&& grep -F "$x5.elf.tmp" "$cc_log" \
+		| grep -q -- '-DBYPASS_MCU_AVR_CLASSIC' \
+	|| { printf 'FAIL: initial tinyx5 build did not carry its backend selector\n' >&2; exit 1; }
 run_make "$x5.hex" >/dev/null
 [[ "$(cc_count "$x5.elf")" -eq 2 ]] \
 	|| { printf 'FAIL: repeated tinyx5 configuration reused a stale ELF\n' >&2; exit 1; }

@@ -3858,9 +3858,8 @@ rejected with the intended message; the pristine copy passes. `make test` green.
   Complete below.
 - Remove empty `src/bypass_output_cd4053_simple.h`, or give it a real driver
   contract such as selector validation. Removal complete below.
-- Add one-hot backend/output selector guards. The PIC10F320 and modular-shell
-  output-selector slices are complete below; a backend-selector guard remains
-  an optional candidate.
+- Add one-hot backend/output selector guards. The PIC10F320 output, modular-shell
+  output and modular backend-selector slices are complete below.
 - Require each modular output driver translation unit's expected selector.
 - Correct stale MCU-neutral comments in `src/bypass_config.h`. Complete below.
 - Replace deleted-document references after PIC consolidation.
@@ -3870,13 +3869,11 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Build/test recipes must pass explicit selectors consistently.
 - Static-analysis recipes must cover each expected selector.
 - Negative compile tests must be ready to prove new guards are load-bearing.
-  DONE by BR-SRC-03: `test/test_target_guard_mutations.sh` records two
-  configurations the modular firmware still accepts in silence -- two output
-  selectors on a shell and a driver compiled under a foreign selector. It also
-  retains the PIC10F320's former incidental dual-scheme rejection as an exact
-  assertion fixture now that the guard below has landed. An `UNGUARDED` or
-  `INCIDENTAL` row fails when its guard lands and demands conversion to the
-  project-owned message rather than deletion.
+  DONE by BR-SRC-03: `test/test_target_guard_mutations.sh` retains the original
+  invalid configurations as exact assertions when their guards land. Modular
+  shell output cardinality and PIC10F320's former incidental dual-scheme
+  rejection are complete below; driver translation units compiled under a
+  foreign selector remain `UNGUARDED` until that candidate lands.
 - Pinned toolchains must be available for image/resource/timing comparison.
 
 **Acceptance:**
@@ -3964,13 +3961,13 @@ checks. The analyzer matrix passes 22 checks over its exact 60 rows, and
 golden model also passes 988 checks after the host shim stops including the
 header. The other optional candidates remain, so BR-SRC-02 stays `NEEDS USER`.
 
-**Completed slice -- modular output-selector cardinality:** The user added one
-shared file-scope guard to `bypass_compile_checks.h`, which all four modular MCU
-shells include. A shell now rejects both zero output selectors and more than one
-of `CD4053_SIMPLE`, `CD4053_WITH_MUTE` and `TQ2_L2_5V_RELAY` with the diagnostic
-`exactly one modular output selector must be defined` rather than compiling
-under a missing or ambiguous output contract. The self-contained PIC10F320
-retains its separate `OUTPUT_*` guard.
+**Completed slice -- modular output-selector cardinality (`ba99202`):** The user
+added one shared file-scope guard to `bypass_compile_checks.h`, which all four
+modular MCU shells include. A shell now rejects both zero output selectors and
+more than one of `CD4053_SIMPLE`, `CD4053_WITH_MUTE` and `TQ2_L2_5V_RELAY` with
+the diagnostic `exactly one modular output selector must be defined` rather than
+compiling under a missing or ambiguous output contract. The self-contained
+PIC10F320 retains its separate `OUTPUT_*` guard.
 
 The existing AVR-XT and PIC10F322 dual-selector handoff fixtures now require the
 exact diagnostic instead of `UNGUARDED`, and matching zero-selector fixtures
@@ -3987,6 +3984,32 @@ test-static-assert-guards`, `make STRICT_TOOLS=1
 test-attiny202-guard-mutations` and `make STRICT_TOOLS=1
 test-pic-guard-mutations`. Backend identity and per-driver selector guards
 remain separate optional candidates, so BR-SRC-02 stays `NEEDS USER`.
+
+**Completed slice -- explicit modular backend identity:** The user added an
+exact-one guard for the four modular `BYPASS_MCU_*` backend selectors in
+`bypass_output_common.h` and made the Classic pin-map branch depend on
+`BYPASS_MCU_AVR_CLASSIC` rather than treating the compiler-family macro
+`__AVR__` as a target identity. Classic production, clang, cppcheck and MISRA
+flags now pass that selector explicitly, matching the existing AVR-XT,
+PIC10F322 and PIC12F675 flags.
+
+The target guard fixtures now require the project-owned backend diagnostic when
+AVR-XT, PIC10F322 or PIC12F675 loses its selector; AVR-XT and PIC10F322 also
+prove that two selectors are rejected. The analysis-matrix contract now treats
+Classic as an explicit backend and the fake-tool rebuild gate requires both
+ATtiny13a and tinyx5 compile commands to carry it. Exactly one backend
+preprocesses the guard away, so supported images are expected to remain
+byte-identical. All four valid backend preprocessing probes are token-identical
+to `HEAD`; seven native syntax probes compile the four valid identities and
+reject no selector, bare `__AVR__`, and two selectors with one authoritative
+diagnostic each. The Classic rebuild gate passes 35 checks, the exact analyzer
+matrix passes 22 checks over 60 rows, the workload rebuild gate passes 45, the
+PIC build gate passes its 48/102/168 per-part checks plus five profile checks,
+the stack-bound regression passes 23, the host golden model passes 988, and the
+strengthened deliberate-duplication witness passes 348. Target mutation gates
+remain unexecuted locally because this host has neither `avr-gcc` nor XC8.
+Per-driver selector guards remain a separate optional candidate, so BR-SRC-02
+stays `NEEDS USER`.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 

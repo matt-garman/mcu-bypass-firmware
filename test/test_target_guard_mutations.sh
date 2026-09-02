@@ -228,16 +228,15 @@ FIXTURES=(
 	# derivation, not a literal: halve the divisor and the 1 ms tick becomes 2 ms.
 	"xt tick derivation|avr_xt:cd4053_simple|-|bypass_config.h@@s,((F_CPU / 1000UL) - 1UL),((F_CPU / 2000UL) - 1UL),|bypass_mcu_avr_xt.c|ASSERT:TCB0_CCMP_1MS/F_CPU mismatch"
 	"xt wrong clock|avr_xt:cd4053_simple|drop:-DF_CPU=2000000UL;add:-DF_CPU=1000000UL|-|bypass_mcu_avr_xt.c|ERROR:F_CPU must be 2000000 for the ATtiny202"
-	# The ATtiny202 also defines __AVR__, so a shell that loses its part selector
-	# does not fail to find a pin map -- it silently takes the CLASSIC one and
-	# misroutes every pin. What stops that is the classic arm's F_CPU check.
-	"xt loses its part selector|avr_xt:cd4053_simple|drop:-DBYPASS_MCU_AVR_XT|-|bypass_mcu_avr_xt.c|ERROR:F_CPU must be 1200000 for ATtiny13/a"
+	"xt loses its backend selector|avr_xt:cd4053_simple|drop:-DBYPASS_MCU_AVR_XT|-|bypass_mcu_avr_xt.c|ERROR:exactly one modular MCU backend selector must be defined"
+	"xt rejects two backend selectors|avr_xt:cd4053_simple|add:-DBYPASS_MCU_PIC10F322|-|bypass_mcu_avr_xt.c|ERROR:exactly one modular MCU backend selector must be defined"
 
 	# --- PIC10F322: pins, clock, part identity -------------------------------
 	"322 pin ordinal|pic10f322:cd4053_simple|-|bypass_pins_pic10f322.h@@s/^#define FOOTSW_PIN      (3U)/#define FOOTSW_PIN      (2U)/|bypass_mcu_pic10f322.c|ASSERT:FOOTSW_PIN must be RA3"
 	"322 relay pin ordinal|pic10f322:tq2_l2_5v_relay|-|bypass_pins_pic10f322.h@@s/^#define RELAY_SET_PIN   (2U)/#define RELAY_SET_PIN   (0U)/|bypass_mcu_pic10f322.c|ASSERT:RELAY_SET_PIN must be RA2"
 	"322 wrong clock|pic10f322:cd4053_simple|drop:-D_XTAL_FREQ=2000000UL;add:-D_XTAL_FREQ=4000000UL|-|bypass_mcu_pic10f322.c|ASSERT:_XTAL_FREQ must be 2 MHz"
-	"322 loses its part selector|pic10f322:cd4053_simple|drop:-DBYPASS_MCU_PIC10F322|-|bypass_mcu_pic10f322.c|ERROR:no pin map selected for this target"
+	"322 loses its backend selector|pic10f322:cd4053_simple|drop:-DBYPASS_MCU_PIC10F322|-|bypass_mcu_pic10f322.c|ERROR:exactly one modular MCU backend selector must be defined"
+	"322 rejects two backend selectors|pic10f322:cd4053_simple|add:-DBYPASS_MCU_PIC12F675|-|bypass_mcu_pic10f322.c|ERROR:exactly one modular MCU backend selector must be defined"
 
 	# --- PIC12F675: pins, the GP3/GP4 spare-pin family, clock, part identity --
 	# GP3 is input-only AND has no weak pull-up on this part, which is exactly why
@@ -249,7 +248,7 @@ FIXTURES=(
 	"675 spare input pin|pic12f675:cd4053_simple|-|bypass_pins_pic12f675.h@@s/^#define SPARE_INPUT_PIN  (3U)/#define SPARE_INPUT_PIN  (1U)/|bypass_mcu_pic12f675.c|ASSERT:SPARE_INPUT_PIN must be input-only GP3&&SPARE_INPUT_PIN must use the external pull-up because GP3 has no WPU&&SPARE_INPUT_PIN must remain an input"
 	"675 spare output pin|pic12f675:cd4053_simple|-|bypass_pins_pic12f675.h@@s/^#define SPARE_OUTPUT_PIN (4U)/#define SPARE_OUTPUT_PIN (3U)/|bypass_mcu_pic12f675.c|ASSERT:SPARE_OUTPUT_PIN must be GP4&&SPARE_OUTPUT_PIN must be a guarded low-driven output"
 	"675 wrong clock|pic12f675:cd4053_simple|drop:-D_XTAL_FREQ=4000000UL;add:-D_XTAL_FREQ=2000000UL|-|bypass_mcu_pic12f675.c|ASSERT:_XTAL_FREQ must be 4 MHz"
-	"675 loses its part selector|pic12f675:cd4053_simple|drop:-DBYPASS_MCU_PIC12F675|-|bypass_mcu_pic12f675.c|ERROR:no pin map selected for this target"
+	"675 loses its backend selector|pic12f675:cd4053_simple|drop:-DBYPASS_MCU_PIC12F675|-|bypass_mcu_pic12f675.c|ERROR:exactly one modular MCU backend selector must be defined"
 
 	# --- PIC10F320: the deliberately self-contained shell --------------------
 	# This shell carries its OWN copy of the five shared threshold invariants and

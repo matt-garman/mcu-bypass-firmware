@@ -747,7 +747,7 @@ endif
 # Shared clang target/flags so clang-tidy AND the clang static analyzer parse
 # the firmware exactly as the AVR build sees it.
 CLANG_AVR_FLAGS    ?= -target avr -mmcu=$(ATTINY13A_MCU) -DF_CPU=$(ATTINY13A_F_CPU) -D__AVR__ -D__AVR_ATtiny13A__ \
-                      -D__AVR_DEVICE_NAME__=$(ATTINY13A_MCU) $(if $(AVR_ARCH),-D__AVR_ARCH__=$(AVR_ARCH)) \
+                      -DBYPASS_MCU_AVR_CLASSIC -D__AVR_DEVICE_NAME__=$(ATTINY13A_MCU) $(if $(AVR_ARCH),-D__AVR_ARCH__=$(AVR_ARCH)) \
                       -D__AVR_HAVE_PRR_PRTIM0 $(BYPASS_CTX_CHECK_FLAG) \
                       -Wno-macro-redefined \
 					  -fshort-enums \
@@ -787,9 +787,11 @@ CLASSIC_CPPCHECK_BASE_FLAGS ?= --enable=warning,style,performance,portability \
                       $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*' -I$(AVR_LIBC_INCLUDE)) \
                       $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*' -I$(AVR_GCC_INCLUDE))
 CLASSIC_T13_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_ATtiny13A__ \
-                      -DF_CPU=$(ATTINY13A_F_CPU) $(BYPASS_CTX_CHECK_FLAG)
+                       -DBYPASS_MCU_AVR_CLASSIC -DF_CPU=$(ATTINY13A_F_CPU) \
+                       $(BYPASS_CTX_CHECK_FLAG)
 CLASSIC_X5_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_ATtiny85__ \
-                      -DF_CPU=$(TINYX5_F_CPU) $(BYPASS_CTX_CHECK_FLAG)
+                       -DBYPASS_MCU_AVR_CLASSIC -DF_CPU=$(TINYX5_F_CPU) \
+                       $(BYPASS_CTX_CHECK_FLAG)
 CPPCHECK_FLAGS     ?= $(CLASSIC_CPPCHECK_BASE_FLAGS) $(CLASSIC_T13_CPPCHECK_CPPFLAGS)
 CLASSIC_X5_CPPCHECK_FLAGS ?= $(CLASSIC_CPPCHECK_BASE_FLAGS) $(CLASSIC_X5_CPPCHECK_CPPFLAGS)
 
@@ -940,7 +942,8 @@ CFLAGS_COMMON = -Os \
 
 # Primary (ATtiny13a). The tinyx5 family's per-chip flags are computed inline in
 # the build/sim templates from mmcu_<n> + TINYX5_F_CPU + CFLAGS_COMMON.
-CFLAGS    = -mmcu=$(ATTINY13A_MCU)   -DF_CPU=$(ATTINY13A_F_CPU)   $(CFLAGS_COMMON)
+CFLAGS    = -mmcu=$(ATTINY13A_MCU) -DF_CPU=$(ATTINY13A_F_CPU) \
+            -DBYPASS_MCU_AVR_CLASSIC $(CFLAGS_COMMON)
 LDFLAGS   = -mmcu=$(ATTINY13A_MCU)   -Wl,--gc-sections
 # Internal sequencing override: normal public builds force current tools/flags;
 # validated consumer phases set this empty to reuse the ELF they just checked.
@@ -1054,7 +1057,8 @@ $(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).elf: $$(CORE_SRC) $$(src_$(1)) 
 	@hex="$$(AVR_FW)$(call fw_image_tail,$(1),$(mmcu_$(2))).hex"; \
 	if ! rm -f "$$@" "$$$$hex"; then echo "FAIL: could not remove stale artifact for $$@"; exit 1; fi; \
 	tmp=$$$$(mktemp "$$@.tmp.XXXXXX") || exit 1; \
-	if ! $$(CC) -mmcu=$$(mmcu_$(2)) -DF_CPU=$$(TINYX5_F_CPU) $$(CFLAGS_COMMON) -Wl,--gc-sections \
+	if ! $$(CC) -mmcu=$$(mmcu_$(2)) -DF_CPU=$$(TINYX5_F_CPU) \
+		-DBYPASS_MCU_AVR_CLASSIC $$(CFLAGS_COMMON) -Wl,--gc-sections \
 		-D$$(macro_$(1)) -o "$$$$tmp" $$(CORE_SRC) $$(src_$(1)); then \
 		rm -f "$$$$tmp"; exit 1; \
 	fi; \
