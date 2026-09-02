@@ -5440,7 +5440,7 @@ the explicit BR-FINAL-05 qualification work.
 
 ## BR-FINAL-05 - Run complete project qualification
 
-**Status:** IN PROGRESS (OpenCode + user; complete-toolchain run pending)
+**Status:** IN PROGRESS (user; production release qualification deferred)
 
 **Depends on:** All implementation tasks intended for the release, including
 BR-REVIEW-02
@@ -5448,7 +5448,7 @@ BR-REVIEW-02
 **Work:**
 
 - [x] Run the ordinary host/default suite.
-- [ ] Run the long/exhaustive suite under the intended strict mutation policy.
+- [x] Run the long/exhaustive suite under the intended strict mutation policy.
 - [x] Run AVR-XT pre-hardware and target aggregates with required tool inputs.
 - [x] Run PIC10F322 pre-hardware and target aggregates.
 - [x] Run PIC10F320 pre-hardware, expected-image, stack, and target aggregates.
@@ -5482,8 +5482,15 @@ root has a group/world-writable ancestor: the PIC12F675 safety policy correctly
 rejects that root, but the test's expected-success command substitution hid the
 captured diagnostic. The test now reports that reason. Its PIC12F675 profile
 passes 168 checks with a safe root, and the unsafe-root control emits the exact
-ancestor rejection. Re-run the still-open strict `test-long` under a private
-temporary root before crediting it.
+ancestor rejection.
+
+**Complete-toolchain result (2026-09-02, `ab882e3f7bf174415ec46120c77f605e2bf28216`):**
+The clean `scripts/ci-local.sh` rerun completed with exit status zero and its
+`ALL STEPS PASSED` sentinel. No toolchain or target lane was skipped. The
+strict, no-skip `test-long` step passed in 1,561 seconds; all PIC, AVR-XT and
+Classic AVR steps passed, and the complete local CI reproduction took 1,741
+seconds. This closes the complete non-release qualification. Only the explicitly
+deferred 24-hour production soak and its candidate resource report remain open.
 
 **Acceptance:**
 
@@ -5685,6 +5692,6 @@ dependencies and acceptance criteria.
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
 | BR-FINAL-04 | Run focused gates incrementally | DONE `e5bdb6e` |
-| BR-FINAL-05 | Run complete qualification | IN PROGRESS (complete-toolchain run pending) |
+| BR-FINAL-05 | Run complete qualification | IN PROGRESS (production release qualification deferred) |
 | BR-FINAL-06 | Measure outcome | DONE `bc1fe73` |
 | BR-FINAL-07 | Delete this working document | TODO |
