@@ -4047,6 +4047,15 @@ iterate explicit source/selector tuples, and a fake-analyzer contract checks all
 five pairings. `test-analyze-variant-guard` passes 21 checks; the analyzer
 matrix, Classic rebuild and workload rebuild contracts pass 22, 35 and 45.
 
+The next full-toolchain run exposed the same stale selector assumption in the
+watchdog budget-map fixture: production `CFLAGS` already selected Classic, then
+the loop added AVR-XT or a PIC backend and correctly tripped the exact-one guard.
+The fixture now removes only the Classic backend from its private flag set and
+requires no backend to remain before each row adds the map it is measuring. All
+other production compiler flags remain in force. Four native map controls pass,
+as do shell syntax, `git diff --check` and the 348-check deliberate-duplication
+contract; the complete lane still requires the unavailable `avr-gcc`.
+
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 
 **Status:** DONE `781cb43`

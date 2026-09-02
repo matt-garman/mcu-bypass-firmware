@@ -95,6 +95,17 @@ CFLAGS=$(read_var CFLAGS)
 	|| fail "CFLAGS no longer carries -fshort-enums; the enum-size guards below cannot be exercised as written"
 checks=$((checks + 1))
 
+# CFLAGS is the Classic production configuration and therefore carries its
+# backend selector. The map-only watchdog fixture substitutes each modular
+# backend in turn, so preserve every other production flag while removing that
+# one selector before a row adds its own.
+BUDGET_CFLAGS=${CFLAGS//-DBYPASS_MCU_AVR_CLASSIC/}
+[ "$BUDGET_CFLAGS" != "$CFLAGS" ] \
+	|| fail "CFLAGS no longer carries the Classic backend selector required by the production guard lane"
+[[ "$BUDGET_CFLAGS" != *-DBYPASS_MCU_* ]] \
+	|| fail "budget-fixture flags still carry a modular backend selector: $BUDGET_CFLAGS"
+checks=$((checks + 1))
+
 # Calculate the duty conversion independently of the firmware macros. `duty`
 # is the ISR-owned fraction of wall time, so foreground delay work receives the
 # denominator 100-duty. Quotient plus nonzero remainder is an upward-rounded
@@ -311,7 +322,7 @@ compile() {
 
 compile_budget_fixture() {
 	local tree=$1 map_define=$2 relay=$3 mute=$4 simple=$5 probe=$6 expected=$7
-	$CC $CFLAGS "$map_define" -I"$tree" \
+	$CC $BUDGET_CFLAGS "$map_define" -I"$tree" \
 		-DTEST_RELAY_BUDGET_MS="$relay" \
 		-DTEST_MUTE_BUDGET_MS="$mute" \
 		-DTEST_SIMPLE_BUDGET_MS="$simple" \
