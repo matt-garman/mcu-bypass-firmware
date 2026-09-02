@@ -295,6 +295,7 @@ for source_route in "${source_route_cases[@]}"; do
 				fail "release producer accepted malformed ATtiny202 source command: $bad_source_command"
 			fi
 		done
+		# name-contract: exempt (intentional mis-cased override rejection fixture)
 		if (shopt -s nocasematch; release_producer_source_command_valid \
 				"$source_image" \
 				"make $source_goal $source_selector=cd4053_simple xt_updi_port=/dev/ttyACM0"); then
@@ -1321,6 +1322,7 @@ for source_xt_case in \
 done
 
 reset_fixture
+# name-contract: exempt (intentional mis-cased override rejection fixture)
 replace_fixture_source_command "$source_xt" \
 	"make attiny202-program VARIANT=$source_xt_variant xt_updi_port=/dev/ttyACM0"
 if output=$(export BASHOPTS; shopt -s nocasematch; \
@@ -2445,6 +2447,7 @@ render_source_reject "an ATtiny202 source command with a traversing UPDI path" \
 	bypass-attiny202-cd4053_simple.hex \
 	'make attiny202-program VARIANT=cd4053_simple XT_UPDI_PORT=/dev/../etc/passwd'
 shopt -s nocasematch
+# name-contract: exempt (intentional mis-cased override rejection fixture)
 render_source_reject "an ATtiny202 source command with a mis-cased UPDI assignment" \
 	bypass-attiny202-cd4053_simple.hex \
 	'make attiny202-program VARIANT=cd4053_simple xt_updi_port=/dev/ttyACM0'
