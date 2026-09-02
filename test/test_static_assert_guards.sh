@@ -237,17 +237,18 @@ done
 # predicates that have no mutation.
 #
 # EVERY shell is counted, not only the ones this file compiles. The four target
-# shells hold 53 of the 80 guards; their mutations live behind optional
+# shells hold 53 of the 81 guards; their mutations live behind optional
 # toolchains, and a census that skipped with them would leave the majority of
 # the firmware's compile-time invariants protected by nothing on a machine
 # without XC8.
 #
-# On bypass_compile_checks.h's five: four are reachable. PRESSED_THRESH <
-# DEBOUNCE_COUNTER_MAX cannot fire while RELEASE_THRESH < DEBOUNCE_COUNTER_MAX
-# and RELEASE_THRESH > PRESSED_THRESH both hold, so it is defence in depth
-# against a future edit to those two rather than a guard this file can trip.
+# Of bypass_compile_checks.h's five threshold guards, four are reachable.
+# PRESSED_THRESH < DEBOUNCE_COUNTER_MAX cannot fire while RELEASE_THRESH <
+# DEBOUNCE_COUNTER_MAX and RELEASE_THRESH > PRESSED_THRESH both hold, so it is
+# defence in depth against a future edit to those two rather than a guard this
+# file can trip.
 GUARD_CENSUS=(
-	"bypass_compile_checks.h 5"
+	"bypass_compile_checks.h 6"
 	"bypass_mcu_avr_classic.c 17"
 	"bypass_mcu_avr_xt.c 11"
 	"bypass_mcu_pic10f320.c 19"

@@ -3858,9 +3858,9 @@ rejected with the intended message; the pristine copy passes. `make test` green.
   Complete below.
 - Remove empty `src/bypass_output_cd4053_simple.h`, or give it a real driver
   contract such as selector validation. Removal complete below.
-- Add one-hot backend/output selector guards. The PIC10F320 output-selector
-  slice is complete below; modular-shell and backend-selector guards remain
-  optional candidates.
+- Add one-hot backend/output selector guards. The PIC10F320 and modular-shell
+  output-selector slices are complete below; a backend-selector guard remains
+  an optional candidate.
 - Require each modular output driver translation unit's expected selector.
 - Correct stale MCU-neutral comments in `src/bypass_config.h`. Complete below.
 - Replace deleted-document references after PIC consolidation.
@@ -3946,14 +3946,14 @@ static-assert guard gate skipped cleanly because this host has no `avr-gcc`. No
 permanent regression was added for prose inside firmware source. The other
 optional candidates remain, so BR-SRC-02 stays `NEEDS USER`.
 
-**Completed slice -- remove the empty simple-CD4053 header:** The user removed
-`src/bypass_output_cd4053_simple.h`, which contained only an include guard and
-was not included by any firmware translation unit. The host shim no longer
-performs a no-op include for the non-blocking output variant; only the mute and
-relay variants include dedicated headers for their timing constants. Makefile
-dependency lists and rebuild-test sandboxes no longer invent or watch the deleted
-file, and the documented MISRA boundary is now the actual 14 authored headers
-without an explicit unparsed-header coverage limit.
+**Completed slice -- remove the empty simple-CD4053 header (`fe15fd2`):** The
+user removed `src/bypass_output_cd4053_simple.h`, which contained only an include
+guard and was not included by any firmware translation unit. The host shim no
+longer performs a no-op include for the non-blocking output variant; only the
+mute and relay variants include dedicated headers for their timing constants.
+Makefile dependency lists and rebuild-test sandboxes no longer invent or watch
+the deleted file, and the documented MISRA boundary is now the actual 14
+authored headers without an explicit unparsed-header coverage limit.
 
 The deleted header contributed no preprocessor tokens beyond its unused guard,
 so firmware images are expected to remain byte-identical. The focused fake-tool
@@ -3963,6 +3963,30 @@ checks. The analyzer matrix passes 22 checks over its exact 60 rows, and
 `test-deliberate-duplication` passes its reduced 347-check inventory. The native
 golden model also passes 988 checks after the host shim stops including the
 header. The other optional candidates remain, so BR-SRC-02 stays `NEEDS USER`.
+
+**Completed slice -- modular output-selector cardinality:** The user added one
+shared file-scope guard to `bypass_compile_checks.h`, which all four modular MCU
+shells include. A shell now rejects both zero output selectors and more than one
+of `CD4053_SIMPLE`, `CD4053_WITH_MUTE` and `TQ2_L2_5V_RELAY` with the diagnostic
+`exactly one modular output selector must be defined` rather than compiling
+under a missing or ambiguous output contract. The self-contained PIC10F320
+retains its separate `OUTPUT_*` guard.
+
+The existing AVR-XT and PIC10F322 dual-selector handoff fixtures now require the
+exact diagnostic instead of `UNGUARDED`, and matching zero-selector fixtures
+prove the other side of exactly-one under both compiler families. The shared
+header's census moves from five to six declarations and the whole firmware from
+80 to 81. Exactly one selector preprocesses the guard away, so supported images
+are expected to remain byte-identical. Three valid-selector preprocessing probes
+are token-identical to `HEAD`; native syntax probes compile all three valid
+selectors and reject zero and two selectors with the exact message. The updated
+81-guard census agrees, and `test-deliberate-duplication` passes 347 checks. The
+target mutation gates skipped locally because this host has neither `avr-gcc`
+nor XC8; the focused full-toolchain checks are `make STRICT_TOOLS=1
+test-static-assert-guards`, `make STRICT_TOOLS=1
+test-attiny202-guard-mutations` and `make STRICT_TOOLS=1
+test-pic-guard-mutations`. Backend identity and per-driver selector guards
+remain separate optional candidates, so BR-SRC-02 stays `NEEDS USER`.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 

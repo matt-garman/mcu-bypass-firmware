@@ -7,7 +7,7 @@
 # compiles the classic-AVR lane only, with avr-gcc, and says so. Four MCU shells
 # sit outside it -- bypass_mcu_avr_xt.c, bypass_mcu_pic10f322.c,
 # bypass_mcu_pic12f675.c and bypass_mcu_pic10f320.c -- and they hold 53 of the
-# firmware's 80 static_assert guards. This file exercises selected predicates
+# firmware's 81 static_assert guards. This file exercises selected predicates
 # from their pin, clock, layout, threshold and timing-budget families.
 #
 # Those target-local predicates cannot be proven with a shared compile. A pin
@@ -325,9 +325,11 @@ BUDGETS=(
 # When a guard here starts firing, do not delete the row -- change UNGUARDED or
 # INCIDENTAL to ASSERT:<its message>, proving the new guard is load-bearing.
 GUARD_HANDOFF_FIXTURES=(
-	"xt shell accepts two output selectors|avr_xt:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_avr_xt.c|UNGUARDED"
+	"xt shell rejects two output selectors|avr_xt:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_avr_xt.c|ASSERT:exactly one modular output selector must be defined"
+	"xt shell rejects no output selector|avr_xt:cd4053_simple|drop:-DCD4053_SIMPLE|-|bypass_mcu_avr_xt.c|ASSERT:exactly one modular output selector must be defined"
 	"xt relay driver accepts a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
-	"322 shell accepts two output selectors|pic10f322:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_pic10f322.c|UNGUARDED"
+	"322 shell rejects two output selectors|pic10f322:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_pic10f322.c|ASSERT:exactly one modular output selector must be defined"
+	"322 shell rejects no output selector|pic10f322:cd4053_simple|drop:-DCD4053_SIMPLE|-|bypass_mcu_pic10f322.c|ASSERT:exactly one modular output selector must be defined"
 	"322 relay driver accepts a foreign selector|pic10f322:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
 	"675 relay driver accepts a foreign selector|pic12f675:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
 	# This used to fail incidentally when two selection idioms chose different

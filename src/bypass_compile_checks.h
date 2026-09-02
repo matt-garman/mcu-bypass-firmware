@@ -4,7 +4,8 @@
 #ifndef BYPASS_COMPILE_CHECKS_H__
 #define BYPASS_COMPILE_CHECKS_H__
 
-// Shared, MCU-NEUTRAL compile-time contract for the debounce thresholds.
+// Shared, MCU-NEUTRAL compile-time contract for output selection and the
+// debounce thresholds.
 //
 // Included by the four modular hardware shells (bypass_mcu_avr_classic.c,
 // bypass_mcu_avr_xt.c, bypass_mcu_pic10f322.c and bypass_mcu_pic12f675.c) so
@@ -27,6 +28,16 @@
 
 #include "bypass_config.h"        // PRESSED_THRESH / RELEASE_THRESH
 #include "bypass_static_assert.h" // static_assert()
+
+
+// Every modular shell must select exactly one shared output-driver translation
+// unit. Reject both a missing selection and conflicting selections before a
+// shell can silently compile against the wrong output contract.
+#if ((defined(CD4053_SIMPLE) + \
+            defined(CD4053_WITH_MUTE) + \
+            defined(TQ2_L2_5V_RELAY)) != 1)
+static_assert(0, "exactly one modular output selector must be defined");
+#endif
 
 
 // Upper bound for values stored in the uint8_t debounce counter, as an
