@@ -992,8 +992,9 @@ done
 
 # The source-checkout block, if the release publishes one, must be exactly what
 # it says: one MCU-specific Make programming goal and one exact selector for the
-# variant its own image names. This mapping is intentionally independent of the
-# producer and renderer.
+# variant its own image names, with no semantic assignments except the ATtiny202
+# route's required shell-safe UPDI path beneath /dev. This mapping is
+# intentionally independent of the producer and renderer.
 if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 	flash_source="$work/flash-source.sh"
 	awk '
@@ -1026,11 +1027,13 @@ if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 		flash_stem=${flash_current%.hex}
 		flash_part=${flash_current#*-}
 		flash_part=${flash_part%%-*}
+		flash_expected_extra_count=0
 		case "$flash_part" in
 			attiny13a) flash_expected_goal=attiny13a-program; flash_expected_selector=VARIANT ;;
 			attiny45)  flash_expected_goal=attiny45-program;  flash_expected_selector=VARIANT ;;
 			attiny85)  flash_expected_goal=attiny85-program;  flash_expected_selector=VARIANT ;;
-			attiny202) flash_expected_goal=attiny202-program; flash_expected_selector=VARIANT ;;
+			attiny202) flash_expected_goal=attiny202-program; flash_expected_selector=VARIANT
+				flash_expected_extra_count=1 ;;
 			pic10f322) flash_expected_goal=pic10f322-program; flash_expected_selector=VARIANT ;;
 			pic10f320) flash_expected_goal=pic10f320-program; flash_expected_selector=PIC10F320_VARIANT ;;
 			pic12f675)
@@ -1045,18 +1048,31 @@ if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 		flash_selector_name=""
 		flash_selector=""
 		flash_selector_count=0
+		flash_extra_count=0
 		for flash_word in "${flash_words[@]:1}"; do
 			case "$flash_word" in
 				*=*)
 					flash_name=${flash_word%%=*}
 					[[ "$flash_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
 						|| die "the source-checkout command for $flash_current has a malformed assignment: $flash_word"
-					case "$flash_name" in
-						*VARIANT)
-							flash_selector_name=$flash_name
-							flash_selector=${flash_word#*=}
-							flash_selector_count=$((flash_selector_count + 1)) ;;
-					esac ;;
+					if [ "$flash_name" = "$flash_expected_selector" ]; then
+						flash_selector_name=$flash_name
+						flash_selector=${flash_word#*=}
+						flash_selector_count=$((flash_selector_count + 1))
+					elif [[ "$flash_name" = *VARIANT ]]; then
+						# Preserve the more specific wrong-selector diagnostic below.
+						flash_selector_name=$flash_name
+						flash_selector=${flash_word#*=}
+						flash_selector_count=$((flash_selector_count + 1))
+					elif [ "$flash_name" = XT_UPDI_PORT ]; then
+						[ "$flash_part" = attiny202 ] \
+							|| die "the source-checkout command for $flash_current has an unsupported assignment: $flash_word"
+						[[ "${flash_word#*=}" =~ ^/dev/[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$ ]] \
+							|| die "the source-checkout command for $flash_current has an invalid XT_UPDI_PORT assignment: $flash_word"
+						flash_extra_count=$((flash_extra_count + 1))
+					else
+						die "the source-checkout command for $flash_current has an unsupported assignment: $flash_word"
+					fi ;;
 				*)
 					flash_goal=$flash_word
 					flash_goal_count=$((flash_goal_count + 1)) ;;
@@ -1070,6 +1086,8 @@ if grep -Fxq -- '### Source-checkout equivalents' "$manifest"; then
 			|| die "the source-checkout command for $flash_current must use the exact $flash_expected_selector selector: $flash_line"
 		[ "$flash_selector" = "${flash_stem##*-}" ] \
 			|| die "the source-checkout command for $flash_current does not select its own variant: $flash_line"
+		[ "$flash_extra_count" -eq "$flash_expected_extra_count" ] \
+			|| die "the source-checkout command for $flash_current must carry exactly $flash_expected_extra_count target-specific assignments: $flash_line"
 		flash_current=""
 	done < "$flash_source"
 fi

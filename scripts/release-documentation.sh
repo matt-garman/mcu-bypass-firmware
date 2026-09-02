@@ -1537,12 +1537,15 @@ release_render_pic12f675_flashing() {
 
 # Re-derive the source-checkout route here rather than trusting the producer's
 # validation. The retained-manifest verifier has its own copy of the relation as
-# a third opinion over the bytes that are eventually committed.
+# a third opinion over the bytes that are eventually committed. Treat every
+# other Make assignment as semantic, except the ATtiny202 route's required
+# shell-safe UPDI path beneath /dev.
 _release_source_command_valid() {
 	[ "$#" -eq 2 ] || return 2
 	local image=$1 command=$2 part variant expected_goal expected_selector word name
 	local goal="" selector_name="" selector_value=""
-	local goal_count=0 selector_count=0
+	local goal_count=0 selector_count=0 extra_count=0 expected_extra_count=0
+	local LC_ALL=C
 	local -a words=()
 
 	part=${image#*-}
@@ -1553,7 +1556,8 @@ _release_source_command_valid() {
 		attiny13a) expected_goal=attiny13a-program; expected_selector=VARIANT ;;
 		attiny45)  expected_goal=attiny45-program;  expected_selector=VARIANT ;;
 		attiny85)  expected_goal=attiny85-program;  expected_selector=VARIANT ;;
-		attiny202) expected_goal=attiny202-program; expected_selector=VARIANT ;;
+		attiny202) expected_goal=attiny202-program; expected_selector=VARIANT
+			expected_extra_count=1 ;;
 		pic10f322) expected_goal=pic10f322-program; expected_selector=VARIANT ;;
 		pic10f320) expected_goal=pic10f320-program; expected_selector=PIC10F320_VARIANT ;;
 		*) return 1 ;;
@@ -1566,12 +1570,16 @@ _release_source_command_valid() {
 			*=*)
 				name=${word%%=*}
 				[[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
-				case "$name" in
-					*VARIANT)
-						selector_name=$name
-						selector_value=${word#*=}
-						selector_count=$((selector_count + 1)) ;;
-				esac ;;
+				if [ "$name" = "$expected_selector" ]; then
+					selector_name=$name
+					selector_value=${word#*=}
+					selector_count=$((selector_count + 1))
+				elif [ "$name" = XT_UPDI_PORT ] && [ "$part" = attiny202 ] \
+						&& [[ "${word#*=}" =~ ^/dev/[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$ ]]; then
+					extra_count=$((extra_count + 1))
+				else
+					return 1
+				fi ;;
 			*)
 				goal=$word
 				goal_count=$((goal_count + 1)) ;;
@@ -1580,7 +1588,8 @@ _release_source_command_valid() {
 	[ "$goal_count" -eq 1 ] && [ "$goal" = "$expected_goal" ] \
 		&& [ "$selector_count" -eq 1 ] \
 		&& [ "$selector_name" = "$expected_selector" ] \
-		&& [ "$selector_value" = "$variant" ]
+		&& [ "$selector_value" = "$variant" ] \
+		&& [ "$extra_count" -eq "$expected_extra_count" ]
 }
 
 release_render_flashing() {

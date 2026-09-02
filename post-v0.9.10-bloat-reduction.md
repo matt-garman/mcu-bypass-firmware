@@ -4803,6 +4803,24 @@ qualification and plan deletion.
   implementation commit, `df344a7`. BR-FINAL-06 remains explicitly scoped to
   endpoint `cc2ff7a`; it is a fixed comparison, not an unqualified tip metric.
 
+- [x] **BR-RVW2-10 -- HIGH -- reject semantic overrides in published
+  source-checkout programming commands.** Follow-up review at `9d47651` found
+  that BR-RVW2-02 deliberately ignored assignments not ending in `VARIANT`.
+  That let a syntactically valid command retain its expected goal and selector
+  while appending `PIC10F322_PROG_HEX=foreign.hex`,
+  `PIC10F322_PROG_CMD=:` or `MAKEFLAGS=-n`. GNU Make consumes those assignments,
+  so the command could write another image, suppress the programmer invocation
+  or change recipe semantics while all three release validators accepted it.
+
+  **Resolved:** The producer, renderer and retained-manifest verifier now reject
+  every assignment except the exact variant selector, plus the ATtiny202 route's
+  one required `XT_UPDI_PORT=/dev/...` input. The port value is restricted to a
+  shell-safe path lexically confined beneath `/dev/`; duplicates, omission,
+  traversal and mis-cased names fail even under inherited `nocasematch`. Focused
+  negatives cover image-path, programmer-command and Make-semantics overrides at
+  all three validation boundaries. `test-release-qualification` passes 217
+  checks; shell syntax and `git diff --check` pass.
+
 **Measured branch shape:** At the review baseline, `main...7dd4840` changes 92
 paths with 19,963 insertions and 18,636 deletions, including all 5,172 lines of
 this branch-only plan. Excluding the plan gives 91 paths, 14,791 insertions and

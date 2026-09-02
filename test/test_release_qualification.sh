@@ -259,25 +259,57 @@ source_route_cases=(
 for source_route in "${source_route_cases[@]}"; do
 	read -r source_part source_goal source_selector <<<"$source_route"
 	source_image="bypass-$source_part-cd4053_simple.hex"
-	source_command="make $source_goal $source_selector=cd4053_simple"
+	source_extra=""
 	[ "$source_part" != attiny202 ] \
-		|| source_command+=" XT_UPDI_PORT=/dev/ttyACM0"
+		|| source_extra=" XT_UPDI_PORT=/dev/ttyACM0"
+	source_command="make $source_goal $source_selector=cd4053_simple$source_extra"
 	release_producer_source_command_valid "$source_image" "$source_command" \
 		|| fail "release producer rejected the exact $source_part goal/selector pair"
+	if [ "$source_part" = attiny202 ]; then
+		release_producer_source_command_valid "$source_image" \
+			"make $source_goal $source_selector=cd4053_simple XT_UPDI_PORT=/dev/serial/by-id/fixture-updi" \
+			|| fail "release producer rejected a nested safe UPDI device path"
+	fi
 	wrong_goal=attiny202-program
 	[ "$source_goal" != "$wrong_goal" ] || wrong_goal=pic10f322-program
 	foreign_selector=PIC10F320_VARIANT
 	[ "$source_selector" != "$foreign_selector" ] || foreign_selector=VARIANT
 	for bad_source_command in \
-			"make $source_goal WRONG${source_selector}=cd4053_simple" \
-			"make $wrong_goal $source_selector=cd4053_simple" \
-			"make $source_goal $foreign_selector=cd4053_simple" \
-			"make $source_goal $source_selector=cd4053_simple $source_selector=cd4053_simple" \
-			"make $source_goal $source_selector=cd4053_simple $source_selector=tq2_l2_5v_relay"; do
+			"make $source_goal WRONG${source_selector}=cd4053_simple$source_extra" \
+			"make $wrong_goal $source_selector=cd4053_simple$source_extra" \
+			"make $source_goal $foreign_selector=cd4053_simple$source_extra" \
+			"make $source_goal $source_selector=cd4053_simple $source_selector=cd4053_simple$source_extra" \
+			"make $source_goal $source_selector=cd4053_simple $source_selector=tq2_l2_5v_relay$source_extra" \
+			"make $source_goal $source_selector=cd4053_simple$source_extra MAKEFLAGS=-n"; do
 		if release_producer_source_command_valid "$source_image" "$bad_source_command"; then
 			fail "release producer accepted malformed $source_part source command: $bad_source_command"
 		fi
 	done
+	if [ "$source_part" = attiny202 ]; then
+		for bad_source_command in \
+				"make $source_goal $source_selector=cd4053_simple" \
+				"$source_command XT_UPDI_PORT=/dev/ttyUSB0" \
+				"make $source_goal $source_selector=cd4053_simple XT_UPDI_PORT=\$(id)" \
+				"make $source_goal $source_selector=cd4053_simple XT_UPDI_PORT=/dev/../etc/passwd"; do
+			if release_producer_source_command_valid "$source_image" "$bad_source_command"; then
+				fail "release producer accepted malformed ATtiny202 source command: $bad_source_command"
+			fi
+		done
+		if (shopt -s nocasematch; release_producer_source_command_valid \
+				"$source_image" \
+				"make $source_goal $source_selector=cd4053_simple xt_updi_port=/dev/ttyACM0"); then
+			fail "release producer accepted a mis-cased UPDI assignment under nocasematch"
+		fi
+	fi
+done
+for bad_source_command in \
+		'make pic10f322-program VARIANT=cd4053_simple PIC10F322_PROG_HEX=foreign.hex' \
+		'make pic10f322-program VARIANT=cd4053_simple PIC10F322_PROG_CMD=:' \
+		'make pic10f322-program VARIANT=cd4053_simple XT_UPDI_PORT=/dev/ttyACM0'; do
+	if release_producer_source_command_valid \
+			bypass-pic10f322-cd4053_simple.hex "$bad_source_command"; then
+		fail "release producer accepted a semantic programming override: $bad_source_command"
+	fi
 done
 if release_producer_source_command_valid \
 		bypass-pic12f675-cd4053_simple.hex \
@@ -625,7 +657,9 @@ fixture_source_command() {
 		pic10f320) goal=pic10f320-program; selector=PIC10F320_VARIANT ;;
 		*) return 1 ;;
 	esac
-	printf 'make %s %s=%s\n' "$goal" "$selector" "$variant"
+	printf 'make %s %s=%s' "$goal" "$selector" "$variant"
+	[ "$part" != attiny202 ] || printf ' XT_UPDI_PORT=/dev/ttyACM0'
+	printf '\n'
 }
 
 # Mirrors release_render_flashing's published shape without calling it, for the
@@ -1231,6 +1265,71 @@ replace_fixture_source_command "$source_generic" \
 	"make attiny13a-program VARIANT=$source_variant VARIANT=not_the_variant"
 expect_fail "source-checkout command carrying conflicting selectors" \
 	"must carry exactly one variant selector"
+
+reset_fixture
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program VARIANT=$source_variant MAKEFLAGS=-n"
+expect_fail "source-checkout command overriding Make semantics" \
+	"has an unsupported assignment: MAKEFLAGS=-n"
+
+reset_fixture
+replace_fixture_source_command "$source_generic" \
+	"make attiny13a-program VARIANT=$source_variant XT_UPDI_PORT=/dev/ttyACM0"
+expect_fail "non-ATtiny202 source-checkout command carrying a UPDI path" \
+	"has an unsupported assignment: XT_UPDI_PORT=/dev/ttyACM0"
+
+source_pic322=""
+for image in "${canonical_images[@]}"; do
+	case "$image" in *-pic10f322-*) source_pic322=$image; break ;; esac
+done
+[ -n "$source_pic322" ] || fail "the canonical image set contains no PIC10F322 image"
+source_pic322_variant=${source_pic322%.hex}
+source_pic322_variant=${source_pic322_variant##*-}
+for source_override in \
+		PIC10F322_PROG_HEX=foreign.hex \
+		PIC10F322_PROG_CMD=:; do
+	reset_fixture
+	replace_fixture_source_command "$source_pic322" \
+		"make pic10f322-program VARIANT=$source_pic322_variant $source_override"
+	expect_fail "source-checkout command carrying $source_override" \
+		"has an unsupported assignment: $source_override"
+done
+
+source_xt=""
+for image in "${canonical_images[@]}"; do
+	case "$image" in *-attiny202-*) source_xt=$image; break ;; esac
+done
+[ -n "$source_xt" ] || fail "the canonical image set contains no ATtiny202 image"
+source_xt_variant=${source_xt%.hex}
+source_xt_variant=${source_xt_variant##*-}
+reset_fixture
+replace_fixture_source_command "$source_xt" \
+	"make attiny202-program VARIANT=$source_xt_variant XT_UPDI_PORT=/dev/serial/by-id/fixture-updi"
+reseal_provenance
+expect_pass "ATtiny202 source-checkout command with one nested safe UPDI path"
+for source_xt_case in \
+		"missing UPDI path|make attiny202-program VARIANT=$source_xt_variant|must carry exactly 1 target-specific assignments" \
+		"duplicate UPDI path|make attiny202-program VARIANT=$source_xt_variant XT_UPDI_PORT=/dev/ttyACM0 XT_UPDI_PORT=/dev/ttyUSB0|must carry exactly 1 target-specific assignments" \
+		"shell-active UPDI path|make attiny202-program VARIANT=$source_xt_variant XT_UPDI_PORT=\$(id)|has an invalid XT_UPDI_PORT assignment" \
+		"traversing UPDI path|make attiny202-program VARIANT=$source_xt_variant XT_UPDI_PORT=/dev/../etc/passwd|has an invalid XT_UPDI_PORT assignment"; do
+	IFS='|' read -r source_xt_label source_xt_command source_xt_error \
+		<<<"$source_xt_case"
+	reset_fixture
+	replace_fixture_source_command "$source_xt" "$source_xt_command"
+	expect_fail "ATtiny202 source-checkout command with $source_xt_label" \
+		"$source_xt_error"
+done
+
+reset_fixture
+replace_fixture_source_command "$source_xt" \
+	"make attiny202-program VARIANT=$source_xt_variant xt_updi_port=/dev/ttyACM0"
+if output=$(export BASHOPTS; shopt -s nocasematch; \
+		"$VERIFY" "$release" "$version" 2>&1); then
+	fail "retained verifier accepted a mis-cased UPDI assignment under nocasematch"
+fi
+[[ "$output" == *"has an unsupported assignment: xt_updi_port=/dev/ttyACM0"* ]] \
+	|| fail "mis-cased UPDI assignment failed for the wrong reason: $output"
+checks=$((checks + 1))
 
 # A namespaced selector is legitimate only with the PIC10F320 goal and image.
 source_pic320=$flash_pic_victim
@@ -2321,6 +2420,35 @@ render_source_reject "a duplicated source selector" "$source_image" \
 	'make pic10f322-program VARIANT=cd4053_simple VARIANT=cd4053_simple'
 render_source_reject "conflicting source selectors" "$source_image" \
 	'make pic10f322-program VARIANT=cd4053_simple VARIANT=tq2_l2_5v_relay'
+render_source_reject "a source image-path override" "$source_image" \
+	'make pic10f322-program VARIANT=cd4053_simple PIC10F322_PROG_HEX=foreign.hex'
+render_source_reject "a source programmer-command override" "$source_image" \
+	'make pic10f322-program VARIANT=cd4053_simple PIC10F322_PROG_CMD=:'
+render_source_reject "a source Make-semantics override" "$source_image" \
+	'make pic10f322-program VARIANT=cd4053_simple MAKEFLAGS=-n'
+render_source_reject "a non-ATtiny202 source command carrying a UPDI path" \
+	"$source_image" \
+	'make pic10f322-program VARIANT=cd4053_simple XT_UPDI_PORT=/dev/ttyACM0'
+render_source_accept "an ATtiny202 source command with a nested safe UPDI path" \
+	bypass-attiny202-cd4053_simple.hex \
+	'make attiny202-program VARIANT=cd4053_simple XT_UPDI_PORT=/dev/serial/by-id/fixture-updi'
+render_source_reject "an ATtiny202 source command with no UPDI path" \
+	bypass-attiny202-cd4053_simple.hex \
+	'make attiny202-program VARIANT=cd4053_simple'
+render_source_reject "an ATtiny202 source command with duplicate UPDI paths" \
+	bypass-attiny202-cd4053_simple.hex \
+	'make attiny202-program VARIANT=cd4053_simple XT_UPDI_PORT=/dev/ttyACM0 XT_UPDI_PORT=/dev/ttyUSB0'
+render_source_reject "an ATtiny202 source command with an unsafe UPDI path" \
+	bypass-attiny202-cd4053_simple.hex \
+	'make attiny202-program VARIANT=cd4053_simple XT_UPDI_PORT=$(id)'
+render_source_reject "an ATtiny202 source command with a traversing UPDI path" \
+	bypass-attiny202-cd4053_simple.hex \
+	'make attiny202-program VARIANT=cd4053_simple XT_UPDI_PORT=/dev/../etc/passwd'
+shopt -s nocasematch
+render_source_reject "an ATtiny202 source command with a mis-cased UPDI assignment" \
+	bypass-attiny202-cd4053_simple.hex \
+	'make attiny202-program VARIANT=cd4053_simple xt_updi_port=/dev/ttyACM0'
+shopt -u nocasematch
 render_source_reject "the generic selector on PIC10F320" \
 	bypass-pic10f320-cd4053_simple.hex \
 	'make pic10f320-program VARIANT=cd4053_simple'
