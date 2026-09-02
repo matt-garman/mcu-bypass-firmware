@@ -827,8 +827,9 @@ release_validate_claim_boundaries() {
 	return "$rc"
 }
 
-# Every PUBLISHED PIC12F675 finalization command must carry the complete identity
-# of the transaction it recovers.
+# release/README.md is the one maintained semantic owner of the source-checkout
+# transaction, and every PUBLISHED PIC12F675 finalization command must carry the
+# complete identity of the transaction it recovers.
 #
 # `make pic12f675-finalize` is read-only recovery of a PENDING transaction, and it
 # passes the CALLER-selected identity to the recovery oracle, which compares it
@@ -984,13 +985,26 @@ release_validate_pic12f675_finalization_document() {
 release_validate_pic12f675_finalization() {
 	[ "$#" -eq 2 ] || return 2
 	local repo_root=$1 version=$2
-	local document label rendered find_pid rc=0
+	local document label rendered toolchain find_pid rc=0
 	# Always scanned, so deleting the recovery example from it is a failure with
 	# a precise diagnostic rather than a silently empty scan.
 	local -a publishers=("release/README.md")
 
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
+
+	# TOOLCHAIN.adoc owns installation, pinning and tool behavior. It links to
+	# the operator transaction rather than maintaining the transaction's goals,
+	# evidence paths, reservation files or temporary-storage policy a second time.
+	toolchain="$repo_root/TOOLCHAIN.adoc"
+	[ -f "$toolchain" ] && [ -s "$toolchain" ] && [ ! -L "$toolchain" ] \
+		|| _release_documentation_error "PIC12F675 toolchain document is not a regular nonempty file: TOOLCHAIN.adoc" || return
+	grep -Fq 'link:release/README.md#flash-a-chip[' "$toolchain" \
+		|| _release_documentation_error "TOOLCHAIN.adoc does not link to release/README.md as the PIC12F675 source-checkout transaction owner" || rc=1
+	if grep -Eq 'pic12f675-preflight|PIC12F675_(TRIM_EVIDENCE|BENCH_RESULT)|reservation\.json|result\.json|XDG_RUNTIME_DIR' \
+			"$toolchain"; then
+		_release_documentation_error "TOOLCHAIN.adoc restates PIC12F675 source-checkout transaction details owned by release/README.md" || rc=1
+	fi
 
 	while IFS= read -r -d '' document; do
 		label=${document#$repo_root/}

@@ -1580,11 +1580,13 @@ done
 	|| fail "release handoff does not sign, register, verify, stage, commit and tag in order"
 checks=$((checks + 1))
 
-# R3: a PUBLISHED PIC12F675 finalization command must carry the identity of the
-# transaction it recovers. `make pic12f675-finalize` passes the CALLER-selected
-# identity to the recovery oracle, which compares it against what the reservation
-# recorded -- so a signed-release example missing PIC12F675_RELEASE_TAG rejects
-# the transaction it claims to recover, and a development example carrying one
+# R3: release/README.md is the maintained owner of the source-checkout
+# transaction, and a PUBLISHED PIC12F675 finalization command must carry the
+# identity of the transaction it recovers. `make pic12f675-finalize` passes the
+# CALLER-selected identity to the recovery oracle, which compares it against what
+# the reservation recorded -- so a signed-release example missing
+# PIC12F675_RELEASE_TAG rejects the transaction it claims to recover, and a
+# development example carrying one
 # rejects a reservation that holds no release identity. Both directions are
 # checked, in both the static and the generated documentation.
 finalization_root="$work/finalization-docs"
@@ -1631,6 +1633,9 @@ write_finalization_fixture() {
 		pic12f675-release-program "${FINALIZE_RELEASE_ARGS[@]}"
 	write_finalization_doc "$finalization_root/release/README.md" \
 		pic12f675-release-program "${FINALIZE_RELEASE_ARGS[@]}"
+	printf '%s\n' \
+		'PIC12F675 tool facts defer to link:release/README.md#flash-a-chip[release policy].' \
+		> "$finalization_root/TOOLCHAIN.adoc"
 }
 
 assert_finalization_accepts() {
@@ -1655,6 +1660,17 @@ assert_finalization_rejects() {
 
 write_finalization_fixture
 assert_finalization_accepts 'a correctly published signed-release recovery'
+
+write_finalization_fixture
+printf '%s\n' 'PIC12F675 tool facts only.' > "$finalization_root/TOOLCHAIN.adoc"
+assert_finalization_rejects 'a toolchain guide that drops the transaction owner link' \
+	'TOOLCHAIN.adoc does not link to release/README.md as the PIC12F675 source-checkout transaction owner'
+
+write_finalization_fixture
+printf '%s\n' 'Run pic12f675-preflight before the first write.' \
+	>> "$finalization_root/TOOLCHAIN.adoc"
+assert_finalization_rejects 'a toolchain guide that republishes transaction details' \
+	'TOOLCHAIN.adoc restates PIC12F675 source-checkout transaction details owned by release/README.md'
 
 # The exact pre-v0.9.10 defect, in each anchor independently.
 write_finalization_fixture

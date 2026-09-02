@@ -82,6 +82,8 @@ historical records and are not retroactively compacted by this policy.
   facts; the historical PIC10F320 fit experiment remains with its exact source
   commit, compiler and device-pack binding. The live documentation contract
   rejects representative unbound measurements and numeric topology copies.
+  PIC12F675 source-checkout transaction semantics now have one maintained home
+  in the release policy; the toolchain guide retains only tool-support facts.
 
 - **Retained qualification evidence is now bound to what each operation
   produced.** Build and target-test logs bind their payload, source commit, role

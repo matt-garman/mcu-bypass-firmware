@@ -4612,7 +4612,7 @@ qualification and plan deletion.
   copies and all three removed unbound measurement forms, and requires the
   historical source/toolchain binding to survive.
 
-- [ ] **BR-RVW2-06 -- MEDIUM -- give the PIC12F675 source-checkout transaction
+- [x] **BR-RVW2-06 -- MEDIUM -- give the PIC12F675 source-checkout transaction
   one maintained semantic owner.** `TOOLCHAIN.adoc` carries most of the baseline,
   immediate-read, reservation, result, temporary-storage and ipecmd limitations
   that `release/README.md` also maintains for the exact transaction. Retain in
@@ -4620,6 +4620,21 @@ qualification and plan deletion.
   owns; link to the release-policy procedure for the operator transaction. If
   any duplicated safety statement must remain at both sites, classify it as a
   deliberate independent boundary and add the witness that prevents drift.
+
+  **Resolved:** `release/README.md` remains the sole maintained source-checkout
+  procedure. The 50-line PIC12F675 programmer block in `TOOLCHAIN.adoc` was
+  reduced to installation, readback-dialect pinning and tool-behavior facts,
+  followed by links to the source-checkout and downloaded-release procedures.
+  Baseline ownership, immediate re-read, reservation/result, temporary-storage,
+  evidence and hardware-status semantics now appear only with the operator
+  transaction. No safety statement needed to remain duplicated. The finalization
+  contract requires the toolchain link and rejects the transaction's concrete
+  goals, evidence variables, reservation files or temporary-root selector if
+  they return there; focused fixtures cover both a dropped link and reintroduced
+  transaction detail. Shell syntax, the 18-check reference contract and the
+  finalization validator's live-tree path pass. The complete focused preflight
+  target did not reach a verdict within 240 seconds on this host and was left to
+  the external full-toolchain run.
 
 - [x] **BR-RVW2-07 -- MEDIUM -- include the live release policy in the durable
   reference gate (`4f8ebb5`).** `test/test_reference_contract.py` skips every
