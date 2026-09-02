@@ -5447,13 +5447,13 @@ BR-REVIEW-02
 
 **Work:**
 
-- [ ] Run the ordinary host/default suite.
+- [x] Run the ordinary host/default suite.
 - [ ] Run the long/exhaustive suite under the intended strict mutation policy.
-- [ ] Run AVR-XT pre-hardware and target aggregates with required tool inputs.
-- [ ] Run PIC10F322 pre-hardware and target aggregates.
-- [ ] Run PIC10F320 pre-hardware, expected-image, stack, and target aggregates.
-- [ ] Run PIC12F675 combined retained-matrix aggregates.
-- [ ] Run release preflight, image, provenance, qualification, history,
+- [x] Run AVR-XT pre-hardware and target aggregates with required tool inputs.
+- [x] Run PIC10F322 pre-hardware and target aggregates.
+- [x] Run PIC10F320 pre-hardware, expected-image, stack, and target aggregates.
+- [x] Run PIC12F675 combined retained-matrix aggregates.
+- [x] Run release preflight, image, provenance, qualification, history,
   signature, and publication tests.
 - [ ] Run soak qualification according to the eventual release policy.
 - [ ] Generate and inspect the candidate release resource report without
@@ -5469,9 +5469,21 @@ partial or skipped result is credited above; all qualification work remains for
 the complete-toolchain machine.
 
 **Policy handoff:** The user chose to defer the release-policy soak and its
-candidate resource-report follow-through. Keep those final two work items open;
-the immediate complete-toolchain pass covers the ordinary suite, strict long
-suite, all target aggregates and their embedded release-contract gates.
+candidate resource-report follow-through until the actual next release. That
+release will use the production policy: all 18 combinations for 24 hours, not
+the one-hour express policy used for the previous release. Keep those final two
+work items open.
+
+**Complete-toolchain progress (2026-09-02, `59b1f06`):** Release preflight and
+`make test STRICT_TOOLS=1` pass. `scripts/ci-local.sh` completed every target
+aggregate before its final `test-long` step stopped in the host-only fake PIC
+build regression. The terse failure is reproduced when the selected temporary
+root has a group/world-writable ancestor: the PIC12F675 safety policy correctly
+rejects that root, but the test's expected-success command substitution hid the
+captured diagnostic. The test now reports that reason. Its PIC12F675 profile
+passes 168 checks with a safe root, and the unsafe-root control emits the exact
+ancestor rejection. Re-run the still-open strict `test-long` under a private
+temporary root before crediting it.
 
 **Acceptance:**
 

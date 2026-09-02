@@ -2547,7 +2547,11 @@ EOF
 	: > "$hardware_log"
 	: > "$program_log"
 	rm -f "$program_evidence" "$program_device_state" "$program_transaction"
-	preflight_output=$(run_preflight_make)
+	if ! preflight_output=$(run_preflight_make 2>&1); then
+		printf 'FAIL: PIC12F675 read-only preflight setup failed: %s\n' \
+			"$preflight_output" >&2
+		exit 1
+	fi
 	printf -v expected_preflight_prefix '%q' \
 		"-GF$pic12_temp_root/pic12f675-preflight."
 	[[ "$preflight_output" == *"pk2cmd fixture version 1.21"* \
