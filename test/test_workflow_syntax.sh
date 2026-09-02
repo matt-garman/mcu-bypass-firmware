@@ -70,6 +70,132 @@ def check(ok, msg):
     return ok
 
 
+class UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+# GitHub's workflow parser follows YAML 1.2 for booleans; PyYAML's SafeLoader
+# follows YAML 1.1 and otherwise constructs an unquoted `on` as True. Normalize
+# the resolver so quoted and unquoted spellings become the same mapping key and
+# duplicate detection cannot be bypassed by alternating them.
+UniqueKeyLoader.yaml_implicit_resolvers = {
+    first: list(resolvers)
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+for first, resolvers in UniqueKeyLoader.yaml_implicit_resolvers.items():
+    UniqueKeyLoader.yaml_implicit_resolvers[first] = [
+        resolver for resolver in resolvers
+        if resolver[0] != "tag:yaml.org,2002:bool"
+    ]
+UniqueKeyLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|false)$", re.IGNORECASE),
+    list("tTfF"),
+)
+
+
+def construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping", node.start_mark,
+                "workflow merge keys are not supported", key_node.start_mark,
+            )
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping", node.start_mark,
+                "found an unhashable key", key_node.start_mark,
+            ) from exc
+        if duplicate:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping", node.start_mark,
+                f"found duplicate key ({key!r})", key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_unique_mapping,
+)
+
+
+def bash_syntax_error(run):
+    result = subprocess.run(
+        ["bash", "-n"], input=run, capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 0:
+        return None
+    return result.stderr.strip() or f"bash -n exited {result.returncode}"
+
+
+def job_execution_shape_valid(job):
+    return (
+        isinstance(job, dict)
+        and (("uses" in job) != ("steps" in job))
+        and (("runs-on" in job) == ("steps" in job))
+    )
+
+
+def step_execution_shape_valid(step):
+    return isinstance(step, dict) and (("uses" in step) != ("run" in step))
+
+
+# Prove parser failure modes against in-memory inputs before trusting them with
+# the real workflows. SafeLoader's default last-key-wins behavior and the old
+# shell-token exception suppression both made malformed workflows green.
+for duplicate_label, duplicate_yaml in (
+    ("top-level", "name: first\nname: second\n"),
+    ("nested", "jobs:\n  verify:\n    run: first\n    run: second\n"),
+    ("quoted-on", "on: first\n\"on\": second\n"),
+):
+    try:
+        yaml.load(duplicate_yaml, Loader=UniqueKeyLoader)
+    except yaml.constructor.ConstructorError as exc:
+        check(
+            "found duplicate key" in str(exc),
+            f"duplicate-{duplicate_label} YAML fixture failed for the wrong reason: {exc}",
+        )
+    else:
+        check(False, f"duplicate-{duplicate_label} YAML fixture parsed clean")
+
+try:
+    yaml.load("base: &base {run: first}\njob:\n  <<: *base\n", Loader=UniqueKeyLoader)
+except yaml.constructor.ConstructorError as exc:
+    check(
+        "merge keys are not supported" in str(exc),
+        f"YAML merge-key fixture failed for the wrong reason: {exc}",
+    )
+else:
+    check(False, "YAML merge-key fixture parsed clean")
+
+check(
+    bash_syntax_error('echo "unterminated') is not None,
+    "unmatched-quote shell fixture passed the Bash syntax validator",
+)
+check(
+    bash_syntax_error("if true; then\n  echo ok\n") is not None,
+    "unterminated-if fixture passed the Bash syntax validator",
+)
+for invalid_job in (
+    {"uses": "./reusable.yml", "steps": []},
+    {"uses": "./reusable.yml", "runs-on": "ubuntu-24.04"},
+):
+    check(
+        not job_execution_shape_valid(invalid_job),
+        "malformed reusable-workflow job passed the execution-shape validator",
+    )
+check(
+    not step_execution_shape_valid({"uses": "./action", "run": "true"}),
+    "step with both uses and run passed the execution-shape validator",
+)
+
+
 docs = {}
 checkout_steps = []
 token_steps = []
@@ -84,7 +210,7 @@ for name in REQUIRED:
         continue
     try:
         with open(path, encoding="utf-8") as fh:
-            docs[name] = yaml.safe_load(fh)
+            docs[name] = yaml.load(fh, Loader=UniqueKeyLoader)
         check(True, "")
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
@@ -95,9 +221,8 @@ for name, doc in docs.items():
     if not check(isinstance(doc, dict), f"{name}: top level is not a mapping"):
         continue
 
-    # PyYAML resolves an unquoted `on:` key to the boolean True (YAML 1.1), so
-    # accept either spelling rather than reporting a missing trigger.
-    check(("on" in doc) or (True in doc), f"{name}: no trigger (`on:`) block")
+    check("on" in doc, f"{name}: no trigger (`on:`) block")
+    check("defaults" not in doc, f"{name}: workflow-level run defaults are unsupported")
 
     jobs = doc.get("jobs")
     if not check(isinstance(jobs, dict) and jobs, f"{name}: no jobs defined"):
@@ -122,6 +247,7 @@ for name, doc in docs.items():
             not isinstance(job_env, dict) or "GH_TOKEN" not in job_env,
             f"{name}: job '{job_id}' exposes GH_TOKEN to every step",
         )
+        check("defaults" not in job, f"{name}: job '{job_id}' run defaults are unsupported")
 
         job_action = job.get("uses")
         if "uses" in job:
@@ -136,7 +262,17 @@ for name, doc in docs.items():
                     f"to a full lowercase commit SHA: '{job_action}'",
                 )
 
-        if "uses" not in job:
+        has_steps = "steps" in job
+        check(
+            job_execution_shape_valid(job),
+            f"{name}: job '{job_id}' has an invalid uses/steps/runs-on shape",
+        )
+        if has_steps:
+            check(
+                isinstance(job.get("runs-on"), str)
+                and job["runs-on"].startswith("ubuntu-"),
+                f"{name}: job '{job_id}' does not use the validator's Ubuntu/Bash substrate",
+            )
             steps = job.get("steps")
             check(
                 isinstance(steps, list) and steps,
@@ -147,8 +283,8 @@ for name, doc in docs.items():
                     check(False, f"{name}: job '{job_id}' step {idx} is not a mapping")
                     continue
                 check(
-                    ("run" in step) or ("uses" in step),
-                    f"{name}: job '{job_id}' step {idx} has neither run nor uses",
+                    step_execution_shape_valid(step),
+                    f"{name}: job '{job_id}' step {idx} must define exactly one of run or uses",
                 )
                 action = step.get("uses")
                 if "uses" in step:
@@ -180,6 +316,27 @@ for name, doc in docs.items():
                             yasimavr_cache_steps.append((name, job_id, idx, key))
 
                 run = step.get("run")
+                if "run" in step:
+                    check(
+                        isinstance(run, str),
+                        f"{name}: job '{job_id}' step {idx} has a non-string run body",
+                    )
+                    if isinstance(run, str):
+                        shell = step.get("shell")
+                        shell_is_bash = shell is None or (
+                            isinstance(shell, str) and shell.split()[:1] == ["bash"]
+                        )
+                        check(
+                            shell_is_bash,
+                            f"{name}: job '{job_id}' step {idx} uses an unsupported shell",
+                        )
+                        if shell_is_bash:
+                            syntax_error = bash_syntax_error(run)
+                            check(
+                                syntax_error is None,
+                                f"{name}: job '{job_id}' step {idx} run body is not valid Bash: "
+                                f"{syntax_error}",
+                            )
                 if run == "scripts/install_pic_toolchain.sh":
                     pic_installer_steps.append((name, job_id, idx))
                 if run == "scripts/verify_pic_toolchain_cache.sh":

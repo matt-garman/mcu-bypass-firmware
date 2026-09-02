@@ -4830,6 +4830,37 @@ qualification and plan deletion.
   all three validation boundaries. `test-release-qualification` passes 217
   checks; shell syntax and `git diff --check` pass.
 
+- [x] **BR-RVW2-11 -- HIGH -- make workflow parsing fail closed.** Follow-up
+  review found two malformed inputs that the local workflow contract accepted.
+  PyYAML's default loader silently retained only the last duplicate mapping key,
+  so a duplicate job, `run`, `uses` or permission declaration disappeared before
+  structural validation. The shell tokenizer likewise caught an unmatched quote
+  and continued, erasing that command from every command inventory.
+
+  **Resolved:** Workflow YAML now uses a dedicated safe loader that rejects a
+  repeated key at any mapping depth and explicitly refuses merge keys rather
+  than assigning them ambiguous duplicate semantics. Its YAML 1.2 Boolean
+  resolver also makes quoted and unquoted `on` the same key. Jobs and steps have
+  one execution shape (`uses` or `steps`; `uses` or `run`), executable jobs are
+  constrained to Ubuntu, and workflow/job run defaults are refused so they
+  cannot silently replace the Bash substrate. Every `run:` body must be a string
+  using Bash and passes `bash -n` in memory with workflow/job/step context.
+  In-memory controls exercise duplicate and merge keys, ambiguous execution
+  shapes, an unmatched quote and an unterminated compound command.
+  `test-workflow-syntax` passes 668 checks; shell syntax and `git diff --check`
+  pass.
+
+- [ ] **BR-RVW2-12 -- HIGH -- reject inherited source-checkout programmer
+  overrides.** The source-command validators now reject semantic assignments in
+  the published command itself, but the PIC10F32x programming recipes still
+  accept environment-origin `PIC10F32x_PART`, `PROG`, `PROG_TOOL` and
+  `PROG_CMD` through `?=`. Thus an operator can paste the exact validated
+  source-checkout command while an inherited whole-command override selects
+  another writer or image. Preserve an explicit, reviewed command-line override
+  path if it remains supported, but make the published command fail before
+  hardware access under direct environment, `-e`, or inherited Make-flag
+  semantic overrides. Add fake-programmer controls for both PIC10F32x goals.
+
 **Measured branch shape:** At the review baseline, `main...7dd4840` changes 92
 paths with 19,963 insertions and 18,636 deletions, including all 5,172 lines of
 this branch-only plan. Excluding the plan gives 91 paths, 14,791 insertions and
