@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Matthew Garman
 
+#ifndef CD4053_WITH_MUTE
+#  error "bypass_output_cd4053_with_mute.c requires CD4053_WITH_MUTE"
+#endif
+
+
 #include "bypass_output_cd4053_with_mute.h"
 #include "bypass_output_common.h"
 #include "bypass_config.h"

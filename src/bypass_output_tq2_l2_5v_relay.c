@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Matthew Garman
 
+#ifndef TQ2_L2_5V_RELAY
+#  error "bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
+#endif
+
+
 #include "bypass_output_tq2_l2_5v_relay.h"
 #include "bypass_output_common.h"
 #include "bypass_config.h"

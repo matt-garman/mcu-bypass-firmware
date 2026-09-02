@@ -57,10 +57,10 @@ historical records and are not retroactively compacted by this policy.
 - **Focused documentation and safety contracts now run under `make test`.**
   Durable links and anchors are checked, deliberately independent safety
   definitions remain structurally separate, and selected high-consequence
-  AVR-XT and PIC guards are exercised under their target toolchains. Guard
-  mutations are representative rather than exhaustive; conflicting output
-  selectors and foreign driver selectors remain unsupported configurations that
-  are not yet rejected uniformly. Firmware behavior is unchanged.
+  AVR-XT and PIC guards are exercised under their target toolchains. Modular
+  shells now reject missing or conflicting MCU/output selectors, and shared
+  output drivers reject a foreign variant selector. Guard mutations are
+  representative rather than exhaustive. Valid firmware behavior is unchanged.
 
 - **`make pic10f320-program` flashes a built PIC10F320.** It mirrors
   `pic10f322-program` with its own `PIC10F320_PROG*` variables, and selects the

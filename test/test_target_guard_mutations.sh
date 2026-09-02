@@ -316,21 +316,23 @@ BUDGETS=(
 # --------------------------------------------------------------------------
 # Invalid configurations handed off to source guards.
 # --------------------------------------------------------------------------
-# UNGUARDED and INCIDENTAL rows fail when their missing guard is added. That is
-# deliberate: until something records today's behaviour, "the guard works" and
-# "the guard was never reachable" look identical on the day it lands. Converted
-# ASSERT rows stay here as proof that the new diagnostic is load-bearing.
+# New gaps first land here as UNGUARDED or INCIDENTAL rows, which fail when their
+# missing guard is added. Converted ASSERT or ERROR rows stay here as proof that
+# the new diagnostic is load-bearing.
 #
 # When a guard here starts firing, do not delete the row -- change UNGUARDED or
-# INCIDENTAL to ASSERT:<its message>, proving the new guard is load-bearing.
+# INCIDENTAL to ASSERT:<message> or ERROR:<message>, proving the new guard is
+# load-bearing.
 GUARD_HANDOFF_FIXTURES=(
 	"xt shell rejects two output selectors|avr_xt:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_avr_xt.c|ASSERT:exactly one modular output selector must be defined"
 	"xt shell rejects no output selector|avr_xt:cd4053_simple|drop:-DCD4053_SIMPLE|-|bypass_mcu_avr_xt.c|ASSERT:exactly one modular output selector must be defined"
-	"xt relay driver accepts a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
+	"xt simple driver rejects a foreign selector|avr_xt:tq2_l2_5v_relay|-|-|bypass_output_cd4053_simple.c|ERROR:bypass_output_cd4053_simple.c requires CD4053_SIMPLE"
+	"xt mute driver rejects a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_cd4053_with_mute.c|ERROR:bypass_output_cd4053_with_mute.c requires CD4053_WITH_MUTE"
+	"xt relay driver rejects a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
 	"322 shell rejects two output selectors|pic10f322:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_pic10f322.c|ASSERT:exactly one modular output selector must be defined"
 	"322 shell rejects no output selector|pic10f322:cd4053_simple|drop:-DCD4053_SIMPLE|-|bypass_mcu_pic10f322.c|ASSERT:exactly one modular output selector must be defined"
-	"322 relay driver accepts a foreign selector|pic10f322:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
-	"675 relay driver accepts a foreign selector|pic12f675:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|UNGUARDED"
+	"322 relay driver rejects a foreign selector|pic10f322:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
+	"675 relay driver rejects a foreign selector|pic12f675:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
 	# This used to fail incidentally when two selection idioms chose different
 	# arms. Keep the invalid configuration and require its deliberate diagnostic.
 	"320 rejects two output schemes deliberately|pic10f320:cd4053_simple|add:-DOUTPUT_TQ2_RELAY|-|bypass_mcu_pic10f320.c|ASSERT:PIC10F320 output selectors are mutually exclusive"

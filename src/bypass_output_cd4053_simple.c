@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Matthew Garman
 
+#ifndef CD4053_SIMPLE
+#  error "bypass_output_cd4053_simple.c requires CD4053_SIMPLE"
+#endif
+
+
 #include "bypass_output_common.h"
 #include "bypass_hw_iface.h"
 #include "bypass_static_assert.h" // static_assert()

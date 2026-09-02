@@ -3596,7 +3596,7 @@ test-static-assert-guards:
 	./test/test_static_assert_guards.sh
 
 # The same proof for the guards test-static-assert-guards cannot reach. Its
-# mutations compile the classic-AVR lane with avr-gcc; 53 of the firmware's 80
+# mutations compile the classic-AVR lane with avr-gcc; 53 of the firmware's 81
 # static_assert guards live in the AVR-XT and three PIC shells, where a pin
 # assert reads the device pack, a clock assert reads that part's -D, and a
 # watchdog assert compares against that part's own de-rated floor. None of that

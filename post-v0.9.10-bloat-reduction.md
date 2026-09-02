@@ -3861,8 +3861,10 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Add one-hot backend/output selector guards. The PIC10F320 output, modular-shell
   output and modular backend-selector slices are complete below.
 - Require each modular output driver translation unit's expected selector.
+  Complete below.
 - Correct stale MCU-neutral comments in `src/bypass_config.h`. Complete below.
-- Replace deleted-document references after PIC consolidation.
+- Replace deleted-document references after PIC consolidation. Complete in
+  BR-PIC-05.
 
 **Prerequisites:**
 
@@ -3871,9 +3873,8 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 - Negative compile tests must be ready to prove new guards are load-bearing.
   DONE by BR-SRC-03: `test/test_target_guard_mutations.sh` retains the original
   invalid configurations as exact assertions when their guards land. Modular
-  shell output cardinality and PIC10F320's former incidental dual-scheme
-  rejection are complete below; driver translation units compiled under a
-  foreign selector remain `UNGUARDED` until that candidate lands.
+  shell output cardinality, PIC10F320's former incidental dual-scheme rejection,
+  modular backend identity and foreign driver selection are complete below.
 - Pinned toolchains must be available for image/resource/timing comparison.
 
 **Acceptance:**
@@ -3985,8 +3986,8 @@ test-attiny202-guard-mutations` and `make STRICT_TOOLS=1
 test-pic-guard-mutations`. Backend identity and per-driver selector guards
 remain separate optional candidates, so BR-SRC-02 stays `NEEDS USER`.
 
-**Completed slice -- explicit modular backend identity:** The user added an
-exact-one guard for the four modular `BYPASS_MCU_*` backend selectors in
+**Completed slice -- explicit modular backend identity (`e0a1bac`):** The user
+added an exact-one guard for the four modular `BYPASS_MCU_*` backend selectors in
 `bypass_output_common.h` and made the Classic pin-map branch depend on
 `BYPASS_MCU_AVR_CLASSIC` rather than treating the compiler-family macro
 `__AVR__` as a target identity. Classic production, clang, cppcheck and MISRA
@@ -4008,8 +4009,32 @@ PIC build gate passes its 48/102/168 per-part checks plus five profile checks,
 the stack-bound regression passes 23, the host golden model passes 988, and the
 strengthened deliberate-duplication witness passes 348. Target mutation gates
 remain unexecuted locally because this host has neither `avr-gcc` nor XC8.
-Per-driver selector guards remain a separate optional candidate, so BR-SRC-02
-stays `NEEDS USER`.
+At this slice's commit boundary, per-driver selector guards remained a separate
+optional candidate, so BR-SRC-02 stayed `NEEDS USER`.
+
+**Completed slice -- per-driver output-selector identity:** The user added a
+file-local `#error` guard to each of the three shared output-driver translation
+units. Each now requires its own `CD4053_SIMPLE`, `CD4053_WITH_MUTE` or
+`TQ2_L2_5V_RELAY` selector before includes, so directly compiling a foreign
+driver can no longer succeed merely because every MCU pin map exposes aliases
+for all three variants. The shared shell guard remains the sole owner of
+exact-one output cardinality; these driver guards assert only local identity.
+
+The three retained foreign-selector handoff fixtures now require the relay
+driver's exact project diagnostic under AVR-XT, PIC10F322 and PIC12F675. Two
+additional AVR-XT fixtures prove the simple and mute drivers' own diagnostics,
+covering every new guard without redundantly testing every driver/backend cross
+product. All twelve valid driver/backend preprocessing combinations are
+token-identical to `HEAD`; native syntax probes compile all three matching
+selectors and reject all three foreign selectors with one error each. The host
+golden model passes 988 checks, Classic rebuild 35, analyzer matrix 22 over 60
+rows, workload rebuild 45, PIC rebuild 48/102/168 plus five profile checks,
+stack-bound regression 23, deliberate duplication 348, and reference contract
+18 across 229 files and 15 documents. The target mutation lanes and Classic
+static-assert lane skipped locally because this host has neither `avr-gcc` nor
+XC8. No valid preprocessor tokens or generated image bytes are expected to
+change. This completes the last unresolved candidate listed above; BR-SRC-02
+stays `NEEDS USER` until the user commits the slice and records its hash.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 
