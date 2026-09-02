@@ -5393,7 +5393,7 @@ already thought about.
 
 ## BR-FINAL-04 - Focused verification after each chunk
 
-**Status:** IN PROGRESS (OpenCode; verified, awaiting user commit)
+**Status:** DONE `e5bdb6e`
 
 **Depends on:** BR-REVIEW-02 corrective implementation, plus each earlier
 implementation chunk whose focused result must be reconciled
@@ -5440,7 +5440,7 @@ the explicit BR-FINAL-05 qualification work.
 
 ## BR-FINAL-05 - Run complete project qualification
 
-**Status:** TODO
+**Status:** IN PROGRESS (OpenCode + user; complete-toolchain run pending)
 
 **Depends on:** All implementation tasks intended for the release, including
 BR-REVIEW-02
@@ -5458,6 +5458,20 @@ BR-REVIEW-02
 - [ ] Run soak qualification according to the eventual release policy.
 - [ ] Generate and inspect the candidate release resource report without
   committing it as current development documentation.
+
+**Local boundary (2026-09-02, `e5bdb6e`):** The release preflight confirms the
+pinned 23-field identity, 21-image set and 18-soak set, then fails closed on this
+host's missing AVR/PIC toolchains, simulator development files, analyzers,
+PyYAML, ATtiny202 DFP and patched yasimavr environment. The ordinary `make test`
+likewise produces no pass: without the AVR include installation, clang-tidy
+reaches the host C library model and fails on missing `gnu/stubs-32.h`. No
+partial or skipped result is credited above; all qualification work remains for
+the complete-toolchain machine.
+
+**Policy handoff:** The user chose to defer the release-policy soak and its
+candidate resource-report follow-through. Keep those final two work items open;
+the immediate complete-toolchain pass covers the ordinary suite, strict long
+suite, all target aggregates and their embedded release-contract gates.
 
 **Acceptance:**
 
@@ -5658,7 +5672,7 @@ dependencies and acceptance criteria.
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
-| BR-FINAL-04 | Run focused gates incrementally | IN PROGRESS (awaiting commit) |
-| BR-FINAL-05 | Run complete qualification | TODO |
+| BR-FINAL-04 | Run focused gates incrementally | DONE `e5bdb6e` |
+| BR-FINAL-05 | Run complete qualification | IN PROGRESS (complete-toolchain run pending) |
 | BR-FINAL-06 | Measure outcome | DONE `bc1fe73` |
 | BR-FINAL-07 | Delete this working document | TODO |
