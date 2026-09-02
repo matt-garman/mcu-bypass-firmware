@@ -4599,7 +4599,7 @@ review.
 
 ## BR-REVIEW-02 - Resolve pre-merge readiness review findings
 
-**Status:** TODO
+**Status:** DONE `031f770`
 
 **Depends on:** All implementation through `7dd4840`
 
@@ -4874,6 +4874,10 @@ qualification and plan deletion.
   shadowing, exact canonical argv and exact custom argv: 54 checks pass.
   Release qualification passes 217 checks; the Makefile name and reference
   contracts, shell syntax and `git diff --check` pass.
+
+  **Review completion:** All twelve required findings are resolved. Commit
+  `031f770` closes the final source-checkout programmer-override finding and is
+  the completion point for this review task.
 
 **Measured branch shape:** At the review baseline, `main...7dd4840` changes 92
 paths with 19,963 insertions and 18,636 deletions, including all 5,172 lines of
@@ -5630,7 +5634,7 @@ dependencies and acceptance criteria.
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
 | BR-REVIEW-01 | Resolve completed-item review findings | DONE `cc2ff7a` |
-| BR-REVIEW-02 | Resolve pre-merge readiness review findings | TODO |
+| BR-REVIEW-02 | Resolve pre-merge readiness review findings | DONE `031f770` |
 | BR-FINAL-01 | Audit current references | DONE `880d28b` |
 | BR-FINAL-02 | Verify safety/claim boundaries | DONE `de29c39` |
 | BR-FINAL-03 | Verify independent oracles remain | DONE `0dc5231` |
