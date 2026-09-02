@@ -3862,7 +3862,7 @@ rejected with the intended message; the pristine copy passes. `make test` green.
   slice is complete below; modular-shell and backend-selector guards remain
   optional candidates.
 - Require each modular output driver translation unit's expected selector.
-- Correct stale MCU-neutral comments in `src/bypass_config.h`.
+- Correct stale MCU-neutral comments in `src/bypass_config.h`. Complete below.
 - Replace deleted-document references after PIC consolidation.
 
 **Prerequisites:**
@@ -3928,6 +3928,23 @@ change is expected, and any changed release image must be investigated rather
 than accepted as part of this slice. No permanent regression was added for the
 presence of a single conventional dependency include. The other optional
 candidates remain, so BR-SRC-02 stays `NEEDS USER`.
+
+**Completed slice -- MCU-neutral configuration comments:** The user corrected
+five stale descriptions in `src/bypass_config.h`. The AVR-only block now names
+both AVR generations instead of calling itself Classic-only, its exclusion note
+names both modular PIC shells rather than only the PIC10F322, and the Classic-arm
+label no longer says `AVR Class`. The shared debounce thresholds now describe
+high/low footswitch-pin samples rather than the AVR Classic's `PB0` reads, and
+input noise is no longer described as an interrupt on firmware whose PIC shells
+poll the switch.
+
+Every changed line is a `//` comment or the comment suffix of a preprocessor
+line. Removing those suffixes from `HEAD` and the worktree gives the same
+SHA-256, so the executable token stream is unchanged and no generated-image
+change is expected. `test-deliberate-duplication` passes 350 checks; the
+static-assert guard gate skipped cleanly because this host has no `avr-gcc`. No
+permanent regression was added for prose inside firmware source. The other
+optional candidates remain, so BR-SRC-02 stays `NEEDS USER`.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 

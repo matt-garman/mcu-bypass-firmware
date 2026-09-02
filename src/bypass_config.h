@@ -6,12 +6,12 @@
 
 
 //////////////////////////////////////////////////////////////////////////////
-// Config specific to AVR Classic
+// Configuration specific to AVR targets
 //////////////////////////////////////////////////////////////////////////////
 
 // This block is AVR-specific: the tinyx5 detection, the Timer0 1ms CTC
 // reload, the F_CPU validation, and the tinyx5 TIMSK/TIFR register aliases.
-// The PIC10F322 build (and the native host tests) need NONE of it -- they
+// The modular PIC builds (and the native host tests) need NONE of it -- they
 // consume only the MCU-neutral PRESSED_THRESH / RELEASE_THRESH below.
 // Guarding it on __AVR__ keeps the PIC build from tripping the F_CPU #error,
 // and keeps these symbols out of every non-AVR translation unit. (Verified:
@@ -37,7 +37,7 @@
 // (same "counts-1" convention as the classic shell's OCR0A). At 2MHz => 1999.
 #  define TCB0_CCMP_1MS ((F_CPU / 1000UL) - 1UL)
 
-#else // AVR Class (ATtiny13a / tinyx5)
+#else // AVR Classic (ATtiny13a / tinyx5)
 
 // The ATtiny25/45/85 ("tinyx5" family) are register- and clock-compatible with
 // one another: same 8MHz internal RC (1.0MHz via CKDIV8), same Timer0, and the
@@ -88,15 +88,15 @@
 #endif // __AVR__
 
 
-// number of HIGH PB0/footswitch pin reads to be considered
+// number of HIGH footswitch-pin samples to be considered
 // release-debounced, i.e. the "lock-out" period
 #define RELEASE_THRESH (25U)
 
-// number of LOW PB0/footswitch pin reads to be considered
+// number of LOW footswitch-pin samples to be considered
 // press-debounced
 //
 // trying to balance between "responds immediately" and "immune to
-// spurious interrupts": we can't readily distinguish between
+// spurious input samples": we can't readily distinguish between
 // environmental noise (that we want to filter/ignore as entirely)
 // versus noise from an old/bouncy switch.
 //
