@@ -499,7 +499,12 @@ source-tree equivalent of the programmer command:
 because each goal reads the one its own build lane reads, and passing the wrong
 one would build the default output stage and flash a different one.
 `MANIFEST.md` publishes both beside the downloaded-image commands, and a release
-checks each against the Makefile command it names, byte for byte.
+checks each against the Makefile command it names, byte for byte. These exact
+published goals reject inherited programmer, part, command, and image settings;
+their hardware recipes also use literal canonical argv rather than expanding
+those settings. The separately named `*-program-custom` goals are the explicit
+development path for a non-default programmer transaction and are never
+published as release instructions.
 
 **PIC12F675 is not a raw write target, on either route**, and the board must be
 externally powered for both. Programming a downloaded image needs no source

@@ -30,6 +30,43 @@ _RELEASE_REQUESTED_COMMAND_LINE_NAMES := $(sort $(foreach n,$(.VARIABLES),\
 _RELEASE_REQUESTED_MAKE_FLAGS := $(MAKEFLAGS) $(MFLAGS) $(GNUMAKEFLAGS)
 _RELEASE_REQUESTED_COMPACT_MAKE_FLAGS := \
 	$(firstword $(MAKEFLAGS)) $(firstword $(MFLAGS)) $(firstword $(GNUMAKEFLAGS))
+# The source-checkout programming commands published in release manifests name
+# only a goal and variant selector. Reject ordinary caller-supplied programmer
+# semantics before parsing the later command definitions: environment variables,
+# -e and assignments inherited through MAKEFLAGS must not change what that exact
+# command writes. The public recipes additionally spell their hardware argv in
+# literals, since Make-language injection can hide a target-specific assignment
+# from global origin checks. Deliberate customization has a distinct
+# *-program-custom goal.
+override _pic_programmer_override_names = $(strip $(foreach n,$(1),$(if $(filter-out undefined,$(origin $(n))),$(n))))
+override _PIC10F322_PROGRAMMER_INPUTS := PIC10F322_PART PIC10F322_PROG \
+	PIC10F322_PROG_TOOL PIC10F322_PROG_HEX PIC10F322_PROG_CMD
+override _PIC10F320_PROGRAMMER_INPUTS := PIC10F320_PART PIC10F320_PROG \
+	PIC10F320_PROG_TOOL PIC10F320_PROG_HEX PIC10F320_PROG_CMD
+override _PIC_PROGRAM_REQUESTED_MAKE_FLAGS := \
+	$(MAKEFLAGS) $(MFLAGS) $(GNUMAKEFLAGS)
+override _PIC_PROGRAM_UNSAFE_MAKE_CONTROL := $(strip \
+	$(if $(findstring --eval,$(_PIC_PROGRAM_REQUESTED_MAKE_FLAGS)),--eval) \
+	$(if $(strip $(value MAKEFILES)),MAKEFILES) \
+	$(if $(word 2,$(MAKEFILE_LIST)),additional-makefile))
+override _PIC10F322_PROGRAMMER_OVERRIDES := $(call _pic_programmer_override_names,$(_PIC10F322_PROGRAMMER_INPUTS))
+override _PIC10F320_PROGRAMMER_OVERRIDES := $(call _pic_programmer_override_names,$(_PIC10F320_PROGRAMMER_INPUTS))
+ifneq ($(filter pic10f322-program,$(MAKECMDGOALS)),)
+ifneq ($(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL),)
+$(error pic10f322-program rejects inherited Make control: $(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL))
+endif
+ifneq ($(_PIC10F322_PROGRAMMER_OVERRIDES),)
+$(error pic10f322-program rejects programmer override(s): $(_PIC10F322_PROGRAMMER_OVERRIDES); use pic10f322-program-custom for an explicitly customized transaction)
+endif
+endif
+ifneq ($(filter pic10f320-program,$(MAKECMDGOALS)),)
+ifneq ($(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL),)
+$(error pic10f320-program rejects inherited Make control: $(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL))
+endif
+ifneq ($(_PIC10F320_PROGRAMMER_OVERRIDES),)
+$(error pic10f320-program rejects programmer override(s): $(_PIC10F320_PROGRAMMER_OVERRIDES); use pic10f320-program-custom for an explicitly customized transaction)
+endif
+endif
 # Matrix requests can arrive as recursive command-line variables. Preserve their
 # literal words without expanding embedded GNU Make functions, expose only known
 # names to rule generation, and forward safe metadata through the serialization
@@ -975,7 +1012,7 @@ FORCE:
         test-attiny202-model-ffi \
         test-pic10f320-return-stack-oracle test-pic10f320-expected-images \
         test-pic10f320-coverage-archive \
-        test-attiny202-build test-avr-build-rebuild test-avr-program-order test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
+        test-attiny202-build test-avr-build-rebuild test-avr-program-order test-pic-program-guard test-ci-local-routing test-workflow-syntax test-gpsim-wrappers test-fetch-yasimavr test-supply-chain test-klee-build \
         test-pic-build test-release-images test-release-preflight test-release-provenance test-release-qualification test-release-history test-build-serialization \
         test-published-release-immutability \
         test-pic12f675-flash-helper \
@@ -2120,10 +2157,12 @@ pic10f322-test-target-variants:
 # there is no separate fuse step (and the gpsim/CONFIG-word checks already
 # verified that word pre-flash).
 #
-# Two common Linux programmers, selected by PIC10F322_PROG:
+# The published pic10f322-program route always uses the default pk2cmd command.
+# Two common Linux programmers remain available through the explicitly selected
+# pic10f322-program-custom goal, configured by PIC10F322_PROG:
 #   pk2cmd  (PICkit 2, open-source CLI)            <- default
 #   ipecmd  (PICkit 3/4/5 via MPLAB IPE; PIC10F322_PROG=ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5)
-# The full command is PIC10F322_PROG_CMD; override it wholesale for any other tool.
+# The custom goal also accepts PIC10F322_PROG_CMD for any other tool.
 # Power defaults are CONSERVATIVE: the programmer does NOT source Vdd (safe for an
 # externally-powered pedal board). For a bare chip powered by the programmer, add
 # the power flag: pk2cmd `-T` (and `-A<volts>`), ipecmd `-W5`.
@@ -2153,21 +2192,47 @@ endif
 # checks, this is an intentional bench action: it FAILS LOUDLY (does not silently
 # skip) if the HEX or the programmer is missing. Echoes the exact command before
 # it touches silicon.
-.PHONY: pic10f322-program
+.PHONY: pic10f322-program pic10f322-program-custom
 pic10f322-program: variant-selectors-valid pic10f322
+	@if [ -n "$(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL)" ]; then \
+		echo "ERROR: pic10f322-program rejects inherited Make control: $(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL)"; exit 2; \
+	fi; \
+	if [ -n "$(_PIC10F322_PROGRAMMER_OVERRIDES)" ]; then \
+		echo "ERROR: pic10f322-program rejects programmer override(s): $(_PIC10F322_PROGRAMMER_OVERRIDES)"; \
+		echo "       use pic10f322-program-custom for an explicitly customized transaction"; exit 2; \
+	fi; \
+	hex="$(PIC10F322_BUILD_DIR)/$(call fw_image,$(VARIANT),$(PIC10F322_TAG)).hex"; \
+	if [ ! -f "$$hex" ]; then \
+		echo "ERROR: $$hex not found -- 'make pic10f322' produced no HEX (XC8 installed?)."; \
+		echo "       select a variant with VARIANT=<$(VARIANTS)> (default $(VARIANT))."; \
+		exit 1; \
+	fi; \
+	prog=`/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v pk2cmd' 2>/dev/null`; \
+	case "$$prog" in */*) [ -x "$$prog" ] ;; *) false ;; esac || { \
+		echo "ERROR: PIC programmer 'pk2cmd' not found on PATH."; \
+		echo "       install pk2cmd (PICkit 2), or use pic10f322-program-custom."; \
+		exit 1; \
+	}; \
+	echo "Programming PIC10F322 (variant $(VARIANT)) via pk2cmd:"; \
+	echo "  pk2cmd -PPIC10F322 -F$$hex -M -Y -R"; \
+	/usr/bin/env -i PATH="$$PATH" "$$prog" -PPIC10F322 -F"$$hex" -M -Y -R
+
+# Separate goal, rather than an opt-in variable: a goal is not inherited through
+# MAKEFLAGS, so selecting this path is an explicit action at this invocation.
+pic10f322-program-custom: variant-selectors-valid pic10f322
 	@hex="$(PIC10F322_PROG_HEX)"; \
 	if [ ! -f "$$hex" ]; then \
 		echo "ERROR: $$hex not found -- 'make pic10f322' produced no HEX (XC8 installed?)."; \
 		echo "       select a variant with VARIANT=<$(VARIANTS)> (default $(VARIANT))."; \
 		exit 1; \
 	fi; \
-	if ! command -v $(PIC10F322_PROG) >/dev/null 2>&1; then \
+	if [ -z "$(filter PIC10F322_PROG_CMD,$(_PIC10F322_PROGRAMMER_OVERRIDES))" ] \
+			&& ! command -v $(PIC10F322_PROG) >/dev/null 2>&1; then \
 		echo "ERROR: PIC programmer '$(PIC10F322_PROG)' not found on PATH."; \
-		echo "       install pk2cmd (PICkit 2), or set PIC10F322_PROG=ipecmd (PICkit 3/4/5),"; \
-		echo "       or override the whole command with PIC10F322_PROG_CMD=..."; \
+		echo "       set PIC10F322_PROG= or PIC10F322_PROG_CMD= for the custom transaction."; \
 		exit 1; \
 	fi; \
-	echo "Programming PIC10F322 (variant $(VARIANT)) via $(PIC10F322_PROG):"; \
+	echo "Programming PIC10F322 (variant $(VARIANT)) via custom command:"; \
 	echo "  $(PIC10F322_PROG_CMD)"; \
 	$(PIC10F322_PROG_CMD)
 
@@ -3168,7 +3233,7 @@ TEST_GATES_LATE = \
         test-sim-attiny13a test-sim-tinyx5 test-attiny202-build \
         test-attiny202-output-oracle test-attiny202-delay-oracle \
         test-attiny202-fault-oracle test-attiny202-model-ffi \
-        test-avr-build-rebuild test-avr-program-order \
+        test-avr-build-rebuild test-avr-program-order test-pic-program-guard \
         test-ci-local-routing test-workflow-syntax \
         test-gpsim-wrappers test-fetch-yasimavr test-supply-chain \
         test-klee-build test-mutation-sandbox test-pic-build \
@@ -3289,6 +3354,11 @@ test-avr-build-rebuild:
 # image before the first avrdude invocation, and then writes fuses before flash.
 test-avr-program-order:
 	./test/test_avr_program_order.sh
+
+# Fake-XC8/programmer proof that the published PIC10F32x source commands keep
+# canonical writer/image semantics under every inherited Make input channel.
+test-pic-program-guard:
+	./test/test_pic_program_guard.sh
 
 # Fake-gpsim proof that complete snapshots cannot hide process failure/timeout.
 test-gpsim-wrappers:
@@ -4921,7 +4991,9 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 	image_complete=1
 
 # --- PIC10F320 device programming (hardware) ---------------------------------
-# The PIC10F322 interface above, separately namespaced. The two variable
+# The PIC10F322 interface above, separately namespaced. The published goal keeps
+# the default pk2cmd command; programmer overrides require
+# pic10f320-program-custom. The two variable
 # families are deliberately independent -- which is also why make-release.sh
 # refuses to derive one part's published command from the other's -- so that
 # re-pinning one part cannot silently re-pin the other.
@@ -4938,9 +5010,9 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 # under a written procedure with retained measurements; HARDWARE_VALIDATION_LOG.md
 # states that for every part in this repository, and TODO `T3-hw-procedure` is
 # the procedure it waits on. What this target does add is an authority: a release
-# publishes the pk2cmd spelling of this command and checks it against
-# PIC10F320_PROG_CMD byte for byte, so the published instruction and the one a
-# developer runs cannot drift apart.
+# publishes the default PIC10F320_PROG_CMD spelling, while
+# test-pic-program-guard independently pins this public recipe to the same
+# literal argv. Either side drifting breaks its own gate.
 PIC10F320_PART      ?= PIC10F320
 PIC10F320_PROG      ?= pk2cmd
 PIC10F320_PROG_TOOL ?= PK3
@@ -4956,8 +5028,33 @@ endif
 # pic10f322-program this is an intentional bench action: it FAILS LOUDLY rather
 # than skipping when the HEX or the programmer is missing, and echoes the exact
 # command before it touches silicon.
-.PHONY: pic10f320-program
+.PHONY: pic10f320-program pic10f320-program-custom
 pic10f320-program: variant-selectors-valid pic10f320
+	@if [ -n "$(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL)" ]; then \
+		echo "ERROR: pic10f320-program rejects inherited Make control: $(_PIC_PROGRAM_UNSAFE_MAKE_CONTROL)"; exit 2; \
+	fi; \
+	if [ -n "$(_PIC10F320_PROGRAMMER_OVERRIDES)" ]; then \
+		echo "ERROR: pic10f320-program rejects programmer override(s): $(_PIC10F320_PROGRAMMER_OVERRIDES)"; \
+		echo "       use pic10f320-program-custom for an explicitly customized transaction"; exit 2; \
+	fi; \
+	hex="$(PIC10F320_HEX)"; \
+	if [ ! -f "$$hex" ]; then \
+		echo "ERROR: $$hex not found -- 'make pic10f320' produced no HEX (XC8 installed?)."; \
+		echo "       select an output stage with PIC10F320_VARIANT=<$(PIC10F320_VARIANTS_SUPPORTED)>"; \
+		echo "       (default $(PIC10F320_VARIANT))."; \
+		exit 1; \
+	fi; \
+	prog=`/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v pk2cmd' 2>/dev/null`; \
+	case "$$prog" in */*) [ -x "$$prog" ] ;; *) false ;; esac || { \
+		echo "ERROR: PIC programmer 'pk2cmd' not found on PATH."; \
+		echo "       install pk2cmd (PICkit 2), or use pic10f320-program-custom."; \
+		exit 1; \
+	}; \
+	echo "Programming PIC10F320 (variant $(PIC10F320_VARIANT)) via pk2cmd:"; \
+	echo "  pk2cmd -PPIC10F320 -F$$hex -M -Y -R"; \
+	/usr/bin/env -i PATH="$$PATH" "$$prog" -PPIC10F320 -F"$$hex" -M -Y -R
+
+pic10f320-program-custom: variant-selectors-valid pic10f320
 	@hex="$(PIC10F320_PROG_HEX)"; \
 	if [ ! -f "$$hex" ]; then \
 		echo "ERROR: $$hex not found -- 'make pic10f320' produced no HEX (XC8 installed?)."; \
@@ -4965,13 +5062,13 @@ pic10f320-program: variant-selectors-valid pic10f320
 		echo "       (default $(PIC10F320_VARIANT))."; \
 		exit 1; \
 	fi; \
-	if ! command -v $(PIC10F320_PROG) >/dev/null 2>&1; then \
+	if [ -z "$(filter PIC10F320_PROG_CMD,$(_PIC10F320_PROGRAMMER_OVERRIDES))" ] \
+			&& ! command -v $(PIC10F320_PROG) >/dev/null 2>&1; then \
 		echo "ERROR: PIC programmer '$(PIC10F320_PROG)' not found on PATH."; \
-		echo "       install pk2cmd (PICkit 2), or set PIC10F320_PROG=ipecmd (PICkit 3/4/5),"; \
-		echo "       or override the whole command with PIC10F320_PROG_CMD=..."; \
+		echo "       set PIC10F320_PROG= or PIC10F320_PROG_CMD= for the custom transaction."; \
 		exit 1; \
 	fi; \
-	echo "Programming PIC10F320 (variant $(PIC10F320_VARIANT)) via $(PIC10F320_PROG):"; \
+	echo "Programming PIC10F320 (variant $(PIC10F320_VARIANT)) via custom command:"; \
 	echo "  $(PIC10F320_PROG_CMD)"; \
 	$(PIC10F320_PROG_CMD)
 
@@ -8337,7 +8434,9 @@ help:
 	@echo "  pic10f322-test-io     libgpsim GPIO transition + pulse timing check (PIC10F322_IO_VARIANT)"
 	@echo "  pic10f322-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
-	@echo "  pic10f322-program     flash one PIC10F322 variant to hardware (VARIANT=, PIC10F322_PROG=pk2cmd|ipecmd)"
+	@echo "  pic10f322-program     flash one PIC10F322 variant with canonical pk2cmd semantics (VARIANT=)"
+	@echo "  pic10f322-program-custom  explicit custom-programmer path"
+	@echo "                        (PIC10F322_PROG=, PIC10F322_PROG_TOOL=, PIC10F322_PROG_CMD=)"
 	@echo "PIC12F675 (classic mid-range, 1024 words; release-supported, built by all/release):"
 	@echo "  Full CI-gated pre-hardware validation, plus a bench-programming workflow with trim evidence."
 	@echo "  pic12f675-test        all PIC12F675 pre-hardware checks (CONFIG + analysis + source"
@@ -8393,8 +8492,10 @@ help:
 	@echo "  pic10f320-test-target  fail-closed fault + lock-step + target-I/O for one variant"
 	@echo "                     (PIC10F320_TARGET_VARIANT); pic10f320-test-target-variants runs all"
 	@echo "  pic10f320-test-soak  libgpsim soak (PIC10F320_SOAK_VARIANT, PIC10F320_SOAK_DURATION_MS)"
-	@echo "  pic10f320-program  flash one PIC10F320 variant to hardware"
-	@echo "                     (PIC10F320_VARIANT=, PIC10F320_PROG=pk2cmd|ipecmd)"
+	@echo "  pic10f320-program  flash one PIC10F320 variant with canonical pk2cmd semantics"
+	@echo "                     (PIC10F320_VARIANT=)"
+	@echo "  pic10f320-program-custom  explicit custom-programmer path"
+	@echo "                     (PIC10F320_PROG=, PIC10F320_PROG_TOOL=, PIC10F320_PROG_CMD=)"
 	@echo "  pic10f320-clean    remove build_pic10f320/ (build + coverage artifacts)"
 	@echo "ATtiny202 release-supported target (AVR-XT / avrxmega3):"
 	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
@@ -8450,6 +8551,7 @@ help:
 	@echo "  test-attiny202-build  fail-closed AVR-XT image-generation checks"
 	@echo "  test-avr-build-rebuild  classic AVR stale/config/partial-output checks"
 	@echo "  test-avr-program-order  AVR *-program: build+validate, then fuses, then flash"
+	@echo "  test-pic-program-guard  PIC10F32x published programming rejects inherited writer/image overrides"
 	@echo "  test-gpsim-wrappers  fail-closed gpsim process-status checks"
 	@echo "  test-fetch-yasimavr  safe destination/rebuild/install checks for the yasimavr venv"
 	@echo "  test-supply-chain  external download, cache, dependency and action pin checks"
@@ -8524,8 +8626,7 @@ help:
 	@echo "  clean-tests     remove only test binaries"
 	@echo "  coverage-clean  remove coverage artifacts"
 	@echo "Overrides: VARIANT=, AVR_PROGRAMMER=, COVERAGE_MIN=, HOSTCC=, HOST_DEFS=, SIM_DEFS=, AVR_BUILD_DIR="
-	@echo "PIC overrides: PIC_CC=, PIC10F322_PROG=pk2cmd|ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5, PIC10F322_PROG_CMD="
-	@echo "               PIC10F320_PROG=pk2cmd|ipecmd, PIC10F320_PROG_TOOL=PK3|PK4|PK5, PIC10F320_PROG_CMD="
+	@echo "PIC overrides: PIC_CC=; the PIC10F32x PROG/PROG_TOOL/PROG_CMD inputs require their *-program-custom goal"
 	@echo "               PIC12F675_PROG=, PIC12F675_PROG_KIND=pk2cmd|ipecmd, PIC12F675_PROG_TOOL=PK3|PK4|PK5,"
 	@echo "               PIC12F675_READ_PROG=pk2cmd, PIC12F675_TRIM_EVIDENCE=, PIC12F675_BENCH_RESULT=,"
 	@echo "               PIC12F675_RELEASE_TAG=vX.Y.Z (pic12f675-release-program, and pic12f675-finalize"

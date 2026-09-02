@@ -137,12 +137,20 @@ repository. Confirm them on the first PICkit 3 run and correct this file.
 
 From a source checkout, `make pic10f322-program VARIANT=<variant>` and
 `make pic10f320-program PIC10F320_VARIANT=<variant>` build the selected image,
-run its budget gates, and then write it. They issue `pk2cmd … -M -Y -R` by
-default, and the `-M -Y -OL` form above when `PIC10F322_PROG` or
-`PIC10F320_PROG` is set to `ipecmd`; `PIC10F322_PROG_TOOL` and
-`PIC10F320_PROG_TOOL` pick `PK3`, `PK4` or `PK5`. They never add `-W5`: those
-goals assume the board supplies its own power, which is the arrangement a pedal
-is in. Neither route has been run against a part under a written procedure.
+run its budget gates, and then write it with the canonical
+`pk2cmd … -M -Y -R` command. These release-published goals reject programmer,
+part, command, or image overrides from the command line, environment, `-e`, or
+inherited Make variable assignments. Their hardware recipes do not expand those
+variables, so a concealed target-specific assignment cannot change the literal
+part, writer, image argument, or `-M -Y -R` flags. For a deliberate alternative,
+use the explicitly named `pic10f322-program-custom` or
+`pic10f320-program-custom` goal. On those goals, set `PIC10F322_PROG` or
+`PIC10F320_PROG` to `ipecmd`, and set
+`PIC10F322_PROG_TOOL` or `PIC10F320_PROG_TOOL` to select the `-M -Y -OL` form
+above. `PIC10F322_PROG_CMD` or `PIC10F320_PROG_CMD` accepts another writer. None
+of the routes adds `-W5`: they assume the board supplies its own power, which
+is the arrangement a pedal is in. Neither route has been run against a part
+under a written procedure.
 
 
 ## PIC12F675 — not a raw write target

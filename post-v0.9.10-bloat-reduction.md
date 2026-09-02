@@ -4850,7 +4850,7 @@ qualification and plan deletion.
   `test-workflow-syntax` passes 668 checks; shell syntax and `git diff --check`
   pass.
 
-- [ ] **BR-RVW2-12 -- HIGH -- reject inherited source-checkout programmer
+- [x] **BR-RVW2-12 -- HIGH -- reject inherited source-checkout programmer
   overrides.** The source-command validators now reject semantic assignments in
   the published command itself, but the PIC10F32x programming recipes still
   accept environment-origin `PIC10F32x_PART`, `PROG`, `PROG_TOOL` and
@@ -4860,6 +4860,20 @@ qualification and plan deletion.
   path if it remains supported, but make the published command fail before
   hardware access under direct environment, `-e`, or inherited Make-flag
   semantic overrides. Add fake-programmer controls for both PIC10F32x goals.
+
+  **Resolved:** The release-published PIC10F322 and PIC10F320 goals reject all
+  part, programmer, tool, image and whole-command assignments received from the
+  command line, ordinary environment, `-e` or inherited `MAKEFLAGS`. Their
+  hardware recipes no longer expand those variables at all: each executes the
+  literal canonical part and `-M -Y -R` arguments against its selected build
+  product. `pk2cmd` is resolved in a function-free environment and invoked by
+  path, so an exported Bash function cannot become the writer. Explicitly named
+  `*-program-custom` goals retain the reviewed override path. The new host-only
+  fake-XC8/programmer gate covers both parts, every variable/channel pair,
+  ordinary eval and preloaded-file injection, guard-control spoofing, function
+  shadowing, exact canonical argv and exact custom argv: 54 checks pass.
+  Release qualification passes 217 checks; the Makefile name and reference
+  contracts, shell syntax and `git diff --check` pass.
 
 **Measured branch shape:** At the review baseline, `main...7dd4840` changes 92
 paths with 19,963 insertions and 18,636 deletions, including all 5,172 lines of

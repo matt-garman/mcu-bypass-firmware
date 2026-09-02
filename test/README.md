@@ -507,6 +507,7 @@ rather than a built image. They need no toolchain and are members of `make test`
 | `test-build-serialization` | Independent top-level Make and release invocations sharing one worktree cannot enter the shared critical section concurrently. |
 | `test-strict-tools` | The skip-versus-strict policy holds for the host lanes and all three PIC parts, so `STRICT_TOOLS=1` really converts every clean skip into a failure. |
 | `test-avr-program-order` | Every AVR `*-program` goal builds and validates its image before the first programmer invocation, then writes fuses before flash. |
+| `test-pic-program-guard` | The release-published PIC10F32x source goals use literal canonical hardware argv even when the caller environment is contaminated. Direct command-line, environment, `-e`, and inherited `MAKEFLAGS` programmer assignments fail before a fake programmer runs; ordinary eval/preloaded-file inputs are refused, and guard-control plus shell-function negatives keep concealed assignments from selecting a writer. Separately named custom goals preserve an explicit override path. |
 | `test-avr-build-rebuild` | Modular-header dependencies and Classic AVR configuration changes invalidate what they must. |
 | `test-workload-rebuild` | Workload and fuse changes retrigger the builds that depend on them. |
 | `test-pic10f320-coverage-archive` | The PIC10F320 coverage gate still runs from an extracted source archive with no Git index, where file modes rather than the index decide what is executable. |
