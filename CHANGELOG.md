@@ -43,7 +43,7 @@ historical records and are not retroactively compacted by this policy.
 > unified release onward there is one timeline, with PIC10F320 changes recorded
 > as a sub-lane inside each entry.
 
-## [Unreleased]
+## [v0.9.12]
 
 ### Added
 
