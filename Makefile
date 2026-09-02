@@ -766,10 +766,15 @@ CLANG_TIDY         ?= clang-tidy
 # a different tidy binary or check set.
 ANALYZE_CMD        ?= $(CLANG_TIDY) --checks='$(CLANG_TIDY_CHECKS)' --warnings-as-errors='*'
 
-# Firmware translation units used by the Classic clang analyzers. Cppcheck and
-# MISRA use the complete immutable target/TU/selector matrix below instead.
-# $(sort) de-duplicates the selected development set for clang-tidy/deep.
-FW_SOURCES         = $(sort $(CORE_SRC) $(foreach v,$(VARIANTS),$(src_$(v))))
+# Firmware translation units and selectors used by the Classic clang analyzers.
+# Cppcheck and MISRA use the complete immutable target/TU/selector matrix below
+# instead. The two core files use one representative valid output selector;
+# every selected driver receives its own required selector.
+override CLANG_CLASSIC_ROWS = \
+                      src/bypass_mcu_avr_classic.c:CD4053_SIMPLE \
+                      src/bypass_pure.c:CD4053_SIMPLE \
+                      $(foreach v,$(VARIANTS),$(src_$(v)):$(macro_$(v)))
+FW_SOURCES         = $(sort $(foreach tuple,$(CLANG_CLASSIC_ROWS),$(word 1,$(subst :, ,$(tuple)))))
 
 # cppcheck: a second, independent analyzer. Uses the AVR platform model and the
 # avr-libc include path so it sees the real register definitions. Findings
@@ -4255,14 +4260,16 @@ analyze: analyze-tidy analyze-cppcheck analyze-deep analyze-misra
 analyze-tidy: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@cmd=$(word 1,$(ANALYZE_CMD)); \
 	if command -v $$cmd >/dev/null 2>&1; then \
-		for f in $(FW_SOURCES); do \
+		for tuple in $(CLANG_CLASSIC_ROWS); do \
+			f=$${tuple%%:*}; selector=$${tuple#*:}; \
 			echo "clang-tidy: $$cmd $$f"; \
-			$(ANALYZE_CMD) $$f -- $(CLANG_TIDY_FLAGS) || exit 1; \
+			$(ANALYZE_CMD) $$f -- $(CLANG_TIDY_FLAGS) -D$$selector || exit 1; \
 		done; \
 	elif $(CC) -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then \
 		echo "avr-gcc -fanalyzer"; \
-		for f in $(FW_SOURCES); do \
-			$(CC) $(CFLAGS) -fanalyzer -c $$f -o $(FW_BASE).analyze.o || exit 1; \
+		for tuple in $(CLANG_CLASSIC_ROWS); do \
+			f=$${tuple%%:*}; selector=$${tuple#*:}; \
+			$(CC) $(CFLAGS) -D$$selector -fanalyzer -c $$f -o $(FW_BASE).analyze.o || exit 1; \
 		done; \
 		rm -f $(FW_BASE).analyze.o; \
 	else \
@@ -4285,15 +4292,17 @@ analyze-cppcheck: classic-variant-request-valid $(call analysis_matrix_sources,$
 # `-fanalyzer`-equivalent gate.
 analyze-deep: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@if command -v $(CLANG) >/dev/null 2>&1; then \
-		for f in $(FW_SOURCES); do \
+		for tuple in $(CLANG_CLASSIC_ROWS); do \
+			f=$${tuple%%:*}; selector=$${tuple#*:}; \
 			echo "clang --analyze (-target avr): $(CLANG) $$f"; \
 			$(CLANG) --analyze -Xclang -analyzer-output=text -Werror \
-				$(CLANG_AVR_FLAGS) $$f || exit 1; \
+				$(CLANG_AVR_FLAGS) -D$$selector $$f || exit 1; \
 		done; \
 	elif $(CC) -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then \
 		echo "clang unavailable; using avr-gcc -fanalyzer"; \
-		for f in $(FW_SOURCES); do \
-			$(CC) $(CFLAGS) -fanalyzer -c $$f -o $(FW_BASE).analyze.o || exit 1; \
+		for tuple in $(CLANG_CLASSIC_ROWS); do \
+			f=$${tuple%%:*}; selector=$${tuple#*:}; \
+			$(CC) $(CFLAGS) -D$$selector -fanalyzer -c $$f -o $(FW_BASE).analyze.o || exit 1; \
 		done; \
 		rm -f $(FW_BASE).analyze.o; \
 	else \

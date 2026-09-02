@@ -23,7 +23,7 @@
 # check over those 53 declarations. The census still records only per-file
 # counts: this mutation roster does not detect arbitrary weakening of an
 # unmutated predicate, and must not be represented as semantic coverage of all
-# 52 guards.
+# 53 guards.
 #
 # HOW. The same discipline as the classic-AVR file, so the two read alike:
 # copy src/ to a throwaway tree, break ONE input, compile with the flags the real
@@ -326,13 +326,13 @@ BUDGETS=(
 GUARD_HANDOFF_FIXTURES=(
 	"xt shell rejects two output selectors|avr_xt:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_avr_xt.c|ASSERT:exactly one modular output selector must be defined"
 	"xt shell rejects no output selector|avr_xt:cd4053_simple|drop:-DCD4053_SIMPLE|-|bypass_mcu_avr_xt.c|ASSERT:exactly one modular output selector must be defined"
-	"xt simple driver rejects a foreign selector|avr_xt:tq2_l2_5v_relay|-|-|bypass_output_cd4053_simple.c|ERROR:bypass_output_cd4053_simple.c requires CD4053_SIMPLE"
-	"xt mute driver rejects a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_cd4053_with_mute.c|ERROR:bypass_output_cd4053_with_mute.c requires CD4053_WITH_MUTE"
-	"xt relay driver rejects a foreign selector|avr_xt:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
+	"xt simple driver rejects a foreign selector|avr_xt:cd4053_simple|drop:-DCD4053_SIMPLE;add:-DTQ2_L2_5V_RELAY|-|bypass_output_cd4053_simple.c|ERROR:bypass_output_cd4053_simple.c requires CD4053_SIMPLE"
+	"xt mute driver rejects a foreign selector|avr_xt:cd4053_with_mute|drop:-DCD4053_WITH_MUTE;add:-DCD4053_SIMPLE|-|bypass_output_cd4053_with_mute.c|ERROR:bypass_output_cd4053_with_mute.c requires CD4053_WITH_MUTE"
+	"xt relay driver rejects a foreign selector|avr_xt:tq2_l2_5v_relay|drop:-DTQ2_L2_5V_RELAY;add:-DCD4053_SIMPLE|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
 	"322 shell rejects two output selectors|pic10f322:cd4053_simple|add:-DTQ2_L2_5V_RELAY|-|bypass_mcu_pic10f322.c|ASSERT:exactly one modular output selector must be defined"
 	"322 shell rejects no output selector|pic10f322:cd4053_simple|drop:-DCD4053_SIMPLE|-|bypass_mcu_pic10f322.c|ASSERT:exactly one modular output selector must be defined"
-	"322 relay driver rejects a foreign selector|pic10f322:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
-	"675 relay driver rejects a foreign selector|pic12f675:cd4053_simple|-|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
+	"322 relay driver rejects a foreign selector|pic10f322:tq2_l2_5v_relay|drop:-DTQ2_L2_5V_RELAY;add:-DCD4053_SIMPLE|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
+	"675 relay driver rejects a foreign selector|pic12f675:tq2_l2_5v_relay|drop:-DTQ2_L2_5V_RELAY;add:-DCD4053_SIMPLE|-|bypass_output_tq2_l2_5v_relay.c|ERROR:bypass_output_tq2_l2_5v_relay.c requires TQ2_L2_5V_RELAY"
 	# This used to fail incidentally when two selection idioms chose different
 	# arms. Keep the invalid configuration and require its deliberate diagnostic.
 	"320 rejects two output schemes deliberately|pic10f320:cd4053_simple|add:-DOUTPUT_TQ2_RELAY|-|bypass_mcu_pic10f320.c|ASSERT:PIC10F320 output selectors are mutually exclusive"

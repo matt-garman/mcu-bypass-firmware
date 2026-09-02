@@ -3850,7 +3850,7 @@ rejected with the intended message; the pristine copy passes. `make test` green.
 
 ## BR-SRC-02 - Low-risk firmware-source cleanup candidates
 
-**Status:** NEEDS USER
+**Status:** DONE `801e033`
 
 **Candidates:**
 
@@ -4012,9 +4012,9 @@ remain unexecuted locally because this host has neither `avr-gcc` nor XC8.
 At this slice's commit boundary, per-driver selector guards remained a separate
 optional candidate, so BR-SRC-02 stayed `NEEDS USER`.
 
-**Completed slice -- per-driver output-selector identity:** The user added a
-file-local `#error` guard to each of the three shared output-driver translation
-units. Each now requires its own `CD4053_SIMPLE`, `CD4053_WITH_MUTE` or
+**Completed slice -- per-driver output-selector identity (`801e033`):** The user
+added a file-local `#error` guard to each of the three shared output-driver
+translation units. Each now requires its own `CD4053_SIMPLE`, `CD4053_WITH_MUTE` or
 `TQ2_L2_5V_RELAY` selector before includes, so directly compiling a foreign
 driver can no longer succeed merely because every MCU pin map exposes aliases
 for all three variants. The shared shell guard remains the sole owner of
@@ -4033,8 +4033,19 @@ stack-bound regression 23, deliberate duplication 348, and reference contract
 18 across 229 files and 15 documents. The target mutation lanes and Classic
 static-assert lane skipped locally because this host has neither `avr-gcc` nor
 XC8. No valid preprocessor tokens or generated image bytes are expected to
-change. This completes the last unresolved candidate listed above; BR-SRC-02
-stays `NEEDS USER` until the user commits the slice and records its hash.
+change. This completes the last unresolved candidate listed above and closes
+BR-SRC-02.
+
+**Follow-up selector integration correction:** The first target-toolchain run
+found that each foreign-driver fixture used the intentionally wrong selector as
+its nominal control. Once the guards landed, that control correctly failed
+before the fixture could mutate anything. Each row now starts from the driver's
+matching production variant, proves that control compiles, and then replaces
+only its selector with the foreign one. The same review found that the Classic
+clang-tidy and clang-analyzer loops passed only the backend selector; they now
+iterate explicit source/selector tuples, and a fake-analyzer contract checks all
+five pairings. `test-analyze-variant-guard` passes 21 checks; the analyzer
+matrix, Classic rebuild and workload rebuild contracts pass 22, 35 and 45.
 
 ## BR-SRC-03 - Expand negative compile-guard coverage before source cleanup
 
@@ -5543,7 +5554,7 @@ dependencies and acceptance criteria.
 | BR-REL-07 | Preserve historical releases | DONE `24c2ded` + `7fe055b` |
 | BR-REL-08 | Collapse duplicate release phase logs | DONE |
 | BR-SRC-01 | Preserve deliberate source duplication | DONE `28f8ffe` |
-| BR-SRC-02 | Perform optional source cleanup | NEEDS USER |
+| BR-SRC-02 | Perform optional source cleanup | DONE `801e033` |
 | BR-SRC-03 | Expand negative guard tests | DONE `781cb43` |
 | BR-SRC-04 | Enforce source-refactor proof obligations | DONE `1b79ed5` |
 | BR-REVIEW-01 | Resolve completed-item review findings | DONE `cc2ff7a` |

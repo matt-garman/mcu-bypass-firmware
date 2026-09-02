@@ -295,8 +295,8 @@ MUTATIONS=(
 	# Dropping the floor below the budget while the pulse stays < RELEASE_THRESH
 	# fires ONLY the margin guard, which is what a prescaler/tick regression looks
 	# like. avr-classic's is the floor the standalone driver compile resolves
-	# (__AVR__ -> bypass_pins_avr_classic.h). A floor of 5 is the far-from-bound
-	# case; the near-bound cases that prove the overhead terms are load-bearing are
+	# (BYPASS_MCU_AVR_CLASSIC -> bypass_pins_avr_classic.h). A floor of 5 is the
+	# far-from-bound case; the near-bound cases that prove the overhead terms are
 	# in NEARBOUND below.
 	"relay WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_tq2_l2_5v_relay.c|TQ2_L2_5V_RELAY|relay: worst-case wall-clock WDT pet-to-pet interval must stay"
 	"mute WDT floor|bypass_pins_avr_classic.h|s/^#define WDT_MIN_PERIOD_MS (100U)/#define WDT_MIN_PERIOD_MS (5U)/|bypass_output_cd4053_with_mute.c|CD4053_WITH_MUTE|mute: worst-case wall-clock WDT pet-to-pet interval must stay"

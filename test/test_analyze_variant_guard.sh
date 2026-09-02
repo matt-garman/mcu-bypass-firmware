@@ -215,4 +215,37 @@ for variants in "${accepted[@]}"; do
 	checks=$((checks + 1))
 done
 
+# A valid clang analysis must pair every source with an output selector. Without
+# this, the shell's exact-one guard and the drivers' identity guards reject the
+# analysis configuration before either analyzer can inspect the source.
+fake_analyzer="$scratch/fake-analyzer"
+analyzer_log="$scratch/analyzer.log"
+cat > "$fake_analyzer" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source=
+selector=
+for arg in "$@"; do
+	case "$arg" in
+		src/*.c) source=$arg ;;
+		-DCD4053_SIMPLE|-DCD4053_WITH_MUTE|-DTQ2_L2_5V_RELAY) selector=$arg ;;
+	esac
+done
+printf '%s\t%s\n' "$source" "$selector" >> "${FAKE_ANALYZER_LOG:?}"
+EOF
+chmod 750 "$fake_analyzer"
+
+expected_analysis=$'src/bypass_mcu_avr_classic.c\t-DCD4053_SIMPLE\nsrc/bypass_output_cd4053_simple.c\t-DCD4053_SIMPLE\nsrc/bypass_output_cd4053_with_mute.c\t-DCD4053_WITH_MUTE\nsrc/bypass_output_tq2_l2_5v_relay.c\t-DTQ2_L2_5V_RELAY\nsrc/bypass_pure.c\t-DCD4053_SIMPLE'
+export FAKE_ANALYZER_LOG=$analyzer_log
+for spec in "analyze-tidy ANALYZE_CMD" "analyze-deep CLANG"; do
+	read -r goal tool_var <<<"$spec"
+	: > "$analyzer_log"
+	run_make "$goal" "VARIANTS=$SUPPORTED" "$tool_var=$fake_analyzer" >/dev/null \
+		|| fail "$goal rejected the valid full selector matrix"
+	actual_analysis=$(sort "$analyzer_log")
+	[ "$actual_analysis" = "$expected_analysis" ] \
+		|| fail "$goal did not pair each source with its required selector; got: $actual_analysis"
+	checks=$((checks + 1))
+done
+
 printf 'analyze variant-request guard: %d checks, 0 failures\n' "$checks"
