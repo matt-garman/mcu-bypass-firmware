@@ -55,7 +55,11 @@ analyzed*, independently from the hardware implementation.
 flash memory to use the pure debounce abstraction.  Its
 implementation is inlined with its hardware-specific details.
 
-Given a choice, the AVR parts are preferred.  See details in the
+Given a choice, the AVR parts are preferred.  The AVR Classic parts
+are mature (legacy, but still current-production), low-cost,
+available in through-hole and SMD; and the tooling is open source.
+AVR XT is a newer MCU architecture and SMD-only, but otherwise has
+similar benefits.  See details in the
 [Why AVR Classic](DESIGN_DOCUMENTATION.adoc#why-avr-classic) and
 [Why ATtiny202](DESIGN_DOCUMENTATION.adoc#why-avr-xt) in the
 [Design Documentation](DESIGN_DOCUMENTATION.adoc).
