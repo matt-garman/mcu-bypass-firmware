@@ -3,55 +3,71 @@
 
 [![CI](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml/badge.svg)](https://github.com/matt-garman/mcu-bypass-firmware/actions/workflows/ci.yml)
 
-The source tree supports AVR and PIC targets; see the table below for target
-selection. The current and historical release contracts, including exact image
-inventories, are maintained in [release/README.md](release/README.md).
+## Overview
 
-## Targets
-
-| Target | Status | Notes |
-|---|---|---|
-| ATtiny13a | release-supported | the primary/default target |
-| ATtiny45 / ATtiny85 | release-supported | tinyx5 family |
-| **ATtiny202 (AVR-XT)** | release-supported | first released in `v0.9.6`; 2 KB flash, SOIC-8 only (no DIP), UPDI programming |
-| PIC10F322 | release-supported | 512 words |
-| **PIC10F320** | release-supported | **first released here in `v0.9.6`; constrained exception: 256 words, so the debounce algorithm is implemented directly rather than by compiling the verified core — see "PIC10F320: the constrained target" in [DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc#pic10f320-architecture)** |
-| **PIC12F675** | release-supported | **first released here in `v0.9.9`; classic mid-range: 1024 words, no `LATx` (the output latch is an SRAM shadow), 1.024 ms tick. Every pre-hardware lane the release parts have, plus a calibration contract they do not — and, uniquely, guarded development and signed-release programming procedures that check and record factory OSCCAL/BG before and after writing, plus a release-shipped `flash-pic12f675.py` so a downloaded image can be programmed under the same transaction with no source checkout (see [FLASHING.md](FLASHING.md)). Real preservation remains hardware-unvalidated (see [release/README.md](release/README.md) and `make pic12f675-release-program`). See [DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc)** |
-
-Every release target except one compiles the verified core (`src/bypass_pure.c`)
-directly into its shipping image. The release-supported PIC10F320 cannot — its
-flash is half the PIC10F322's — so it carries an inlining seam that equivalence
-and real-HEX lock-step against that same core, plus independent fault injection,
-mitigate but do not eliminate. Prefer another part when the choice is yours;
-[DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc#pic10f320-architecture)
-explains the trade in full, and the retained record under `release/<version>/`
-identifies the qualified source commit and what its gates returned.
-
-The firmware is intended to be used for electric instrument
-effects (e.g. guitar effect pedals) bypass switching.  The firmware
-has four responsibilities:
+The firmware is intended to be used for electric instrument effects
+(e.g. guitar effect pedals) bypass switching.  The firmware has the
+following responsibilities:
 
   - Maintain state (engage/bypass)
   - Light or dark a status indicator LED
   - Respond to footswitch presses, _including debounce_
   - Control the actual signal switching mechanism
+  - Recover gracefully (to the extent possible) from extreme/outlier situations
 
-Fundamentally, the algorithm uses a saturating integrator to debounce the
-footswitch and offer some EMI/RFI protection.
+Fundamentally, the algorithm uses a saturating integrator to
+debounce the footswitch and offer some EMI/RFI protection.
 
 The firmware is bundled with an extensive test and validation suite.
 The project's overall goal is to be reference-quality, suitable for
 use in professional, touring-grade effects.
 
-See the [Design Documentation](DESIGN_DOCUMENTATION.adoc) for the complete
-firmware description and design details.
+See the [Design Documentation](DESIGN_DOCUMENTATION.adoc) for the
+complete firmware description and design details.
+
+The source tree supports AVR and PIC microcontrollers; see the table
+below for target selection.  The current and historical release
+contracts, including exact image inventories, are maintained in
+[release/README.md](release/README.md).
+
+
+## Targets
+
+  1. AVR Classic
+    - ATtiny13A
+    - ATtiny45
+    - ATtiny85
+  2. AVR XT
+    - ATtiny202
+  3. PIC Enhanced Midrange
+    - PIC10F320
+    - PIC10F322
+  4. PIC Classic Midrange
+    - PIC12F675
+
+The firmware uses a *pure* implementation of the debounce and
+state-management algorithm (`src/bypass_pure.c`); it is
+hardware independent and side-effect free.  This allows it to be
+host-compiled, exhaustively tested, and verified indepedently from
+the hardware implementation.
+
+**_Note:_** the PIC10F320 is a special case, as it lacks sufficient
+flash memory to use the pure debounce abstraction.  It's
+implementation is inlined with its hardware-specific details.
+
+Given a choice, the AVR parts are preferred.  See details in the
+[Why AVR Classic](DESIGN_DOCUMENTATION.adoc#why-avr-classic) and
+[Why ATtiny202](DESIGN_DOCUMENTATION.adoc#why-avr-xt) in the
+[Design Documentation](DESIGN_DOCUMENTATION.adoc).
+
 
 
 ## Circuit-switching Hardware Support
 
-The firmware currently supports circuit-switching via:
+The firmware supports multiple schemes for actual circuit switching.
+These schemes are as follows:
 
-  - Panasonic TQ-L2-5v mechanical relay
+  - Panasonic TQ-L2-5v mechanical relay ("true bypass")
   - CD4053 or TMUX4053 electrical analog switches, two variants:
     - Simple scheme using only two DPDT switches
     - Fancier scheme using all three DPDT switches with a 5ms mute
@@ -79,18 +95,92 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
     firmware errors)
   - Simulated fault-injection tests to verify WDT functioning
 
-Every item above runs on a host or in a simulator. **No part has completed
-controlled hardware qualification** — a bench run against a written procedure
-whose source/image identity, configuration bytes, instrument readings and
-acceptance result are retained. That is what the `1.x.y` line adds, and it is
-the criterion for leaving `0.9.x`. Released images *have* been flashed onto real
-parts and reported working by builders;
-[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) records those field-use
-reports, keeps them separate from qualification records, and states what a
-qualification record must retain.
+Every item above runs on a host or in a simulator.
+
+A remaining validation step is a *controlled hardware
+qualification*, i.e. a physical test bench run against a written
+procedure that captures source/image identity, configuration bytes,
+instrument readings and acceptance result(s).  However, the
+firmwares are being deployed in the field, see
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).
+
+The project is using the `0.9.x` release versioning until all
+firmwares have been validated on the bench; the `1.x.y` version is
+reserved for that future state.
 
 
-## Documentation map
+## Quickstart
+
+### Flashing
+
+For flashing only, it is not necessary to clone this repository or
+obtain the complete toolchain.  Only the firmware images, hardware
+programmer, and software flashing tool are needed.
+
+1. Prerequisites
+  - A hardware programmer device
+    - AVR Classic has many available programmers; "USBasp" and
+      "USBtiny" are common and readily available
+    - AVR XT uses UPDI (Unified Program and Debug Interface); for
+      example, [Adafruit UPDI Friend](https://www.adafruit.com/product/5879)
+    - PIC uses PICkit, of which there are multiple versions; this
+      project used a PICkit 3 clone; MPLAB Snap appears to be a
+      low-cost, modern programmer (but untested in this project)
+  - The software flashing tool
+    - `avrdude` for ATtiny devices
+    - `ipecmd` for PIC devices (generally part of Microchip's MPLAB
+      suite, be wary of MPLAB version compatibility with different
+      PICkit versions)
+2. Decide which firmware image you need; there are 21 different
+   firmware images, one for each combination of microcontroller and
+   switching scheme.
+3. Download the latest release firmware for your MCU + switching
+   scheme combination
+4. Write the firmware image to the device; see
+   [FLASHING.md](FLASHING.md) for the exact command to use,
+   **_as there are per-part unique options._**
+
+**_Note:_** the PIC12F675 is a special case; it additionally
+requires use of a dedicated Python script (`flash-pic12f675.py`,
+available with the release images).
+
+
+### Building from Source and Development
+
+The number of supported devices results in a rather large
+development toolchain.  Toolchain details are available in
+[TOOLCHAIN.adoc](TOOLCHAIN.adoc).  All tools are free; many (but not
+all) are open-source.
+
+Once the toolchain is available, you should be able to build the
+firmware from source via:
+
+
+```
+make
+```
+
+The Makefile has extensive options, see `make help`.  The makefile
+has recipies for (or runs scripts to):
+    - build
+    - program
+    - validate
+    - test
+
+High-level source overview:
+    - `bypass_mcu_*.c` - hardware "shells" for each MCU or MCU family; define `main()` and other hardware-specific details
+    - `bypass_hw_iface.h` - the hardware "shell" interface (per-MCU definitions in `bypass_mcu_*.c`)
+    - `bypass_output_*.[ch]` - defines the interface and routines for the different switching schemes (relay, x4053)
+    - `bypass_pins_*.h` - defines per-MCU pin functions
+    - `bypass_pure.[ch]` - the hardware-independent, no-side-effect debounce and state-management algorithm
+    - `bypass_types.h` - custom data structures
+    - `bypass_static_assert.h` - platform-independent `static_assert()` macro
+    - `bypass_blocking_delay.h` - platform-independent `BYPASS_DELAY_MS()` macro
+    - `bypass_compile_checks.h` - compile-time `static_assert()` checks
+    - `bypass_config.h` - defines `RELEASE_THRESH` and `PRESSED_THRESH`, as well as some (compile-guarded) hardware-specific constants
+
+
+## Documentation Details
 
 Each fact in this project has exactly one live owner. A document may link to
 another authority, but it does not restate that authority's mutable data —
@@ -120,7 +210,7 @@ mean editing two documents, the fact is in the wrong place.
 | Contributor and agent working rules | [AGENTS.md](AGENTS.md), which `CLAUDE.md` includes |
 | Licensing terms | [LICENSE](LICENSE) |
 
-### Document lifecycle
+### Document Lifecycle
 
 Every durable documentation authority named in the map above has exactly one
 label below. The label decides how it is edited and when it may be deleted;
@@ -146,7 +236,7 @@ Branch-only work plans are not durable authorities. They carry the required
 opening banner, coordinate one branch, and are deleted before release source
 finalization; the release gate refuses any that survives.
 
-### Standing rules
+### Documentation Standing Rules
 
 - **Git history is the archive.** A completed plan or work journal is deleted
   from the branch tip once its durable conclusions have been moved into the
@@ -162,78 +252,3 @@ finalization; the release gate refuses any that survives.
   Correct the input, never the rendered copy.
 
 
-## Quickstart
-
-Programming a downloaded release does not require the firmware development
-toolchain or a repository checkout. Most targets require only the released HEX
-and programmer CLI. PIC12F675 additionally requires Python 3 and the release's
-flashing helper because its per-device factory calibration must be preserved and
-verified. The helper's `ipecmd` route is published and software-tested, but it is
-not hardware-qualified. See [FLASHING.md](FLASHING.md) for the per-part
-`avrdude` and `ipecmd` command templates and the PIC12F675 helper invocation,
-and [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) for which
-combinations builders have reported working and why a shared pinout does not
-make two parts interchangeable to flash. The rest of this section is about
-building from source.
-
-Upgrading a worktree last used to build `v0.9.7` or earlier: run `make clean`
-once before the first new build, or retired and current image names will
-coexist. If that build set a custom PIC build directory, its variable was
-renamed too; the override mapping is under
-[Renamed in v0.9.8](release/README.md#renamed-in-v098-v097-and-earlier-used-different-names).
-
-Requires avrtools, assumes a USBtiny programmer, and a fresh
-ATtiny13a chip (see `make help` for how to build/program other
-MCUs):
-
-```
-make
-make attiny13a-program
-```
-
-`attiny13a-program` is one ordered transaction, and the order is deliberate: it
-builds and validates the selected image first, then writes the fuses, then
-flashes. Nothing reaches the chip until an image exists and passes Intel HEX
-validation, so a failed build cannot leave a device carrying the design's
-clock/watchdog/BOD fuses with no matching firmware. `attiny13a-fuses` and
-`attiny13a-flash` remain available when you want exactly one of the two steps.
-
-The PIC and AVR-XT ports build and validate through their own lanes,
-independent of the AVR Classic build. All of them need a host C compiler (GCC 10
-or newer, or Clang — see [TOOLCHAIN](TOOLCHAIN.adoc)), matching `gcov`, Python
-3.7 or newer, and Bash. Beyond that, the `pic10f322-*`, `pic10f320-*` and
-`pic12f675-*` lanes need the Microchip XC8 compiler, the PIC10-12Fxxx device
-pack, `gpsim` and `gpsim-dev`; the `attiny202-*` lane needs avr-gcc plus the
-fetched-on-demand Microchip device files and the patched `yasimavr` that
-`scripts/fetch_yasimavr.sh` builds. Each lane has a build goal, a pre-hardware
-aggregate, and a fail-closed target aggregate:
-
-```
-make pic10f322 && make pic10f322-test pic10f322-test-target-variants
-make pic10f320-variants && make pic10f320-test pic10f320-test-target-variants
-make pic12f675 && make pic12f675-test pic12f675-test-target-variants
-make attiny202 && make attiny202-test attiny202-test-target
-```
-
-`make help` lists every goal and the variables that select its behavior.
-[test/README.md](test/README.md) says what each aggregate establishes, which
-lanes fail closed rather than skipping when a tool is absent, and why the two
-PIC12F675 aggregates belong in one Make invocation rather than two.
-
-Programming an ATtiny202 is over UPDI rather than ISP. `make attiny202-program
-VARIANT=<v> XT_UPDI_PORT=<port>` is the same ordered transaction the AVR Classic
-parts use, and defaults to avrdude's `serialupdi`, which needs only a USB-serial
-adapter and a series resistor.
-
-> **PIC12F675 is not a raw write target.** A bulk erase destroys the per-device
-> factory oscillator trim and bandgap calibration that no image can supply, and
-> a part that has lost either still appears to run. Programming one is a guarded
-> transaction rather than a command, and each route has exactly one home:
-> [FLASHING.md](FLASHING.md) carries the downloaded-release route through
-> `flash-pic12f675.py`, and [release/README.md](release/README.md) carries the
-> development and release-provenance route, including how to resolve an
-> interrupted transaction. Never hand a PIC12F675 image to a programmer
-> directly, and never program a simulator-derived image onto a real device: the
-> calibration word such an image carries is fabricated.
-
-See [TOOLCHAIN](TOOLCHAIN.adoc) for full environmental details.  

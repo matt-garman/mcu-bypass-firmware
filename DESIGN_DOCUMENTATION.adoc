@@ -2,6 +2,7 @@
 = Electric Guitar Effect Engage/Bypass Scheme Firmware for Microcontrollers
 
 
+[[why-avr-classic]]
 == Why AVR Classic (ATtiny13a, ATtiny45, ATtiny85):
 
     * Readily available in SMD and through-hole
@@ -37,6 +38,7 @@ section are the SRAM output shadow (below) and the 1.024 ms tick that follows
 from the prescaler decision.
 
 
+[[why-avr-xt]]
 == Why ATtiny202 (AVR-XT):
 
 The ATtiny202 is a tinyAVR 0-series part: same vendor as AVR Classic, but a
