@@ -117,28 +117,28 @@ For flashing only, it is not necessary to clone this repository or
 obtain the complete toolchain.  Only the firmware images, hardware
 programmer, and software flashing tool are needed.
 
-    1. Prerequisites
-        - A hardware programmer device
-            - AVR Classic has many available programmers; "USBasp" and
-              "USBtiny" are common and readily available
-            - AVR XT uses UPDI (Unified Program and Debug Interface); for
-              example, [Adafruit UPDI Friend](https://www.adafruit.com/product/5879)
-            - PIC uses PICkit, of which there are multiple versions; this
-              project used a PICkit 3 clone; MPLAB Snap appears to be a
-              low-cost, modern programmer (but untested in this project)
-        - The software flashing tool
-            - `avrdude` for ATtiny devices
-            - `ipecmd` for PIC devices (generally part of Microchip's MPLAB
-              suite, be wary of MPLAB version compatibility with different
-              PICkit versions)
-    2. Decide which firmware image you need; there are 21 different
-       firmware images, one for each combination of microcontroller and
-       switching scheme.
-    3. Download the latest release firmware for your MCU + switching
-       scheme combination
-    4. Write the firmware image to the device; see
-       [FLASHING.md](FLASHING.md) for the exact command to use,
-       **_as there are per-part unique options._**
+  1. Prerequisites
+      - A hardware programmer device
+          - AVR Classic has many available programmers; "USBasp" and
+            "USBtiny" are common and readily available
+          - AVR XT uses UPDI (Unified Program and Debug Interface); for
+            example, [Adafruit UPDI Friend](https://www.adafruit.com/product/5879)
+          - PIC uses PICkit, of which there are multiple versions; this
+            project used a PICkit 3 clone; MPLAB Snap appears to be a
+            low-cost, modern programmer (but untested in this project)
+      - The software flashing tool
+          - `avrdude` for ATtiny devices
+          - `ipecmd` for PIC devices (generally part of Microchip's MPLAB
+            suite, be wary of MPLAB version compatibility with different
+            PICkit versions)
+  2. Decide which firmware image you need; there are 21 different
+     firmware images, one for each combination of microcontroller and
+     switching scheme.
+  3. Download the latest release firmware for your MCU + switching
+     scheme combination
+  4. Write the firmware image to the device; see
+     [FLASHING.md](FLASHING.md) for the exact command to use,
+     **_as there are per-part unique options._**
 
 **Note:** the PIC12F675 is a special case; it additionally
 requires use of a dedicated Python script (`flash-pic12f675.py`,
@@ -161,7 +161,7 @@ make
 ```
 
 The Makefile has extensive options, see `make help`.  The makefile
-has recipes for (or runs scripts to):
+has numerous recipes for (or runs scripts to):
   - build
   - program
   - validate
