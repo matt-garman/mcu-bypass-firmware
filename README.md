@@ -25,34 +25,34 @@ use in professional, touring-grade effects.
 See the [Design Documentation](DESIGN_DOCUMENTATION.adoc) for the
 complete firmware description and design details.
 
-The source tree supports AVR and PIC microcontrollers; see the table
-below for target selection.  The current and historical release
-contracts, including exact image inventories, are maintained in
-[release/README.md](release/README.md).
+The source tree supports AVR and PIC microcontrollers; see the
+Targets list below for supported hardware.  The current and
+historical release contracts, including exact image inventories, are
+maintained in [release/README.md](release/README.md).
 
 
 ## Targets
 
-  1. AVR Classic
-    - ATtiny13A
-    - ATtiny45
-    - ATtiny85
-  2. AVR XT
-    - ATtiny202
-  3. PIC Enhanced Midrange
-    - PIC10F320
-    - PIC10F322
-  4. PIC Classic Midrange
-    - PIC12F675
+    1. AVR Classic
+        - ATtiny13A
+        - ATtiny45
+        - ATtiny85
+    2. AVR XT
+        - ATtiny202
+    3. PIC Enhanced Midrange
+        - PIC10F320
+        - PIC10F322
+    4. PIC Classic Midrange
+        - PIC12F675
 
 The firmware uses a *pure* implementation of the debounce and
-state-management algorithm (`src/bypass_pure.c`); it is
-hardware independent and side-effect free.  This allows it to be
-host-compiled, exhaustively tested, and verified indepedently from
-the hardware implementation.
+state-management algorithm (`src/bypass_pure.c`); it is hardware
+independent and side-effect free.  This allows it to be
+host-compiled, exhaustively tested, verified, and *formally
+analyzed*, independently from the hardware implementation.
 
-**_Note:_** the PIC10F320 is a special case, as it lacks sufficient
-flash memory to use the pure debounce abstraction.  It's
+**Note:** the PIC10F320 is a special case, as it lacks sufficient
+flash memory to use the pure debounce abstraction.  Its
 implementation is inlined with its hardware-specific details.
 
 Given a choice, the AVR parts are preferred.  See details in the
@@ -117,30 +117,30 @@ For flashing only, it is not necessary to clone this repository or
 obtain the complete toolchain.  Only the firmware images, hardware
 programmer, and software flashing tool are needed.
 
-1. Prerequisites
-  - A hardware programmer device
-    - AVR Classic has many available programmers; "USBasp" and
-      "USBtiny" are common and readily available
-    - AVR XT uses UPDI (Unified Program and Debug Interface); for
-      example, [Adafruit UPDI Friend](https://www.adafruit.com/product/5879)
-    - PIC uses PICkit, of which there are multiple versions; this
-      project used a PICkit 3 clone; MPLAB Snap appears to be a
-      low-cost, modern programmer (but untested in this project)
-  - The software flashing tool
-    - `avrdude` for ATtiny devices
-    - `ipecmd` for PIC devices (generally part of Microchip's MPLAB
-      suite, be wary of MPLAB version compatibility with different
-      PICkit versions)
-2. Decide which firmware image you need; there are 21 different
-   firmware images, one for each combination of microcontroller and
-   switching scheme.
-3. Download the latest release firmware for your MCU + switching
-   scheme combination
-4. Write the firmware image to the device; see
-   [FLASHING.md](FLASHING.md) for the exact command to use,
-   **_as there are per-part unique options._**
+    1. Prerequisites
+        - A hardware programmer device
+            - AVR Classic has many available programmers; "USBasp" and
+              "USBtiny" are common and readily available
+            - AVR XT uses UPDI (Unified Program and Debug Interface); for
+              example, [Adafruit UPDI Friend](https://www.adafruit.com/product/5879)
+            - PIC uses PICkit, of which there are multiple versions; this
+              project used a PICkit 3 clone; MPLAB Snap appears to be a
+              low-cost, modern programmer (but untested in this project)
+        - The software flashing tool
+            - `avrdude` for ATtiny devices
+            - `ipecmd` for PIC devices (generally part of Microchip's MPLAB
+              suite, be wary of MPLAB version compatibility with different
+              PICkit versions)
+    2. Decide which firmware image you need; there are 21 different
+       firmware images, one for each combination of microcontroller and
+       switching scheme.
+    3. Download the latest release firmware for your MCU + switching
+       scheme combination
+    4. Write the firmware image to the device; see
+       [FLASHING.md](FLASHING.md) for the exact command to use,
+       **_as there are per-part unique options._**
 
-**_Note:_** the PIC12F675 is a special case; it additionally
+**Note:** the PIC12F675 is a special case; it additionally
 requires use of a dedicated Python script (`flash-pic12f675.py`,
 available with the release images).
 
@@ -161,23 +161,23 @@ make
 ```
 
 The Makefile has extensive options, see `make help`.  The makefile
-has recipies for (or runs scripts to):
-    - build
-    - program
-    - validate
-    - test
+has recipes for (or runs scripts to):
+  - build
+  - program
+  - validate
+  - test
 
 High-level source overview:
-    - `bypass_mcu_*.c` - hardware "shells" for each MCU or MCU family; define `main()` and other hardware-specific details
-    - `bypass_hw_iface.h` - the hardware "shell" interface (per-MCU definitions in `bypass_mcu_*.c`)
-    - `bypass_output_*.[ch]` - defines the interface and routines for the different switching schemes (relay, x4053)
-    - `bypass_pins_*.h` - defines per-MCU pin functions
-    - `bypass_pure.[ch]` - the hardware-independent, no-side-effect debounce and state-management algorithm
-    - `bypass_types.h` - custom data structures
-    - `bypass_static_assert.h` - platform-independent `static_assert()` macro
-    - `bypass_blocking_delay.h` - platform-independent `BYPASS_DELAY_MS()` macro
-    - `bypass_compile_checks.h` - compile-time `static_assert()` checks
-    - `bypass_config.h` - defines `RELEASE_THRESH` and `PRESSED_THRESH`, as well as some (compile-guarded) hardware-specific constants
+  - `bypass_mcu_*.c` - hardware "shells" for each MCU or MCU family; define `main()` and other hardware-specific details
+  - `bypass_hw_iface.h` - the hardware "shell" interface (per-MCU definitions in `bypass_mcu_*.c`)
+  - `bypass_output_*.[ch]` - defines the interface and routines for the different switching schemes (relay, x4053)
+  - `bypass_pins_*.h` - defines per-MCU pin functions
+  - `bypass_pure.[ch]` - the hardware-independent, no-side-effect debounce and state-management algorithm
+  - `bypass_types.h` - custom data structures
+  - `bypass_static_assert.h` - platform-independent `static_assert()` macro
+  - `bypass_blocking_delay.h` - platform-independent `BYPASS_DELAY_MS()` macro
+  - `bypass_compile_checks.h` - compile-time `static_assert()` checks
+  - `bypass_config.h` - defines `RELEASE_THRESH` and `PRESSED_THRESH`, as well as some (compile-guarded) hardware-specific constants
 
 
 ## Documentation Details
