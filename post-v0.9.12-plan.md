@@ -20,10 +20,10 @@
 
 | ID | Task | Workstream | Size | Status |
 |---|---|---|---:|---|
-| A1 | Render the mechanical release edits instead of validating them | Strictness | 4-6 h | open |
+| A1 | Render the mechanical release edits instead of validating them | Strictness | 4-6 h | **done** |
 | A2 | Convert verbatim prose pins to marker blocks + keyword sets | Strictness | ~1 d | open |
 | A3 | Move the pinned measurement out of the design document | Strictness | 1 h | open |
-| A4 | Reconcile README with the gates that survive A2 | Strictness | 1 h | open |
+| A4 | Reconcile README and design doc with the gates that survive A2 | Strictness | 2 h | open |
 | A5 | Write down the enforcement register | Strictness | 2 h | open |
 | B1 | Restructure README for its two audiences | README | 3-4 h | open |
 | B2 | Create the governance document | README | 2-3 h | open |
@@ -237,6 +237,46 @@ Do not let the goal invent prose. It writes structure and derived strings only.
 
 Size: 4-6 h.
 
+**Landed.** `scripts/release-prepare.sh`, `make release-prepare VERSION=vX.Y.Z`,
+and `make test-release-prepare`.
+
+- The four `release_render_*` functions plus `_release_transition_line` in
+  `scripts/release-documentation.sh` are now the single format authority. The
+  preparer writes through them; the validator compares against them. Neither
+  states a format the other does not.
+- The validator kept every property. `release_validate_development_state` runs
+  the same checks continuously on the live tree, so deleting them outright --
+  as this section originally proposed -- would have left a stale declaration
+  unnoticed between releases. Render-and-compare removes the hand authoring
+  without removing the check; the diagnostics now end in "re-run release-prepare
+  for <version>" instead of describing a string to type.
+- `RELEASE_CONFIG_GOALS` names the release-configuration goals once; four
+  parse-time guards select on it. `release-prepare` is in that set because it
+  writes the canonical counts into the declaration, so an identity-changing
+  override is refused before anything is read. It is deliberately **not** in
+  `_MAKE_RELEASE_DIRECT` (that flag asserts the script takes the worktree lock
+  itself, which this one does not) and not in the unsupported-override rule
+  (whose own serialization wrapper would trip it). Both exclusions are commented
+  where they are made.
+- Refusals are total. The first draft installed each document as it was
+  rendered, so a fault found while rendering the second left the first already
+  written -- a tree that is half-prepared and reads as prepared. Both candidates
+  are now built and checked before either is installed. The regression test
+  found this, and asserts it for every refusal path.
+
+**The acceptance evidence is a replay, not a fixture.** `test-release-prepare`
+reconstructs the tree at `7a2d5c7^`, runs the preparer once, and requires the
+result to be **byte-identical** to `5c1d215` -- what the four hand commits
+produced. 35 checks, 0 failures. `test-release-preflight` passes at 246 checks
+against a tree with A4's README restored, which is how the A1 change was
+separated from the breakage A4 still owns.
+
+Follow-ups, neither blocking: the topology words (`seven release parts`, `six
+modular targets`, `four shell source files`) are renderer constants rather than
+derived from the Makefile -- C1 will want them derived; and `release-prepare`
+does not take the worktree lock, which is right for a text edit but means it
+should not be run concurrently with a release.
+
 ### A2 — Convert verbatim prose pins to marker blocks and keyword sets
 
 Roughly seventeen places byte-pin the maintainer's own prose: `README.md` (3+),
@@ -331,6 +371,16 @@ the loosened technique rather than against the byte-pins being retired:
    Python 3 and the helper).
 4. The dropped helper status (published, software-tested, not
    hardware-qualified).
+5. **`test-release-qualification`: "design documentation states no PIC12F675
+   release disposition."** Found while regression-testing A1, and it comes from
+   the design-document rewrite (`4d85ad7`), not the README. That gate anchors on
+   a paragraph beginning `A third PIC, the PIC12F675,` in
+   `DESIGN_DOCUMENTATION.adoc`, and requires the block under it to carry the
+   release disposition and the four residual silicon risks. The rewrite removed
+   the anchor. Confirmed pre-existing on a pristine `HEAD`, so it is A4's, not
+   A1's. A2 should convert this anchor to a marker block like the rest.
+6. `DESIGN_DOCUMENTATION.adoc:56` reads `different harware`, introduced by the
+   same rewrite.
 
 **One of these is substantive, not just a gate failure.** The rewrite now reads:
 

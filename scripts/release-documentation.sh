@@ -38,6 +38,72 @@ _release_transition_line() {
 		"$1" "$1"
 }
 
+
+# ============================================================================
+# DERIVED RELEASE LINES
+# ============================================================================
+#
+# Everything below renders a line that is a pure function of the version being
+# cut, the version before it, the release date, and the canonical inventory
+# counts. No human decides any of these bytes.
+#
+# WHY THEY ARE FUNCTIONS. They used to be string literals inside the validator,
+# and a release was prepared by hand-editing documents until that validator
+# stopped objecting. Preparing v0.9.12 took four commits to converge on seven
+# lines -- the wrong heading form, then the right one, then the [Unreleased]
+# section that has to survive the rename, then both compare links and the
+# contract line. Every one of those was derivable, and none of them was
+# derived: the only feedback channel was a gate that said no.
+#
+# So the same functions now serve two callers. scripts/release-prepare.sh
+# WRITES these lines into the working tree, and the validator below COMPARES
+# what it finds against them. That keeps the drift check the development-state
+# gate depends on -- release/README.md's declaration is verified continuously,
+# not only on release day -- while removing the hand authoring entirely. The
+# format is stated once, here, so the writer and the checker cannot disagree
+# about it, and the repair for a mismatch is to re-run the preparer rather than
+# to guess at a diagnostic.
+#
+# The topology words are constants HERE rather than in the validator, which is
+# where the single copy used to live. They change only when a part is added,
+# which is a reviewed event; deriving them from the Makefile's canonical maps
+# is worth doing, but it is a separate change from removing the hand edit.
+
+# The project's canonical remote. Both compare links are built from it, and it
+# appeared twice as a literal before.
+_RELEASE_COMPARE_BASE='https://github.com/matt-garman/mcu-bypass-firmware/compare'
+
+# The bounded declaration's one line. `image_count` and `soak_count` come from
+# the Makefile's canonical sets at release time and from the staged inventory
+# afterwards, so this line compares the declaration against the build rather
+# than against itself.
+release_render_contract_line() {
+	[ "$#" -eq 3 ] || return 2
+	printf '**Current release contract:** `%s`; seven release parts; %s images; %s soak combinations; six modular targets; four shell source files.\n' \
+		"$1" "$2" "$3"
+}
+
+# `## [X.Y.Z] - YYYY-MM-DD`. The release number carries no leading `v`; the
+# compare links and the contract line do. Getting that backwards is the first
+# thing a hand edit gets wrong, which is why nothing hand-writes it now.
+release_render_changelog_heading() {
+	[ "$#" -eq 2 ] || return 2
+	printf '## [%s] - %s\n' "${1#v}" "$2"
+}
+
+# The moving link: always the version just cut, compared against HEAD.
+release_render_unreleased_link() {
+	[ "$#" -eq 1 ] || return 2
+	printf '[Unreleased]: %s/%s...HEAD\n' "$_RELEASE_COMPARE_BASE" "$1"
+}
+
+# The frozen link a release adds once. Its label is the release number and its
+# range is tag-to-tag, so both spellings of the version appear in one line.
+release_render_release_link() {
+	[ "$#" -eq 2 ] || return 2
+	printf '[%s]: %s/%s...%s\n' "${1#v}" "$_RELEASE_COMPARE_BASE" "$2" "$1"
+}
+
 release_validate_current_documentation() {
 	[ "$#" -ge 4 ] && [ "$#" -le 5 ] || return 2
 	local repo_root=$1 version=$2 image_count=$3 soak_count=$4
@@ -45,6 +111,7 @@ release_validate_current_documentation() {
 	local release_number=${version#v} changelog="$repo_root/CHANGELOG.md"
 	local document block contract_line section_count previous_version link_count
 	local transition_line referenced release_heading dated_heading unreleased_heading
+	local expected_line
 	# ONE human authority for the release contract. It was four documents, then
 	# two, and every copy was correct only because this validator held all of
 	# them to the same canonical counts -- controlled duplication is still
@@ -127,14 +194,19 @@ release_validate_current_documentation() {
 	' "$changelog") || return
 	[[ "$previous_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 		|| _release_documentation_error "CHANGELOG.md [$release_number] section has no preceding-release section" || return
-	link_count=$(grep -Fxc "[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/$version...HEAD" "$changelog" || true)
+	# Both links are compared against the renderer that writes them, so the
+	# format lives in exactly one place and a mismatch has one repair:
+	# `make release-prepare VERSION=<version>`. Neither is ever hand-authored.
+	expected_line=$(release_render_unreleased_link "$version") || return
+	link_count=$(grep -Fxc "$expected_line" "$changelog" || true)
 	[ "$link_count" -eq 1 ] \
-		|| _release_documentation_error "CHANGELOG.md has no exact $version...HEAD Unreleased link" || return
-	link_count=$(grep -Fxc "[$release_number]: https://github.com/matt-garman/mcu-bypass-firmware/compare/$previous_version...$version" "$changelog" || true)
+		|| _release_documentation_error "CHANGELOG.md has no exact $version...HEAD Unreleased link; re-run release-prepare for $version" || return
+	expected_line=$(release_render_release_link "$version" "$previous_version") || return
+	link_count=$(grep -Fxc "$expected_line" "$changelog" || true)
 	[ "$link_count" -eq 1 ] \
-		|| _release_documentation_error "CHANGELOG.md has no exact $previous_version...$version release link" || return
+		|| _release_documentation_error "CHANGELOG.md has no exact $previous_version...$version release link; re-run release-prepare for $version" || return
 
-	contract_line="**Current release contract:** \`$version\`; seven release parts; $image_count images; $soak_count soak combinations; six modular targets; four shell source files."
+	contract_line=$(release_render_contract_line "$version" "$image_count" "$soak_count") || return
 	# A bounded declaration states the SOURCE contract; retained evidence lives
 	# in a release directory that a source commit provably cannot carry. The cut
 	# creates release/<version>/, and scripts/verify-release-history.sh rejects a

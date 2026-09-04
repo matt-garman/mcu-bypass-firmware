@@ -11,13 +11,25 @@ _MAKE_SERIAL_WORKTREE_ID := $(shell stat -Lc '%d:%i' . 2>/dev/null)
 ifeq ($(_MAKE_SERIAL_WORKTREE_ID),)
 $(error ERROR: stat is required to identify the worktree serialization lock)
 endif
-# Release configuration queries and the two release goals must reach the
-# release guards without first executing the selected cross-compiler through
-# parse-time discovery below. A valid release runs those probes in its nested
-# build graphs after the guards pass; an invalid one stops before any toolchain
-# process, recipe, scratch directory, clean, or build.
+# The goals that mean "the reviewed production release identity, and nothing
+# else". Named once because five parse-time guards below select on this set: a
+# goal added to four of them is a goal that reaches the fifth unguarded, and the
+# omission is invisible until someone exercises exactly that combination.
+#
+# release-prepare belongs here even though it neither builds nor stages. It
+# WRITES the canonical image and soak counts into the bounded declaration that
+# every later gate compares against, so an identity-changing override would be
+# baked into the document rather than rejected -- the same defect the build
+# goals are guarded against, one document earlier.
+RELEASE_CONFIG_GOALS := release release-preflight release-prepare
+
+# Release configuration queries and the release goals must reach the release
+# guards without first executing the selected cross-compiler through parse-time
+# discovery below. A valid release runs those probes in its nested build graphs
+# after the guards pass; an invalid one stops before any toolchain process,
+# recipe, scratch directory, clean, or build.
 _RELEASE_NO_TOOL_PARSE := $(strip \
-	$(filter release release-preflight,$(MAKECMDGOALS)) \
+	$(filter $(RELEASE_CONFIG_GOALS),$(MAKECMDGOALS)) \
 	$(filter print-RELEASE_CONTRACT_VALID print-RELEASE_IMAGES \
 		print-RELEASE_SOAK_NAMES print-RELEASE_IDENTITY_PINNED \
 		print-RELEASE_IDENTITY_SELECTED print-RELEASE_IDENTITY_IMAGES \
@@ -227,6 +239,13 @@ override PIC10F320_VARIANTS_ALL := $(_MAKE_SERIAL_PIC320_VARIANTS_SAFE)
 override PIC12F675_TARGET_VARIANT := $(if $(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_SAFE),$(_MAKE_SERIAL_PIC12F675_TARGET_VARIANT_SAFE),cd4053_simple)
 
 _make_shell_quote = '$(subst ','"'"',$(1))'
+# Deliberately NOT $(RELEASE_CONFIG_GOALS): this selects the goals whose SCRIPT
+# acquires the worktree lock itself, which is what licenses skipping the
+# serialization pass. release-prepare does not acquire it, so it must not claim
+# to: setting _MAKE_RELEASE_LOCK_IN_SCRIPT for it would record a lock nothing
+# holds. It goes through the ordinary serialized path instead, which costs it a
+# recursive pass and is affordable because it builds nothing -- it rewrites two
+# documents and exits.
 _MAKE_RELEASE_DIRECT := $(if $(filter release release-preflight,$(MAKECMDGOALS)),$(if $(word 2,$(MAKECMDGOALS)),,1))
 _MAKE_SERIAL_LOCK_WAS_HELD := $(if $(filter $(_MAKE_SERIAL_WORKTREE_ID),$(_MAKE_SERIAL_LOCK_HELD)),1,0)
 ifeq ($(_MAKE_RELEASE_DIRECT),1)
@@ -1006,6 +1025,7 @@ FORCE:
         attiny13a-readfuses attiny13a-fuses attiny13a-flash attiny13a-program \
         attiny13a-trace \
         test test-fast test-long stress python-version-valid \
+        release-prepare \
         test-host test-sim-attiny13a test-sim-tinyx5 \
         test-model-check test-fault-inject test-fuses test-symbolic test-cbmc test-mutation test-mutation-sandbox \
         test-attiny202-output-oracle test-attiny202-delay-oracle test-attiny202-fault-oracle \
@@ -1025,7 +1045,7 @@ FORCE:
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
-        test-reference-contract \
+        test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
@@ -3246,7 +3266,7 @@ TEST_GATES_LATE = \
 		test-lockstep-progress test-soak-timing test-xc8-helpers \
 		test-pic-toolchain-assert \
         test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
-        test-reference-contract \
+        test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
@@ -3560,6 +3580,14 @@ test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 .PHONY: test-reference-contract
 test-reference-contract: python-version-valid test/test_reference_contract.py
 	@python3 test/test_reference_contract.py
+
+# The release preparer writes the derived release lines and only those. Its
+# centrepiece replays the v0.9.12 cut out of this repository's own history and
+# requires byte identity with the four commits that produced it by hand.
+.PHONY: test-release-prepare
+test-release-prepare: test/test_release_prepare.sh scripts/release-prepare.sh \
+		scripts/release-documentation.sh
+	@./test/test_release_prepare.sh
 
 # Every reviewed resource ceiling is enforced where it is declared, and this
 # gate measures what the build produced against those declarations: the ceilings
@@ -8324,7 +8352,7 @@ override RELEASE_UNSAFE_OVERRIDE_VALUE_NAMES := $(sort $(foreach n,\
 # MAKEOVERRIDES, bypassing the literal values above. A dollar cannot occur in a
 # valid release version and is not a supported RELEASE_ARGS expansion syntax, so
 # reject it in the outer process before serialization can re-parse it.
-ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
+ifneq ($(filter $(RELEASE_CONFIG_GOALS),$(MAKECMDGOALS)),)
 ifneq ($(findstring $(_RELEASE_DOLLAR),$(_RELEASE_VERSION_LITERAL)$(_RELEASE_ARGS_LITERAL)),)
 $(error VERSION and RELEASE_ARGS must not contain dollar signs)
 endif
@@ -8332,6 +8360,14 @@ endif
 # The script asks for this one value before any other Makefile setting. Apply the
 # same release-input and inventory checks to that query so direct script use has
 # the same no-tools/no-scratch failure boundary as `make release`.
+# Deliberately the two build goals plus the contract query, NOT
+# $(RELEASE_CONFIG_GOALS). release-prepare is not in _MAKE_RELEASE_DIRECT, so it
+# reaches its recipe through the serialization wrapper, and that wrapper's own
+# recursive pass sets MAKE and _MAKE_SERIAL_LOCK_HELD -- which this rule would
+# then report as unsupported release overrides. The identity guards below are
+# what protect release-prepare, and they are the ones that matter to it: they
+# reject an override that would change the counts it writes into the bounded
+# declaration. Widening this rule instead would refuse the goal outright.
 ifneq ($(filter release release-preflight print-RELEASE_CONTRACT_VALID,$(MAKECMDGOALS)),)
 ifneq ($(origin MAKEFILES),default)
 $(error refusing production release configuration under unsupported release overrides: MAKEFILES injects $(MAKEFILES))
@@ -8351,7 +8387,7 @@ endif
 ifneq ($(strip $(RELEASE_UNSUPPORTED_OVERRIDE_NAMES)),)
 $(error refusing production release configuration under unsupported release overrides: $(RELEASE_UNSUPPORTED_OVERRIDE_NAMES). Only version/options, tool paths, build directories, and manifest-disclosed fuse values may be overridden)
 endif
-ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
+ifneq ($(filter $(RELEASE_CONFIG_GOALS),$(MAKECMDGOALS)),)
 ifneq ($(strip $(RELEASE_IDENTITY_FIELD_DRIFT)),)
 $(error refusing a release goal under an overridden production release identity: $(RELEASE_IDENTITY_FIELD_DRIFT). A release always means the reviewed identity declared by RELEASE_IDENTITY_PINNED -- seven parts, 21 images, 18 soak combinations. Re-run without those overrides; build-directory and tool-path overrides stay available)
 endif
@@ -8385,7 +8421,7 @@ $(error pinned RELEASE_IDENTITY_SOAKS contains $(words $(RELEASE_IDENTITY_SOAKS)
 endif
 endif
 endif
-ifneq ($(filter release release-preflight,$(MAKECMDGOALS)),)
+ifneq ($(filter $(RELEASE_CONFIG_GOALS),$(MAKECMDGOALS)),)
 # A release goal means the reviewed production identity, and nothing else. Fail
 # at PARSE time -- before the recipe runs, before the worktree lock is taken,
 # before make-release.sh creates a scratch directory -- so an identity-changing
@@ -8397,6 +8433,22 @@ ifneq ($(RELEASE_IDENTITY_DRIFT),)
 $(error refusing a release goal under an overridden production release identity: $(RELEASE_IDENTITY_DRIFT). A release always means the reviewed identity declared by RELEASE_IDENTITY_PINNED -- seven parts, 21 images, 18 soak combinations. Re-run without those overrides; build-directory and tool-path overrides stay available)
 endif
 endif
+
+# Write the derived release lines into CHANGELOG.md and release/README.md.
+#
+# The counts come from this Makefile's canonical sets rather than from a nested
+# query inside the script, so the declaration the preparer writes is bound to
+# the inventory this Makefile will actually build -- which is the property the
+# validator's exact-contract-line check exists to establish. VERSION reaches the
+# script through the environment, exactly as it does for the release goals, so
+# untrusted command-line text never becomes recipe shell syntax.
+#
+# RELEASE_PREPARE_ARGS carries the options: --check to report staleness and
+# write nothing, --date to override the release date.
+release-prepare:
+	./scripts/release-prepare.sh \
+		--images $(words $(RELEASE_IMAGES)) \
+		--soaks $(words $(RELEASE_SOAK_NAMES)) $(RELEASE_PREPARE_ARGS)
 
 release-preflight:
 	./scripts/make-release.sh --preflight
@@ -8580,6 +8632,7 @@ help:
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
 	@echo "  test-reference-contract  live references resolve and durable authorities have one lifecycle (included in test)"
+	@echo "  test-release-prepare  the release preparer writes the derived lines, and only those (included in test)"
 	@echo "  test-resource-tables  resource-document arithmetic/agreement + final-evidence contract regression (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
@@ -8612,6 +8665,11 @@ help:
 	@echo "  attiny13a-flash / attiny<n>-flash      flash the selected variant"
 	@echo "  attiny13a-program / attiny<n>-program  fuses + flash (fresh chip)"
 	@echo "Release:"
+	@echo "  release-prepare VERSION=vX.Y.Z: write the derived release lines into CHANGELOG.md"
+	@echo "                  and release/README.md (heading+date, both compare links, the bounded"
+	@echo "                  contract line, the pre-tag transition line). Writes no prose; refuses"
+	@echo "                  an empty [Unreleased] section and an already-cut version. Idempotent."
+	@echo "                  RELEASE_PREPARE_ARGS=--check reports staleness and writes nothing."
 	@echo "  release-preflight  check every release prerequisite without cleaning, building or staging"
 	@echo "                     (VERSION=vX.Y.Z requires final docs; tag/output state remains warnings)"
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
