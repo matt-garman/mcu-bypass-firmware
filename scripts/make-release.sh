@@ -1311,6 +1311,11 @@ PIC10F320_CLK_MHZ=$("$AWK" -v h="${PIC10F320_XTAL//[!0-9]/}" 'BEGIN{printf (h%10
 PIC12F675_CLK_MHZ=$("$AWK" -v h="${PIC12F675_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 if [ "$PREFLIGHT" -eq 1 ]; then
 	ok "all required release tools, headers, imports and staging-path capabilities are present."
+elif [ "$GIT_DIRTY" -eq 1 ]; then
+	# Only a dry run reaches here with a dirty tree; every publishable mode
+	# already died in section 0. This line used to report the tree as clean
+	# unconditionally, directly under the WARN that said it was not.
+	ok "working tree DIRTY @ $GIT_SHORT; tag $VERSION free; all tools present."
 else
 	ok "working tree clean @ $GIT_SHORT; tag $VERSION free; all tools present."
 fi
@@ -2476,22 +2481,55 @@ if [ "$staged_sorted" != "$wanted_sorted" ]; then
 fi
 ok "wrote SHA256SUMS over ${#IMAGES[@]} images and ${#RELEASE_HELPER_NAMES[@]} required artifact(s); staging directory holds exactly that image set."
 
-# Copy evidence. The per-combo soak logs and build/target logs are small and kept
-# in full. The exhaustive test-long transcript is large (100s of KB), duplicates
-# the detailed diagnostics of reproducible gates, and is transient diagnostic
-# output rather than required release evidence. Retain an exact source-bound PASS
-# record plus selected terminal output; tag CI independently reruns test-long,
-# but its hosted job log is subject to platform retention and is not an archive.
-for f in "$EVID"/*.log; do
-	case "$(basename "$f")" in
-		test-long.log)
+# Copy evidence, driven by the declared retained set rather than by a glob over
+# the working evidence directory.
+#
+# This loop used to iterate `"$EVID"/*.log`, so every retained member that is
+# not a .log needed its own separate copy below. The PIC12F675 matrix got one;
+# toolchain.txt -- retained, classified with a role, hashed into QUALIFICATION
+# and rendered into the MANIFEST table -- did not, and a glob cannot report a
+# file it never matched. The omission therefore surfaced two statements later as
+# a stat(1) failure while writing evidence/INDEX: after the 24-hour soak, with a
+# whole run to lose. Iterating RELEASE_EVIDENCE_FILES makes the retained set the
+# authority here as it already is everywhere else, so a member with no producer
+# is a named fatal error rather than a file silently left behind.
+#
+# The per-combo soak logs and build/target logs are small and kept in full. The
+# exhaustive test-long transcript is large (100s of KB), duplicates the detailed
+# diagnostics of reproducible gates, and is transient diagnostic output rather
+# than required release evidence. Retain an exact source-bound PASS record plus
+# selected terminal output; tag CI independently reruns test-long, but its
+# hosted job log is subject to platform retention and is not an archive.
+# `evidence_member` rather than the `evidence_base` its sibling loops use: the
+# retained set is iterated in three places, and test_release_provenance.sh pins
+# THIS loop's head as the line where evidence acceptance begins (it must follow
+# the classic-AVR byte binding and the checksum). A marker has to be unique to
+# be a position, so the loop that is a marker gets its own iterator name.
+for evidence_member in $RELEASE_EVIDENCE_FILES; do
+	case "$evidence_member" in
+		# Rendered below from the staged tree; it cannot list itself.
+		INDEX) continue ;;
+		# Staged from $PIC12F675_QUALIFIED_MATRIX below, beside the matrix
+		# verifier that binds the staged bytes to the qualification run.
+		pic12f675-qualified-matrix.json) continue ;;
+		test-long.summary.txt)
+			[ -f "$EVID/test-long.log" ] && [ ! -L "$EVID/test-long.log" ] \
+				&& [ -s "$EVID/test-long.log" ] \
+				|| die "no test-long transcript to retain a result from"
 			{ echo "# test-long retained result"; echo; \
 			  printf 'TEST_LONG_RESULT format=1 status=pass source_commit=%s target=test-long strict_tools=1 mutation_allow_skip=0\n' "$GIT_SHA"; \
 			  echo; echo "# Selected terminal output (the full transcript is not retained)."; echo; \
-			  grep -nE '^(===|--- |OK:|FAIL|cbmc:|MISRA|golden-model|killed|survived|mutant)' "$f" || true; \
-			  echo; echo "# --- last 20 lines ---"; tail -20 "$f"; \
-			} > "$OUTPUT_DIR/evidence/test-long.summary.txt" ;;
-		*) cp -p "$f" "$OUTPUT_DIR/evidence/" ;;
+			  grep -nE '^(===|--- |OK:|FAIL|cbmc:|MISRA|golden-model|killed|survived|mutant)' "$EVID/test-long.log" || true; \
+			  echo; echo "# --- last 20 lines ---"; tail -20 "$EVID/test-long.log"; \
+			} > "$OUTPUT_DIR/evidence/test-long.summary.txt" \
+				|| die "could not retain the test-long result" ;;
+		*)
+			[ -f "$EVID/$evidence_member" ] && [ ! -L "$EVID/$evidence_member" ] \
+				&& [ -s "$EVID/$evidence_member" ] \
+				|| die "retained evidence was never produced under $EVID: $evidence_member"
+			cp -p -- "$EVID/$evidence_member" \
+				"$OUTPUT_DIR/evidence/$evidence_member" \
+				|| die "could not stage retained evidence: $evidence_member" ;;
 	esac
 done
 cp -p -- "$PIC12F675_QUALIFIED_MATRIX" \

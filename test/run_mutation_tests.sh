@@ -164,7 +164,7 @@ resolve_pic10f322_mutation_hex() {
         print-PIC10F322_RELEASE_IMAGES) || return 1
     [ -n "$dir" ] && [ -n "$images" ] || return 1
     case $dir in *[[:space:]]*) return 1 ;; esac
-    matched=$(printf '%s\n' $images | grep -c -- "-${PIC10F322_MUTATION_VARIANT}\.hex$")
+    matched=$(printf '%s\n' $images | grep -c -- "-${PIC10F322_MUTATION_VARIANT}\.hex$" || true)
     [ "$matched" -eq 1 ] || return 1
     printf '%s/%s\n' "$dir" \
         "$(printf '%s\n' $images | grep -- "-${PIC10F322_MUTATION_VARIANT}\.hex$")"
@@ -2135,6 +2135,18 @@ EOF
     cat > "$interrupt_checker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# A bare `var=$(... grep ...)` that matches nothing takes this suite down with
+# `set -e` and NO output: the failure has no diagnostic, and any guard on the
+# next line never runs. Name the line instead of exiting mute. Deliberately no
+# `set -E` -- without errtrace the trap is not inherited by the command
+# substitution's subshell, so a failure is reported once rather than twice.
+# This only reports; `set -e` still does the exiting, so control flow is unchanged.
+# The `case $-` guard is required, not defensive: bash runs an ERR trap even
+# inside a deliberate `set +e` block, and several suites use one around a
+# command whose non-zero status IS the expected result (`make -q` returns 1).
+# Without the guard those print a spurious FAIL that lands in retained
+# release evidence, because test-long.summary.txt is built by grepping ^FAIL.
+trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 printf '%s\n' "$BASHPID" > "${MUTATION_INTERRUPT_CHECKER_PID:?}"
 timeout 30 "${MUTATION_INTERRUPT_IGNORE:?}" &
 printf '%s\n' "$!" > "${MUTATION_INTERRUPT_NESTED_PID:?}"

@@ -7,6 +7,18 @@
 # output directory, and leave tracked/nonignored worktree content unchanged on
 # every tested path.
 set -euo pipefail
+# A bare `var=$(... grep ...)` that matches nothing takes this suite down with
+# `set -e` and NO output: the failure has no diagnostic, and any guard on the
+# next line never runs. Name the line instead of exiting mute. Deliberately no
+# `set -E` -- without errtrace the trap is not inherited by the command
+# substitution's subshell, so a failure is reported once rather than twice.
+# This only reports; `set -e` still does the exiting, so control flow is unchanged.
+# The `case $-` guard is required, not defensive: bash runs an ERR trap even
+# inside a deliberate `set +e` block, and several suites use one around a
+# command whose non-zero status IS the expected result (`make -q` returns 1).
+# Without the guard those print a spurious FAIL that lands in retained
+# release evidence, because test-long.summary.txt is built by grepping ^FAIL.
+trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
@@ -1529,7 +1541,7 @@ preflight_exit_line=$(grep -n 'preflight passed: this host can start a release' 
 gate_call_line=$(grep -Fn 'release_reject_branch_only_documents "$REPO_ROOT"' \
 	"$release_script" | head -1 | cut -d: -f1)
 main_call_line=$(grep -Fn 'release_require_main_branch "$REPO_ROOT"' \
-	"$release_script" | head -1 | cut -d: -f1)
+	"$release_script" | head -1 | cut -d: -f1 || true)
 [ -n "$preflight_exit_line" ] && [ -n "$main_call_line" ] && [ -n "$gate_call_line" ] \
 	|| fail "could not locate the preflight exit and production release gates in make-release.sh"
 [ "$main_call_line" -gt "$preflight_exit_line" ] \
@@ -1548,7 +1560,7 @@ qualification_call_line=$(grep -Fn 'scripts/verify-release-qualification.sh "${q
 staged_call_line=$(grep -Fn 'release_validate_staged_documentation "$REPO_ROOT" "$OUTPUT_DIR" "$VERSION"' \
 	"$release_script" | head -1 | cut -d: -f1)
 handoff_line=$(grep -Fn 'staged -- next steps (run by hand)' \
-	"$release_script" | head -1 | cut -d: -f1)
+	"$release_script" | head -1 | cut -d: -f1 || true)
 [ -n "$qualification_call_line" ] && [ -n "$staged_call_line" ] && [ -n "$handoff_line" ] \
 	|| fail "could not locate the staging, staged-documentation and hand-off steps in make-release.sh"
 [ "$staged_call_line" -gt "$qualification_call_line" ] \

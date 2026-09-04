@@ -34,6 +34,18 @@
 # DEFAULT parameters, so it carries one AVR soak combination rather than all
 # six; check 4 covers the rest of that family by construction.
 set -euo pipefail
+# A bare `var=$(... grep ...)` that matches nothing takes this suite down with
+# `set -e` and NO output: the failure has no diagnostic, and any guard on the
+# next line never runs. Name the line instead of exiting mute. Deliberately no
+# `set -E` -- without errtrace the trap is not inherited by the command
+# substitution's subshell, so a failure is reported once rather than twice.
+# This only reports; `set -e` still does the exiting, so control flow is unchanged.
+# The `case $-` guard is required, not defensive: bash runs an ERR trap even
+# inside a deliberate `set +e` block, and several suites use one around a
+# command whose non-zero status IS the expected result (`make -q` returns 1).
+# Without the guard those print a spurious FAIL that lands in retained
+# release evidence, because test-long.summary.txt is built by grepping ^FAIL.
+trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"

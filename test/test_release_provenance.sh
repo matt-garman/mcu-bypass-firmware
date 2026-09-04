@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# A bare `var=$(... grep ...)` that matches nothing takes this suite down with
+# `set -e` and NO output: the failure has no diagnostic, and any guard on the
+# next line never runs. Name the line instead of exiting mute. Deliberately no
+# `set -E` -- without errtrace the trap is not inherited by the command
+# substitution's subshell, so a failure is reported once rather than twice.
+# This only reports; `set -e` still does the exiting, so control flow is unchanged.
+# The `case $-` guard is required, not defensive: bash runs an ERR trap even
+# inside a deliberate `set +e` block, and several suites use one around a
+# command whose non-zero status IS the expected result (`make -q` returns 1).
+# Without the guard those print a spurious FAIL that lands in retained
+# release evidence, because test-long.summary.txt is built by grepping ^FAIL.
+trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
@@ -425,8 +437,14 @@ mapfile -t avr_stage_bind_lines < <(grep -nF \
 # checksumming happens relative to staging, not its argument list.
 mapfile -t checksum_lines < <(grep -nF \
 	'( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}"' "$RELEASE")
+# Evidence acceptance begins at the head of the staging loop. That loop is
+# driven by the declared retained set, not by a glob over $EVID -- a glob cannot
+# report a member it never matched, which is how toolchain.txt reached staging
+# unstaged and failed the release AFTER the 24-hour soak. The retained set is
+# iterated in three places, so this marker pins the one with its own iterator
+# name; see the comment on that loop.
 mapfile -t evidence_copy_lines < <(grep -nF \
-	'for f in "$EVID"/*.log; do' "$RELEASE")
+	'for evidence_member in $RELEASE_EVIDENCE_FILES; do' "$RELEASE")
 [ "${#avr_final_hash_lines[@]}" -eq 1 ] \
 	&& [ "${#avr_stage_bind_lines[@]}" -eq 1 ] \
 	&& [ "${#checksum_lines[@]}" -eq 1 ] \
@@ -813,14 +831,14 @@ required_evidence_record=$(grep -oP "^\s*printf 'EVIDENCE_RESULT \K[^\\\\]*" "$Q
 	|| fail "make-release.sh writes EVIDENCE_RESULT '$produced_evidence_record' but the verifier derives '$required_evidence_record'"
 checks=$((checks + 1))
 
-produced_index_header=$(grep -cF "printf 'EVIDENCE_INDEX format=2 source_commit=%s" "$RELEASE")
+produced_index_header=$(grep -cF "printf 'EVIDENCE_INDEX format=2 source_commit=%s" "$RELEASE" || true)
 [ "$produced_index_header" = 1 ] \
 	|| fail "make-release.sh does not write exactly one EVIDENCE_INDEX header record"
 grep -qF 'grep -Fxq "EVIDENCE_INDEX format=2 source_commit=${q[source_commit]}"' "$QUALIFY" \
 	|| fail "verify-release-qualification.sh does not bind the EVIDENCE_INDEX header to source_commit"
 checks=$((checks + 1))
 
-produced_index_result=$(grep -oP "printf 'EVIDENCE_INDEX_RESULT \K[^\\\\]*" "$RELEASE" | head -1)
+produced_index_result=$(grep -oP "printf 'EVIDENCE_INDEX_RESULT \K[^\\\\]*" "$RELEASE" | head -1 || true)
 [ "$produced_index_result" = 'format=2 status=pass members=%d source_commit=%s' ] \
 	|| fail "make-release.sh writes an unexpected EVIDENCE_INDEX_RESULT shape: $produced_index_result"
 grep -qF 'index_result="EVIDENCE_INDEX_RESULT format=2 status=pass members=${#indexed_names[@]} source_commit=${q[source_commit]}"' "$QUALIFY" \
@@ -839,7 +857,12 @@ sealed_evidence=(
 	pic10f320-test.log pic10f320-test-target-variants.log
 	soak-build.log final-image-build.log
 )
-copy_evidence_line=$(grep -nF '# Copy evidence.' "$RELEASE" | cut -d: -f1)
+# Staging begins at the evidence loop's head, already located above. This used
+# to re-derive the position from the literal comment `# Copy evidence.`, so
+# rewording a comment silently relocated the boundary this block depends on --
+# and, because the assignment inherits the failed grep's status under `set -e`,
+# it exited 1 with no diagnostic at all. Pin the code, and pin it once.
+copy_evidence_line=$evidence_copy_line
 [[ "$copy_evidence_line" =~ ^[0-9]+$ ]] \
 	|| fail "could not locate release evidence staging"
 for sealed_name in "${sealed_evidence[@]}"; do
@@ -849,7 +872,7 @@ for sealed_name in "${sealed_evidence[@]}"; do
 		|| fail "$sealed_name has ${#seal_lines[@]} operation-closure seals, expected 1"
 	seal_line=${seal_lines[0]%%:*}
 	last_operation_line=$(grep -nF "\$EVID/$sealed_name" "$RELEASE" \
-		| grep -v 'seal_evidence_result' | cut -d: -f1 | sort -n | tail -1)
+		| grep -v 'seal_evidence_result' | cut -d: -f1 | sort -n | tail -1 || true)
 	[[ "$last_operation_line" =~ ^[0-9]+$ ]] \
 		|| fail "could not locate the final operation reference for $sealed_name"
 	[ "$seal_line" -gt "$last_operation_line" ] \
@@ -1019,7 +1042,7 @@ if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 fi
 checks=$((checks + 1))
 
-version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "$RELEASE")
+version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "$RELEASE" || true)
 [ "$version_assignments" -eq 11 ] \
 	|| fail "release has $version_assignments fail-closed executable version probes, expected 11"
 ! grep -Fq 'v1()' "$RELEASE" \

@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# A bare `var=$(... grep ...)` that matches nothing takes this suite down with
+# `set -e` and NO output: the failure has no diagnostic, and any guard on the
+# next line never runs. Name the line instead of exiting mute. Deliberately no
+# `set -E` -- without errtrace the trap is not inherited by the command
+# substitution's subshell, so a failure is reported once rather than twice.
+# This only reports; `set -e` still does the exiting, so control flow is unchanged.
+# The `case $-` guard is required, not defensive: bash runs an ERR trap even
+# inside a deliberate `set +e` block, and several suites use one around a
+# command whose non-zero status IS the expected result (`make -q` returns 1).
+# Without the guard those print a spurious FAIL that lands in retained
+# release evidence, because test-long.summary.txt is built by grepping ^FAIL.
+trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERIFY="$ROOT/scripts/verify-release-qualification.sh"
@@ -340,8 +352,9 @@ checks=$((checks + 1))
 # D4: the strict resource gate runs exactly twice, and neither run is optional.
 # The first is a fail-fast: it reads the same gate logs and images, so it must
 # run BEFORE the soak starts, and it must report OUTSIDE $EVID -- staging copies
-# every $EVID/*.log into the release, where the retained set must equal
-# RELEASE_EVIDENCE_FILES exactly. The second is the retained record: it must
+# each RELEASE_EVIDENCE_FILES member out of $EVID into the release, where the
+# retained set must equal that list exactly. The second is the retained record:
+# it must
 # consume the post-qualification logs and the final regenerated image set, not
 # the initial clean build, and it must land before the final source-provenance
 # check and staging.
@@ -354,7 +367,7 @@ for wiring in \
 		|| fail "release producer omits strict resource-evidence wiring: $wiring"
 done
 resource_invocations=$(grep -Fc -- \
-	'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' "$RELEASE")
+	'python3 "$REPO_ROOT/test/test_resource_tables.py" --root "$REPO_ROOT"' "$RELEASE" || true)
 [ "$resource_invocations" -eq 2 ] \
 	|| fail "release producer must run the strict resource gate exactly twice (found $resource_invocations)"
 presoak_resource_line=$(grep -Fn -- '>"$WORK/resource-tables-presoak.log" 2>&1' \

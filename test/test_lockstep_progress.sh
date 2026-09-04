@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# A bare `var=$(... grep ...)` that matches nothing takes this suite down with
+# `set -e` and NO output: the failure has no diagnostic, and any guard on the
+# next line never runs. Name the line instead of exiting mute. Deliberately no
+# `set -E` -- without errtrace the trap is not inherited by the command
+# substitution's subshell, so a failure is reported once rather than twice.
+# This only reports; `set -e` still does the exiting, so control flow is unchanged.
+# The `case $-` guard is required, not defensive: bash runs an ERR trap even
+# inside a deliberate `set +e` block, and several suites use one around a
+# command whose non-zero status IS the expected result (`make -q` returns 1).
+# Without the guard those print a spurious FAIL that lands in retained
+# release evidence, because test-long.summary.txt is built by grepping ^FAIL.
+trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-lockstep-progress.XXXXXX")
@@ -292,7 +304,7 @@ run_wedge() {
 	[[ "$output" == *"FATAL: core not advancing"* ]] \
 		|| { printf 'FAIL: %s %s wedge omitted the fatal progress error\n' \
 			"$label" "$stage" >&2; exit 1; }
-	fatal_count=$(grep -c 'FATAL: core not advancing' <<<"$output")
+	fatal_count=$(grep -c 'FATAL: core not advancing' <<<"$output" || true)
 	[ "$fatal_count" -eq 1 ] \
 		|| { printf 'FAIL: %s %s wedge reported %d fatal errors\n' \
 			"$label" "$stage" "$fatal_count" >&2; exit 1; }
@@ -343,7 +355,7 @@ run_soak_wedge() {
 	[[ "$output" == *"proc=$processor "* ]] \
 		|| { printf 'FAIL: %s %s wedge did not run the %s adapter\n' \
 			"$label" "$stage" "$processor" >&2; exit 1; }
-	fail_count=$(grep -c 'SOAK FAIL.*core not advancing' <<<"$output")
+	fail_count=$(grep -c 'SOAK FAIL.*core not advancing' <<<"$output" || true)
 	[ "$fail_count" -eq 1 ] \
 		|| { printf 'FAIL: %s %s wedge reported %d progress failures\n' \
 			"$label" "$stage" "$fail_count" >&2; exit 1; }
