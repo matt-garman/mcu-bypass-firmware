@@ -1584,8 +1584,8 @@ needed a two-word contiguous range and the largest free one was a single word,
 which is fragmentation at a full ceiling rather than a program two words too
 large. Freeing flash would not have settled it either, because that call shape
 consumes six of the eight hardware return-stack levels, leaving nothing beyond
-the deliberate two-level reserve. Those are dated 2026-08-05 figures for a
-spike build that was never shipped, not a measurement of any current image;
+the deliberate two-level reserve. Those are historical figures for a spike
+build that was never shipped, not a measurement of any current image;
 what carries forward is the conclusion, which is that Model B is now held in
 place by the budget as well as chosen on merit.
 
@@ -1804,12 +1804,11 @@ this design, with the same peripherals and the same CONFIG posture -- and
 **256 words of program flash, exactly half**. Everything below follows from that
 one number.
 
+// pic10f320-flash-overrun:start
 **The modular architecture does not fit, and that is measured rather
-than assumed.** Measured 2026-06-26 at source commit `0b44c0d` with free-tier
-XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189, the modular firmware for this part
-built at 356, 386 and
-381 words for the simple, mute and relay variants -- roughly 100 words over 256
-in every case, and hard link failures rather than near misses. Three
+than assumed.** The modular firmware for this part built roughly 100 words over
+256 for the simple, mute and relay variants alike -- hard link failures rather
+than near misses. Three
 source-level reductions were then priced rather than estimated. Packed enums
 saved nothing, because the optimizer already emitted identical code and packing
 shrank only the unconstrained RAM. Force-inlining the core saved nothing,
@@ -1821,11 +1820,15 @@ the most at 47 words, still left the image 53 words over, and was refused on
 correctness grounds that are stated in Failsafe Mechanisms rather than here,
 because they apply to every target. The two best ideas did not even compose:
 stacking them was *larger* than bit-packing alone, which is the signature of a
-floor. So `src/bypass_mcu_pic10f320.c` is a single self-contained file: the
+floor. Those are historical figures for builds that were never shipped, not a
+measurement of any current image; what carries forward is the conclusion, which
+is that this part has no room for the modular architecture.
+So `src/bypass_mcu_pic10f320.c` is a single self-contained file: the
 saturating integrator and the state machine are written directly in `main()`,
 debounce initialization directly in `init()`, and the three output variants are
 source-local static functions selected by `#if defined(OUTPUT_*)`. It links
 neither `src/bypass_pure.c` nor the modular output drivers.
+// pic10f320-flash-overrun:end
 
 **The seam, stated plainly.** Inlining by hand creates two expressions of the
 same algorithm that no compiler is keeping in step. On every other target that
@@ -1989,9 +1992,9 @@ The PIC12F675 is a modular target -- `src/bypass_mcu_pic12f675.c` and
 `src/bypass_pins_pic12f675.h` on top of the shared output drivers, compiling
 and linking the same `src/bypass_pure.c` -- and its shell shares no register
 code with the PIC10F322's. That it could be modular was established before the
-shell was written rather than discovered afterwards: measured 2026-08-05 on
-`main` at `0cfc72e`, with the pinned free-tier XC8 and device pack, a spike
-shell carrying the complete defensive layer built the three variants at 494,
+shell was written rather than discovered afterwards: on the pinned free-tier
+XC8 and device pack, a spike shell carrying the complete defensive layer built
+the three variants at 494,
 520 and 523 of the part's 1024 words. Roughly half the flash was spare, against
 39 words spare on the PIC10F322, so this part never faced the question
 <<pic10f320-architecture>> had to answer. Those are historical spike figures,

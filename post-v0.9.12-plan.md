@@ -22,7 +22,7 @@
 |---|---|---|---:|---|
 | A1 | Render the mechanical release edits instead of validating them | Strictness | 4-6 h | **done** |
 | A2 | Convert verbatim prose pins to marker blocks + keyword sets | Strictness | ~1 d | **done** |
-| A3 | Move the pinned measurement out of the design document | Strictness | 1 h | open |
+| A3 | Move the pinned measurement out of the design document | Strictness | 1 h | **done** |
 | A4 | Reconcile README and design doc with the gates that survive A2 | Strictness | 2 h | open |
 | A5 | Write down the enforcement register | Strictness | 2 h | open |
 | B1 | Restructure README for its two audiences | README | 3-4 h | open |
@@ -190,7 +190,7 @@ what they cost the author's voice:
 | Marker block + structural check | `HARDWARE_VALIDATION_LOG.md`'s `<!-- controlled-qualification:start -->` plus required `- **Field**` bullets (`release-documentation.sh:536,589`) | none |
 | Keyword set | `for required in ATtiny13a PIC10F320 'own image' fuse CONFIG` (`:634`) — requires the concepts, not a sentence | none |
 | Form-family regex, banning | the unscoped-ipecmd denial and the retired idiom, with code-span and quoted-span stripping so *naming* a retired claim is not *making* it (`:645-658`) | none |
-| Verbatim sentence, requiring | ~~`bounded_claims` (7), the programming claim (2 documents), the helper status (3 documents)~~ — **retired by A2**; only the frozen PIC10F320 measurement still uses it, and A3 removes that | total |
+| Verbatim sentence, requiring | ~~`bounded_claims` (7), the programming claim (2 documents), the helper status (3 documents), the frozen PIC10F320 measurement~~ — **retired by A2 and A3**; nothing in the tree pins a sentence any more | total |
 | Verbatim line, requiring | ~~the CHANGELOG compare links, the contract line~~ — **retired by A1**; those lines are machine-written now | total |
 
 `_release_flowed_text` collapses whitespace, so **rewrapping survives and
@@ -202,10 +202,11 @@ The project already reached the right conclusion once, at
 > *the same false claim survives an editor's rewrap and an adjective swap; what
 > it deliberately does NOT ban is a claim SCOPED to a route*
 
-A2 applied it to the rest. The two bottom rows are now empty of maintained
-prose, and the mechanism that emptied them -- a named fence plus a set of
+A2 applied it to the rest, and A3 took the last one. The two bottom rows are
+now empty, and the mechanism that emptied them -- a named fence plus a set of
 required terms, in `_release_check_claim_block` -- is the first two rows fused:
-the marker block bounds the claim, and the keyword set holds it.
+the marker block bounds the claim, and the keyword set holds it. Three
+techniques remain, and none of them costs the author a word.
 
 That analysis was applied to one check and not to the sixteen others. **This is
 not a philosophy change. It is finishing a conversion that was started and left
@@ -475,6 +476,81 @@ dates.
 Firmware is untouched; this is a documentation and gate edit.
 
 Size: 1 h.
+
+**Landed.** The last exact-sentence pin in the project is gone, and
+`DESIGN_DOCUMENTATION.adoc` now carries **no date and no commit ID at all** —
+three dates and two commit IDs, against the 2-of-3 and 1-of-3 this section
+predicted.
+
+**What the pin actually was.** `git blame` settles it: the date `2026-06-26`
+was the maintainer's, but the clause that pinned it — *"at source commit
+`0b44c0d` with free-tier XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189"* — was
+inserted by `e16517d9`, the very commit that established the current-fact rule.
+That commit deleted the measured simavr tables and wrote the remedy in the
+document itself:
+
+> *The exact Classic-AVR intervals are results of the source, compiler and
+> simavr run, so the harness emits them and any durable result belongs in
+> release evidence rather than this design document maintaining a second
+> current table.*
+
+It then made one exception, for this passage, and mitigated the exception by
+binding it to a revision. A3 removes the exception rather than the rule.
+
+**Where the measurement went, given that it cannot go to the release record.**
+The measured thing — a *modular* build of the PIC10F320 — is not a shipped
+image and never was, so `test-resource-tables` has nowhere to put it. But this
+document had already solved that case twice, for the PIC10F322 ISR spike and
+the PIC12F675 modular spike, and in both places the remedy is the same phrase:
+*"not a measurement of any current image; what carries forward is the
+conclusion"*. The PIC10F320 passage is the one that never got it. It has it
+now, in the document's own words:
+
+> Those are historical figures for builds that were never shipped, not a
+> measurement of any current image; what carries forward is the conclusion,
+> which is that this part has no room for the modular architecture.
+
+**Which numbers left and which stayed, and why they differ.** The three variant
+counts (356, 386, 381) were a restatement of *"roughly 100 words over 256 in
+every case"*, which the same sentence already said — a redundant current-ish
+measurement, so they went. The PIC12F675 spike's counts (494, 520, 523 of 1024)
+stayed, because they carry a comparison the passage explicitly draws against
+39 words spare on the PIC10F322, and nothing else states it. The priced
+reductions (12, 47, 53 words) stayed for the same reason: they are the prices of
+options that were **refused**, which is history by construction, and the new
+framing sentence now covers them.
+
+**The gate that replaced it.** One fenced claim and one ban:
+
+| Rule | Kind | Holds |
+|---|---|---|
+| `pic10f320-flash-overrun` | fenced claim | `modular`, `256`, `words`, a *does-not-fit* form family (does/did/would/can not fit·link·build·compile, cannot, never fits, too big·large, over·beyond 256, overrun, exceed, no room, out of flash·room·space, link failures, failed to link), and an empiricism group (measured, priced, built, observed, compiled) |
+| no dates, no revisions | ban, `current_fact_rules` | `DESIGN_DOCUMENTATION.adoc` may not contain an ISO date, an `at\|on [source ]commit <sha>`, or a `main\|HEAD at <sha>` |
+
+The ban is the half that keeps A3 from being undone. The provenance pin existed
+*because* a measurement sat in durable prose; removing the measurement without
+closing that door just invites the next author to reach for the same mitigation.
+The rule states the principle instead: git already records when a thing was
+written and against what.
+
+The direction is enforced as a *form family* rather than a keyword, because
+`modular` + `256` + `words` + `measured` are all satisfied by a block that says
+the modular firmware **fit**. That is the inversion case, and it has a negative
+test.
+
+**Evidence.** `test_release_preflight`: 268 checks, 0 failures, up from 264 --
+five new cases replacing one retired pin. `test_release_qualification`: 231
+checks, 0 failures, unchanged; all fourteen design-contract patterns still match
+the edited document. `test_reference_contract` 21/0, `test_release_prepare`
+35/0, `test-makefile-name-contract` 48/0, `test-todo-index` 99/0. `asciidoctor`
+renders the document with zero warnings and the `//` markers emit nothing, so
+the fenced paragraph is unbroken. The five new cases: fence deleted rejects; the claim
+inverted while keeping every noun rejects; a date reintroduced rejects; a
+revision binding reintroduced rejects; and one **accept** case — the same
+overrun rewritten in another voice, leaning on a different member of the
+does-not-fit family than the shipped prose uses — passes. `TOOLCHAIN.adoc:80`
+pointed at the binding this task removed and was corrected to point at the
+history instead.
 
 ### A4 — Reconcile README and design doc with the gates that survive A2
 

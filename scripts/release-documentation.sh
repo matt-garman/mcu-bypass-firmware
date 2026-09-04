@@ -870,7 +870,12 @@ release_validate_hardware_claims() {
 #      bounded declaration in release/README.md, while current timing, size and
 #      current-draw results belong to build output or source/toolchain-bound
 #      release evidence. Focused lexical rules reject the concrete result and
-#      inventory forms removed from those two live specifications.
+#      inventory forms removed from those two live specifications, and
+#      DESIGN_DOCUMENTATION.adoc additionally carries no date and no source
+#      revision: binding durable prose to either one is the mitigation a
+#      misplaced measurement asks for, so the rule that removes the measurement
+#      has to close that door behind it. Git already records when a thing was
+#      written and against what.
 #
 # The ban is conditional on the sentinel, so it lifts by itself. When a part
 # does complete controlled qualification the sentinel goes, and calling that
@@ -886,7 +891,7 @@ release_validate_claim_boundaries() {
 	local repo_root=$1
 	local log="$repo_root/HARDWARE_VALIDATION_LOG.md"
 	local sentinel='**No controlled hardware-qualification record exists for any part.**'
-	local document label flowed entry required pattern description find_pid rc=0
+	local document label flowed entry pattern description find_pid rc=0
 	local marker terms terms_text block group
 	local -a claim_offenders=()
 	# Adjective-plus-noun only; see the ABSENCE note above for why.
@@ -906,18 +911,11 @@ release_validate_claim_boundaries() {
 	# it is the loudest possible failure.
 	local -a claim_blocks=(
 		$'README.md\tqualification-status\tstatement that controlled hardware qualification is outstanding\tcontrolled qualifications? bench(top)? procedures? identit(y|ies) config(uration)?s? readings? results? retain(s|ed|ing)?|captur(e|es|ed|ing)|record(s|ed|ing)?|keep(s|ing)?|kept HARDWARE_VALIDATION_LOG remaining|outstanding|deferred|pending|awaits|awaiting|unqualified|incomplete|not|yet|never|no[[:space:]]part'
+		$'DESIGN_DOCUMENTATION.adoc\tpic10f320-flash-overrun\trecord that the modular architecture overruns the PIC10F320 flash ceiling\tmodular 256 words? (does|did|would|will|can|could)[[:space:]]not[[:space:]](fit|link|build|compile)|cannot[[:space:]](fit|link|build|compile)|never[[:space:]](fit|fits|fitted|link|links|linked)|too[[:space:]](big|large)|over[[:space:]]256|beyond[[:space:]]256|overrun(s|ning)?|exceed(s|ed|ing)?|no[[:space:]]room|out[[:space:]]of[[:space:]](flash|room|space)|link[[:space:]]failures?|fail(s|ed|ing)?[[:space:]]to[[:space:]]link measur(e|es|ed|ement|ements)|priced|built|observ(e|ed|ation)|compil(e|ed|es|ation)'
 		$'DESIGN_DOCUMENTATION.adoc\tpic10f320-recorded-omission\trecord of which PIC10F320 context check was left out and why\tlatch(es)? TRISA 256 words? not|absent|omitted|omission|omit(s|ted)? variants?'
 		$'DESIGN_DOCUMENTATION.adoc\tpic10f320-assurance-seam\tstatement of what the PIC10F320 assurance package does not establish\tseams? behaviou?r(al)? verif(y|ied|ies|ication) ship(s|ped|ping)? latch(es)? absent|not simulat(ed|or|ors|ion|ions|e)'
 		$'release/README.md\timage-attestation\tstatement of what the reproducibility check publicly attests\tattest(ation|s|ed)? binaries|images source compil(es|ed|ation|e) reproduc(ibility|ible|es|ed|tion|e)|rebuild(s|ing)?'
 		$'release/README.md\thistorical-images\tstatement of why superseded images stay published\tretain(ed|s)? historical integrity reproduc(ibility|ible|es|ed|tion|e)'
-	)
-	# Still pinned as an exact sentence, deliberately and temporarily: this one
-	# is a frozen MEASUREMENT rather than the maintainer's prose, and its
-	# numbers are only meaningful beside the source commit and toolchain that
-	# produced them. Rewording it is not editorial. It leaves the durable
-	# documentation altogether rather than growing a fence.
-	local -a pinned_measurements=(
-		"DESIGN_DOCUMENTATION.adoc|Measured 2026-06-26 at source commit \`0b44c0d\` with free-tier XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189"
 	)
 	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
 	# alternation available without inventing an escaping convention.
@@ -927,23 +925,11 @@ release_validate_claim_boundaries() {
 		$'TOOLCHAIN.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)-part,[[:space:]]*[0-9]+-image,[[:space:]]*[0-9]+-soak-combination[[:space:]]+product[[:space:]]+set|build(s|ing)?[[:space:]]+(its[[:space:]]+)?([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+images[[:space:]]+into[[:space:]]+the[[:space:]]+published[[:space:]]+product[[:space:]]+set\trestates current release topology outside release/README.md'
 		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
 		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
+		$'DESIGN_DOCUMENTATION.adoc\t[0-9]{4}-[0-9]{2}-[0-9]{2}|(at|on)[[:space:]]+(source[[:space:]]+)?commit[[:space:]]+.?[0-9a-f]{7}|(main|HEAD)[[:space:]]+at[[:space:]]+.?[0-9a-f]{7}\tbinds durable design prose to a date or a source revision'
 	)
 
 	for entry in "${claim_blocks[@]}"; do
 		_release_check_claim_block "$repo_root" "$entry" || rc=1
-	done
-
-	for entry in "${pinned_measurements[@]}"; do
-		label=${entry%%|*}
-		required=${entry#*|}
-		document="$repo_root/$label"
-		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
-			|| { _release_documentation_error "document owning a pinned measurement is not a regular nonempty file: $label" || rc=1; continue; }
-		flowed=$(_release_flowed_text "$document") || return
-		case "$flowed" in
-			*"$required"*) ;;
-			*) _release_documentation_error "$label no longer states its pinned measurement verbatim: $required" || rc=1 ;;
-		esac
 	done
 
 	for entry in "${current_fact_rules[@]}"; do

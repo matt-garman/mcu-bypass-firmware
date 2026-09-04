@@ -2356,14 +2356,47 @@ reword_claim_block release/README.md historical-images \
 	'They stay published purely so the historical record stays whole and every past release still reproduces; nothing about keeping them is an endorsement, and their integrity is all that is retained.'
 assert_boundaries_accepts 'a rewritten retention limit'
 
-# The one remaining exact-sentence pin, and it is not prose: a frozen
-# measurement is only meaningful beside the source commit and toolchain that
-# produced it, so rewording it is not an editorial act. It leaves the durable
-# documentation entirely rather than growing a fence -- see the plan's A3.
+# The PIC10F320 exists as a hand-inlined single file for exactly one reason,
+# and that reason is a measured overrun. A reader who loses it is left with an
+# unexplained departure from every other target's architecture.
 write_boundaries_fixture
-drop_claim_line DESIGN_DOCUMENTATION.adoc 'Measured 2026-06-26 at source commit'
-assert_boundaries_rejects 'a historical sizing result that drops its source/toolchain binding' \
-	'DESIGN_DOCUMENTATION.adoc no longer states its pinned measurement verbatim'
+drop_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun
+assert_boundaries_rejects 'a design document that drops why the PIC10F320 is hand-inlined' \
+	'DESIGN_DOCUMENTATION.adoc must carry exactly one well-formed pic10f320-flash-overrun block'
+
+# The direction is the claim. A block naming the architecture, the ceiling and
+# the measurement, but no longer saying the one overran the other, has inverted
+# the record while keeping every noun in it.
+write_boundaries_fixture
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun \
+	'The modular firmware for this part was measured at 256 words for the simple, mute and relay variants, so the modular architecture was kept.'
+assert_boundaries_rejects 'a design document whose PIC10F320 sizing record no longer overruns' \
+	"DESIGN_DOCUMENTATION.adoc's pic10f320-flash-overrun block no longer states"
+
+# ACCEPTED: the same overrun, another voice, and a different member of the
+# does-not-fit family than the shipped prose leans on.
+write_boundaries_fixture
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun \
+	'I did not guess at this. The modular firmware simply does not fit: I built all three variants, each came out roughly a hundred words too large for the 256 this part has, and the linker refused outright rather than missing narrowly.'
+assert_boundaries_accepts 'a rewritten PIC10F320 overrun record'
+
+# A3 retired the last exact-sentence pin in this project. It existed because a
+# measurement had been placed in durable design prose and binding its
+# provenance was the mitigation; the rule's own remedy is that the measurement
+# leaves. These two keep the mitigation from creeping back in its place --
+# nothing in this document is dated, and nothing in it is pinned to a revision,
+# because git already records both.
+write_boundaries_fixture
+printf '\nMeasured 2026-06-26 with the pinned toolchain, the shell built at 356 words.\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'a design guide dating its own prose' \
+	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
+
+write_boundaries_fixture
+printf '\nThat was established at source commit `0b44c0d` on the pinned toolchain.\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'a design guide pinning its own prose to a revision' \
+	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
 
 # 2. CURRENT FACTS. Stable design/tool behavior remains in these documents;
 # changing release topology and source-dependent results do not.
