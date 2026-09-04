@@ -60,7 +60,9 @@ polarity. With the associated TMUX4053 board pull-down contract, an absent or
 undriven MCU therefore selects ENGAGED instead of the intended fail-safe
 BYPASS state.
 
+<!-- historical-images:start -->
 These images are retained only for historical integrity and reproducibility.
+<!-- historical-images:end -->
 **Do not select or flash them for new TMUX4053 hardware.** Use release `v0.9.3`
 or later and choose the standard CD4053 image for the target MCU, without
 `_tmux` in the filename (`bypass_cd4053*.hex` / `bypass_mute*.hex` in the
@@ -228,6 +230,7 @@ recovery, backfill an authenticated full Git mirror or offline archive under
 independent control, and demonstrate restoration from it. Retained hashes alone
 are not an archive. Until those steps are complete, loss of the hosting service
 is recovered from Git and authorizes no repository cleanup.
+   <!-- image-attestation:start -->
 
 2. **Reproducibility.** The Intel-HEX images are byte-deterministic for a fixed
    toolchain — `objcopy` ihex output contains only the program's code/data
@@ -239,6 +242,7 @@ is recovered from Git and authorizes no repository cleanup.
    attestation that *these binaries are exactly what the tested source compiles
    to* — you do not have to take the maintainer's word for it, and you can run
    the same check yourself (see "Reproduce" below).
+   <!-- image-attestation:end -->
 
 `SHA256SUMS` is also signed (`SHA256SUMS.asc`), and the release tag is a signed
 git tag, so you can additionally verify the maintainer vouched for the bytes.
@@ -507,6 +511,7 @@ those settings. The separately named `*-program-custom` goals are the explicit
 development path for a non-default programmer transaction and are never
 published as release instructions.
 
+<!-- pic12f675-helper-status:start -->
 **PIC12F675 is not a raw write target, on either route**, and the board must be
 externally powered for both. Programming a downloaded image needs no source
 checkout and no build toolchain: pass the release HEX to this release's
@@ -514,6 +519,7 @@ checkout and no build toolchain: pass the release HEX to this release's
 transaction in [`FLASHING.md`](../FLASHING.md).
 The helper's `ipecmd` route is published and software-tested, but it is not
 hardware-qualified.
+<!-- pic12f675-helper-status:end -->
 
 *Programming from a source checkout of this release's tag* (the development and
 release-provenance path). For each device, choose new baseline and result paths

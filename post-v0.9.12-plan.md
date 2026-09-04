@@ -21,7 +21,7 @@
 | ID | Task | Workstream | Size | Status |
 |---|---|---|---:|---|
 | A1 | Render the mechanical release edits instead of validating them | Strictness | 4-6 h | **done** |
-| A2 | Convert verbatim prose pins to marker blocks + keyword sets | Strictness | ~1 d | open |
+| A2 | Convert verbatim prose pins to marker blocks + keyword sets | Strictness | ~1 d | **done** |
 | A3 | Move the pinned measurement out of the design document | Strictness | 1 h | open |
 | A4 | Reconcile README and design doc with the gates that survive A2 | Strictness | 2 h | open |
 | A5 | Write down the enforcement register | Strictness | 2 h | open |
@@ -190,8 +190,8 @@ what they cost the author's voice:
 | Marker block + structural check | `HARDWARE_VALIDATION_LOG.md`'s `<!-- controlled-qualification:start -->` plus required `- **Field**` bullets (`release-documentation.sh:536,589`) | none |
 | Keyword set | `for required in ATtiny13a PIC10F320 'own image' fuse CONFIG` (`:634`) — requires the concepts, not a sentence | none |
 | Form-family regex, banning | the unscoped-ipecmd denial and the retired idiom, with code-span and quoted-span stripping so *naming* a retired claim is not *making* it (`:645-658`) | none |
-| Verbatim sentence, requiring | `bounded_claims` (7), the programming claim (2 documents), the helper status (3 documents) | total |
-| Verbatim line, requiring | the CHANGELOG compare links, the contract line | total |
+| Verbatim sentence, requiring | ~~`bounded_claims` (7), the programming claim (2 documents), the helper status (3 documents)~~ — **retired by A2**; only the frozen PIC10F320 measurement still uses it, and A3 removes that | total |
+| Verbatim line, requiring | ~~the CHANGELOG compare links, the contract line~~ — **retired by A1**; those lines are machine-written now | total |
 
 `_release_flowed_text` collapses whitespace, so **rewrapping survives and
 rewording does not** — precisely the operation this branch exists to perform.
@@ -201,6 +201,11 @@ The project already reached the right conclusion once, at
 
 > *the same false claim survives an editor's rewrap and an adjective swap; what
 > it deliberately does NOT ban is a claim SCOPED to a route*
+
+A2 applied it to the rest. The two bottom rows are now empty of maintained
+prose, and the mechanism that emptied them -- a named fence plus a set of
+required terms, in `_release_check_claim_block` -- is the first two rows fused:
+the marker block bounds the claim, and the keyword set holds it.
 
 That analysis was applied to one check and not to the sixteen others. **This is
 not a philosophy change. It is finishing a conversion that was started and left
@@ -324,6 +329,122 @@ inside every block can be rewritten without touching a gate.
 
 Size: ~1 d, mechanical, one claim at a time.
 
+**Landed.** The claim gates now hold *terms*, not sentences.
+
+One mechanism, in `scripts/release-documentation.sh`, built by generalizing what
+the tree already had rather than inventing a second convention:
+
+- `_release_marker_block` — was `_release_hardware_block`, which already fenced
+  `HARDWARE_VALIDATION_LOG.md` by marker name. It now accepts both spellings the
+  project writes, `<!-- name:start -->` in Markdown and `// name:start` in
+  AsciiDoc, and ignores indentation so a claim living inside a list item can be
+  fenced without the marker breaking the list. An absent fence and a malformed
+  one fail identically, so neither reads as "nothing to check".
+- `_release_claim_terms_text` — flows a block and drops the markup an author is
+  free to change. Underscores are deliberately **not** dropped: `_` is already a
+  word boundary for the matcher, so `_emphasis_` matches anyway, while removing
+  it would mangle every `SNAKE_CASE` filename a block names. A link contributes
+  both its label and its target, which is what lets a block be required to
+  *point at* the record that owns a fact without dictating the sentence around
+  the link.
+- `_release_claim_has_term` — one required-term group: an ERE alternation,
+  matched case-insensitively and bounded to whole words. A single word is just a
+  keyword, so keyword sets and form families need only one implementation.
+- `_release_check_claim_block` — the editorial contract, defined once. Both
+  validators drive it from a table.
+
+Nine fenced claims replaced seventeen-odd pinned sentences:
+
+| Marker | Document(s) | Was |
+|---|---|---|
+| `qualification-status` | `README.md` | verbatim sentence |
+| `pic10f320-recorded-omission` | `DESIGN_DOCUMENTATION.adoc` | verbatim sentence |
+| `pic10f320-assurance-seam` | `DESIGN_DOCUMENTATION.adoc` | two verbatim sentences |
+| `image-attestation` | `release/README.md` | verbatim sentence |
+| `historical-images` | `release/README.md` | verbatim sentence |
+| `pic12f675-helper-required` | `README.md`, `FLASHING.md` | verbatim sentence |
+| `pic12f675-helper-status` | `README.md`, `FLASHING.md`, `release/README.md` | verbatim sentence |
+| `pic12f675-disposition` | `DESIGN_DOCUMENTATION.adoc` | first-line prose anchor |
+| `document-lifecycle` | `README.md` | verbatim heading |
+
+Two conversions did **not** become keyword sets, because a keyword set would
+have been the wrong tool:
+
+- The **helper status** is a conjunction — published, *and* software-tested,
+  *and* not hardware-qualified. Three independent keywords are satisfied by a
+  block that keeps two parts and drops the third, which is the exact half-a-claim
+  defect the sentence was written to close. It is one ordered pattern instead,
+  so the connective prose is free and all three parts must still appear together.
+- The **fourteen design-contract sentences** in `test/test_release_qualification.sh`
+  are safety-relevant *numbers* wrapped in pinned scaffolding. Each is now an
+  ordered pattern that keeps every figure and every part association and lets the
+  prose between them move. Their negative coverage is generated from the table
+  itself: delete the span a rule matches, and that rule must stop matching — a
+  pattern that survives deletion of its own match was anchored on connective
+  prose, not on the fact it names.
+
+The CHANGELOG pins this section counted are already gone: A1 made those lines
+machine-written, so they are no longer anybody's to maintain.
+
+**Deliberately not converted, and recorded rather than silently skipped.**
+`test/test_release_qualification.sh` also pins six strings out of `TODO.md`'s
+`T3-pic12f675-bench` section, including their `**bold**` markup — for example
+``**1 - bandgap calibration bits (`BG<1:0>`) preserved on program.**``. These
+were left alone for now because the *numbering* really is an interface: the
+Makefile, the CI notes and the release documentation all cite those residual
+risks by their original numbers, so unlike the claims above, part of what is
+pinned is genuinely an API rather than prose. What is **not** API is the bold
+markup and the exact phrasing around each number, and that half should still be
+loosened. It is small, it is the same mechanism, and it belongs in A5's
+enforcement register as a known remaining pin rather than in an unrecorded
+backlog.
+
+**Evidence that the technique change worked.**
+
+- `release_validate_claim_boundaries` now **passes on the maintainer's own
+  rewritten README, with no prose change at all.** The whole document diff for
+  this task is ten added marker lines and zero altered words.
+- `test_reference_contract`: 21 checks, 0 failures. It was 5 failures, all
+  cascading from `### Document Lifecycle` versus the pinned `### Document
+  lifecycle` — one capital letter, which also broke four self-tests that use the
+  checked-in table as their control fixture. The heading is prose again; the
+  marker is the contract — and one of the three added checks is a control case
+  asserting that renaming that heading is still accepted.
+- `test_release_qualification`: 231 checks, 0 failures, up from 217. The extra
+  fourteen are the generated negative cases for the design-contract rules.
+- `test_release_preflight`: 264 checks, 0 failures, up from 246. The extra
+  eighteen are the fenced claims' negatives and, more importantly, their accept
+  cases. Run against a sandbox carrying restored content for the four A4 items
+  below, so what it measures is A2's machinery rather than A4's absence.
+- A design-contract rule had been broken by changing one `.` to a `;` in
+  "...sample cadence. PIC12F675 uses 1.024ms" — an edit that altered no claim, no
+  number and no part. It passes now.
+- Every claim carries a retained negative test: fence deleted, fence emptied,
+  fence left unclosed, claim inverted, and definition gutted while the denial
+  survives. Each also carries an **accept** case — the same commitment in another
+  voice — which is the case that fails if a future edit quietly re-pins prose.
+
+**A2 found no way to soften a property, and softened none.** What changed is
+which of the five techniques each claim uses, not what any claim asserts.
+
+**Handed to A4.** Three of these blocks have no prose to fence, because the
+voice rewrite removed the content rather than rewording it. These are content
+losses, not gate strictness, and two of them are safety facts:
+
+1. `README.md` / `pic12f675-helper-required` — that the part needs Python 3 and
+   the release helper *because its per-device factory calibration must be
+   preserved and verified*. A hardware hazard; the README now states only that a
+   script is needed, not why a raw programmer write is unsafe.
+2. `README.md` / `pic12f675-helper-status` — published, software-tested, not
+   hardware-qualified.
+3. `DESIGN_DOCUMENTATION.adoc` / `pic12f675-disposition` — release-supported from
+   `v0.9.9`, not hardware-qualified, deferred to TODO `T3-pic12f675-bench`.
+   Removed whole by `4d85ad7`.
+
+Each fails with a diagnostic naming the marker and what the block must own, so
+A4 is a writing task with a checklist rather than a hunt. The gates were
+validated against a sandbox carrying restored content for all three.
+
 ### A3 — Move the pinned measurement out of the design document
 
 `DESIGN_DOCUMENTATION.adoc:1808` is pinned verbatim as a bounded claim:
@@ -355,12 +476,14 @@ Firmware is untouched; this is a documentation and gate edit.
 
 Size: 1 h.
 
-### A4 — Reconcile README with the gates that survive A2
+### A4 — Reconcile README and design doc with the gates that survive A2
 
-Four assertions are currently red on this branch from the voice rewrite
-(`b3fa0bd`..`6964a00`). Expected and acceptable on a branch; they must be green
-before merge. Resolve them **after** A2, so the reconciliation is done against
-the loosened technique rather than against the byte-pins being retired:
+Seven assertions were red on this branch from the voice rewrite
+(`b3fa0bd`..`6964a00`) — six listed here when the plan was written, and a
+seventh (item 7) that only became visible once A2 unblocked the gates ahead of
+it. Expected and acceptable on a branch; they must be green before merge.
+Resolve them **after** A2, so the reconciliation is done against the loosened
+technique rather than against the byte-pins being retired:
 
 1. `### Document Lifecycle` vs. the literal `"### Document lifecycle"` —
    `test-reference-contract`, 5 failures including all three negative cases,
@@ -381,6 +504,67 @@ the loosened technique rather than against the byte-pins being retired:
    A1's. A2 should convert this anchor to a marker block like the rest.
 6. `DESIGN_DOCUMENTATION.adoc:56` reads `different harware`, introduced by the
    same rewrite.
+
+**A2 resolved items 1, 2 and 6; items 3, 4 and 5 are what remains, and they are
+writing tasks rather than gate arguments.** A2 converted every gate here from a
+pinned sentence to a fenced claim held to its terms, then re-checked each item
+against the maintainer's actual text:
+
+- **Item 1 (`### Document Lifecycle`) — closed.** The lifecycle table is bounded
+  by a `document-lifecycle` marker now, so the heading is prose again.
+  `test-reference-contract` is 18 checks, 0 failures.
+- **Item 2 (the qualification denial) — closed, and it was never a content
+  loss.** The rewritten paragraph still states the denial and still defines what
+  qualification requires; only the *wording* had moved. It now passes untouched.
+  The "However" reading below still deserves the maintainer's eye, but as an
+  editorial judgement, not a red gate.
+- **Item 6 (`harware`) — still open**, a one-character fix at
+  `DESIGN_DOCUMENTATION.adoc:56`.
+
+**Items 3, 4 and 5 are real content losses, and two of them are safety facts.**
+Each now fails with a diagnostic naming the marker and what the block must own:
+
+3. `README.md` needs a `pic12f675-helper-required` block saying the part needs
+   Python 3 and the release helper **because its per-device factory calibration
+   must be preserved and verified**. The README currently says a script is
+   required but not that a raw programmer write destroys the part's only copy of
+   its factory trim. That is the hazard, and it is the half that went missing.
+4. `README.md` needs a `pic12f675-helper-status` block: the helper's `ipecmd`
+   route is published and software-tested, and is **not** hardware-qualified.
+   `FLASHING.md` and `release/README.md` still carry this and were fenced in
+   place, unchanged.
+5. `DESIGN_DOCUMENTATION.adoc` needs a `pic12f675-disposition` block:
+   release-supported from `v0.9.9`, **not** hardware-qualified, deferred to TODO
+   `T3-pic12f675-bench`. `4d85ad7` removed the paragraph whole.
+
+The pre-A2 text for all three is recoverable — items 3 and 4 from `FLASHING.md`,
+which still states both, and item 5 from `git show 4d85ad7^`. They should be
+rewritten rather than reverted; the fences are what make that safe now.
+
+**7. `README.md` no longer publishes the enforced host compiler floor (GCC 10).**
+Found by running the preflight suite past the gates A2 unblocked — it had never
+reached this check before. `b3fa0bd` ("Simplify and 'humanize' README") removed
+the sentence; `main` still carries it, and `TOOLCHAIN.adoc` and `test/README.md`
+both still publish it correctly, so README is the only one out of step.
+
+This one is **not** a strictness problem and A2 deliberately did not touch the
+gate. `test/test_release_preflight.sh:2919` already collapses line wrapping
+before matching and already accepts two spellings, and its real property is that
+the *number* cannot drift from `MINIMUM_GCC` in
+`test/host_compiler_version.sh`. Nothing about it was fighting the rewrite; the
+requirement simply went missing, and it is one a reader needs before they can
+build anything. The removed sentence read:
+
+> All of them need a host C compiler (GCC 10 or newer, or Clang — see
+> [TOOLCHAIN](TOOLCHAIN.adoc)), matching `gcov`, Python 3.7 or newer, and Bash.
+
+Worth noting for A5 rather than acting on now: that gate accepts exactly two
+spellings, `GCC <n> or newer` and `Minimum host gcc version: <n>`. Listing the
+acceptable spellings is the same antipattern A2 retired everywhere else, and
+"GCC 10+" or "at least GCC 10" would fail it while publishing the identical
+requirement. Since drift detection only needs *gcc near the enforced number*,
+the wording could be freed without weakening anything. It belongs in the
+enforcement register as a known narrow form family.
 
 **One of these is substantive, not just a gate failure.** The rewrite now reads:
 

@@ -1,10 +1,12 @@
 # Flashing quick reference
 
+<!-- pic12f675-helper-required:start -->
 Command templates for putting a **released** image on a chip. Programming a
 downloaded release does not require the firmware development toolchain or a
 repository checkout. Most targets require only the released HEX and programmer
 CLI. PIC12F675 additionally requires Python 3 and the release's flashing helper
 because its per-device factory calibration must be preserved and verified.
+<!-- pic12f675-helper-required:end -->
 
 Images: <https://github.com/matt-garman/mcu-bypass-firmware/releases>, named
 `bypass-<mcu>-<variant>.hex`. Download `SHA256SUMS` and `SHA256SUMS.asc`
@@ -185,6 +187,7 @@ transaction rather than a command.
 
 ### Programming
 
+<!-- pic12f675-helper-status:start -->
 Needs Linux, Python 3, the downloaded release bundle, and MPLAB X 6.20
 `ipecmd`. The helper's `ipecmd` route is published and software-tested, but it
 is not hardware-qualified. Linux is a hard requirement of the guarded
@@ -204,6 +207,7 @@ helper supports, programmer-supplied Vdd is refused, and the documented external
 arrangement itself still awaits controlled hardware validation. Choose a NEW
 evidence directory per device; the helper creates it and refuses a path that
 already exists.
+<!-- pic12f675-helper-status:end -->
 
 ```sh
 IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar

@@ -1921,6 +1921,7 @@ rather than the mechanics: running the oracle inside every build proves what
 the recipe produced, not that the file was not modified afterwards. Release
 provenance and reproduction are separate evidence.
 
+// pic10f320-recorded-omission:start
 **One recorded omission.** The exact-`TRISA` direction check was ported here
 because it cost one word per variant; the general output-**latch** match was
 not, because in every formulation that preserves its meaning it overruns 256
@@ -1934,7 +1935,9 @@ forced-reset path like any other fault (Failsafe Mechanisms). The residual gap
 is therefore precise: a wrong LED or analog signal path can persist until the
 next accepted press. The context checksum is likewise absent here for the same
 capacity reason, with the range check still in force.
+// pic10f320-recorded-omission:end
 
+// pic10f320-assurance-seam:start
 **What this package does not establish,** stated so nobody has to infer it.
 The seam remains a seam: everything above is a behavioural assurance argument,
 and however thorough it is, it is a different kind of statement from "the
@@ -1947,6 +1950,7 @@ as above. And the hardware-bench properties -- watchdog and brown-out timing,
 absolute tick period, real-silicon pulse widths -- are simulated rather than
 proven, a limit this target shares with the PIC10F322 because both are
 validated in the same simulator; `test/README.md` carries the full list.
+// pic10f320-assurance-seam:end
 
 **Target-selection consequence.** Prefer another part whenever the choice of MCU
 is yours: the AVR Classic parts, the ATtiny202 and the PIC10F322 all compile
