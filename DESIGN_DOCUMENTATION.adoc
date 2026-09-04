@@ -3,9 +3,10 @@
 
 
 [[why-avr-classic]]
-== Why AVR Classic (ATtiny13a, ATtiny45, ATtiny85):
+== Why AVR Classic (ATtiny13a, ATtiny45, ATtiny85)
 
     * Readily available in SMD and through-hole
+    * "Legacy" parts as an advantge: an extremely mature product that has been deployed in countless applications *and* is still in production and readily available
     * Low cost
     * avr tools - mature, cross-platform, fully-featured free/open-source tooling
     * simavr - open-source hardware simulation
@@ -13,77 +14,49 @@
     * Trivial hardware implementation
     * Schmitt trigger GPIO pins
 
-This project also supports the Microchip PIC10F322 and PIC10F320, which have
-_some_ of the same benefits as AVR Classic, but the tooling is decidedly less
-compelling. Both use Microchip's XC8 compiler and PIC10-12Fxxx_DFP device pack.
-XC8 is not open source, although Microchip offers a limited free version; that
-free tier restricts the options that are available. PIC10F320's 256-word flash
-also requires the self-contained architecture described in
-<<pic10f320-architecture>>.
-
-A third PIC, the PIC12F675, is **release-supported from `v0.9.9`** on the same
-toolchain: release images, a place in the default `all` goal, and the full
-release pipeline, plus a guarded bench programming target (`make
-pic12f675-program`). Like every part here it has **not** completed controlled
-hardware qualification — its release rests on simulation, formal proof and
-static analysis, with that qualification deferred to the `1.x.y` pass (TODO
-`T3-pic12f675-bench`). No field-use report exists for this part either; for the
-parts that have one, see `HARDWARE_VALIDATION_LOG.md`, which keeps the two kinds
-of evidence apart. It is a *classic* mid-range core rather than the 32x's
-enhanced mid-range, which is why it needs its own shell — no `LATx` output
-latch, no `OSCCON`, no `TMR2`/`PR2` period register, and one shared prescaler
-that must be given to either the timer or the watchdog but not both. The design
-consequences of each are in <<pic12f675-architecture>>; the two that reach this
-section are the SRAM output shadow (below) and the 1.024 ms tick that follows
-from the prescaler decision.
-
 
 [[why-avr-xt]]
-== Why ATtiny202 (AVR-XT):
+== Why ATtiny202 (AVR-XT)
 
 The ATtiny202 is a tinyAVR 0-series part: same vendor as AVR Classic, but a
 different core generation (`avrxmega3`) with an entirely different peripheral
 set.  It is the modern-silicon member of the supported set.
 
-    * Still built by the same free/open avr-gcc + avr-libc toolchain, so the
-      open-tooling property that motivates AVR Classic is preserved
-    * Current production part rather than a mature/legacy one, with a
-      correspondingly long expected availability horizon
-    * 2 KB flash and 128 bytes SRAM: roughly double the ATtiny13a's capacities,
-      providing materially more resource headroom. Exact image occupancy is
-      reported by the build and retained with published release results.
-    * An **AEC-Q100 automotive-qualified** variant of this family exists
-      (125 °C), which is a meaningfully stronger environmental rating than any
-      other supported part carries
-    * A genuinely fuse-locked watchdog: once `WDTCFG` is programmed, the WDT
-      cannot be disabled by software at all (see Failsafe Mechanisms), which is
-      a stronger guarantee than the classic parts' WDTON fuse
+    * Also supported by the open-source `avrtools` (avr-gcc + avr-libc toolchain)
+    * Not a legacy legacy part, but still mature; we can expect a longer availability horizon compared to AVR Classic
+    * Roughly double the flash and SRAM of the ATtiny13a
+    * An **AEC-Q100 automotive-qualified** variant exists (125 °C)
+    * A genuinely fuse-locked watchdog: the WDT cannot be disabled by software
+      (a stronger guarantee than the classic parts' WDTON fuse)
     * Programmed over UPDI, a single-wire interface that does not consume the
       RESET pin the way debugWIRE does
 
-The trade-offs are honest ones and are recorded where they bite:
+Trade-offs versus AVR Classic:
 
-    * **Packaging.** The ATtiny202 is SOIC-8 / UDFN-8 only — there is no
-      through-hole DIP version.  For hand-built one-offs the ATtiny13a or
-      PIC10F322 remain the friendlier choice.
-    * **Device pack.** Building for it needs Microchip's ATtiny_DFP device
-      files, which the packaged avr-gcc 7.3.0 does not carry.  That is a
-      Microchip download (no account or EULA), fetched on demand and version
-      pinned; see TOOLCHAIN.adoc.  A modern from-source avr-libc (>= 2.2.0) has
-      native ATtiny202 support and would remove this dependency.
-    * **Simulation.** Neither simavr nor QEMU models the AVR8X core.  The
-      dynamic harness runs on yasimavr instead, a genuine behavioural
-      simulator that needs two vendored patches for this firmware, without
-      which a fuse-locked watchdog cannot run at all.  A third upstream
-      defect — the `SimLoop.run(n)` cycle rewind — is unpatched, and reaches
-      no timing assertion: the output tracer free-runs in millisecond
-      budgets and timestamps every pin edge from a signal hook, so
-      `attiny202-sim` does measure the delivered coil-pulse width
-      in-simulation.  The compiled design width is a separate claim, pinned
-      independently of any simulator by `attiny202-delay-oracle`, which
-      reads it out of the disassembled image.  See "Known gaps (AVR-XT —
-      hardware-bench only)" in test/README.md for exactly what that does
-      and does not cover.
+    * Packaging: the ATtiny202 is surface-mount only (though SOIC-8 to DIP-8 adapters exist)
+    * Vendor "Device Pack": avr-gcc v7.3.0 does not have Microchib's ATtiny_DFP
+      device files, which are required for compilation; it's a free download
+      that is fetched on demand and version pinned (see TOOLCHAIN.adoc).  Note
+      that newer avr-libc (>= 2.2.0) has native ATtiny202 support.
+    * Simulation: Neither simavr nor QEMU models the AVR8X core, but
+      [yasimavr](https://github.com/clesav/yasimavr) exists.  See "Known gaps
+      (AVR-XT - hardware-bench only)" in test/README.md for exactly what that
+      does/does not cover.
+
+
+== PIC Support
+
+This project also supports the Microchip PIC10F322, PIC10F320 and PIC12F675
+microcontrollers, which have _some_ of the same benefits as AVR Classic, but
+the tooling is decidedly less compelling.  They use Microchip's XC8 compiler and
+PIC10-12Fxxx_DFP device pack.  XC8 is not open source, although Microchip offers
+a limited free version; that free tier restricts the options that are
+available.  PIC10F320's 256-word flash also requires the self-contained
+architecture described in <<pic10f320-architecture>>.  The PIC10F32x ("enhanced
+mid-range") and PIC12F675 ("classic mid-range") parts have different harware
+cores, so their hardware-specific implementations ("shell") differ. See
+<<pic12f675-architecture>> for design considerations unique to the PIC12F675.
+
 
 
 == High-Level Functional Description
@@ -92,7 +65,7 @@ The microcontroller will be used with a physical human-operated
 footswitch (momentary, normally open), and a circuit-switching
 mechanism (an electric analog switch, CD4053/TMUX4053, or a two-coil
 latching mechanical relay).  These components comprise a sub-circuit
-of a larger effect circuit, typically for use in a pedal.
+of a larger effect circuit, typically for use in an effect pedal.
 
 The user uses the footswitch to toggle between two states, "engaged"
 and "bypass".  In the "engaged" state, the audio signal is routed
@@ -145,19 +118,18 @@ adverse conditions:
 
 == Caveats and Limitations
     * Every implementation except PIC12F675 uses a nominal 1ms timer-derived
-      sample cadence. PIC12F675 uses 1.024ms: four unprescaled 256us TMR0
-      rollovers counted in software. The AVR implementations sample in timer
-      ISRs, while the PIC implementations poll their timer flags. Under the
-      conservative +/-10% frequency envelope,
-      the 1ms targets span roughly 0.909-1.111ms per sample and PIC12F675 spans
-      roughly 0.931-1.138ms. The algorithm counts samples and still holds; the
+      sample cadence; PIC12F675 uses 1.024ms.  The AVR implementations sample
+      in timer ISRs, while the PIC implementations poll their timer flags.
+      Under the conservative +/-10% frequency envelope, the 1ms targets span
+      roughly 0.909-1.111ms per sample and PIC12F675 spans roughly
+      0.931-1.138ms. The algorithm counts samples and still holds; the
       resulting wall-time variation is not perceptible to the user.
     * Pop/click suppression is provided by the "4053 with muting"
       variant; the other two schemes (simple 4053, relay) do not
       have explicit pop/click suppression
     * The design could arguably be made more battery-friendly by use
       of a DEEP_SLEEP state when waiting for a footswitch press;
-      that may be considered for a future revision - but the current
+      that may be considered for a future revision; the current
       design bias is towards simplicity and verifiability
     * By design, no recovery is currently provided for a
       mechanically stuck switch
