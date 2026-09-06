@@ -1,0 +1,13 @@
+Loaded 904 .text at address 0x0
+Loaded 0 .data
+SOAK START: firmware=build_avr_classic/bypass-attiny45-cd4053_with_mute.elf  MCU=attiny45  F_CPU=1000000 Hz
+SOAK START: duration=3600000 ms (1.0 h)  liveness every 60000 ms  progress every 3600000 ms
+SOAK [1.0 / 1.0 h]: checks=60  fails=0  (wdt_resets=0  crashes=0  liveness_fails=0)
+
+SOAK PASS: 3600000 ms (1.0 h) simulated.
+  WDT resets:        0
+  CPU crashes:       0
+  Liveness failures: 0
+  Total checks:      60
+  Total failures:    0
+SOAK_RESULT format=1 status=pass combination=attiny45_cd4053_with_mute duration_ms=3600000 liveness_interval_ms=60000 checks=60 failures=0 watchdog_failures=0 liveness_failures=0

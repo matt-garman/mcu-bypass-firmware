@@ -1,0 +1,5 @@
+=== ATtiny202 (avrxmega3) build + resource budgets (flash 2048 B, static RAM 16/128 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : flash 968 B (47.3%) of 2048 B; static RAM 5/16 B (128 B device)
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : flash 1008 B (49.2%) of 2048 B; static RAM 5/16 B (128 B device)
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : flash 1040 B (50.8%) of 2048 B; static RAM 5/16 B (128 B device)
+EVIDENCE_RESULT format=2 status=pass role=build evidence=build-avr-xt.log lines=4 payload_sha256=bb614ee37a263f23d14799b0f4e9756b1349a5c2d1ec8e28cc6816df743f8cc3 source_commit=c8bd78278276c6b7d8e24e369f82e4641e61c1ca

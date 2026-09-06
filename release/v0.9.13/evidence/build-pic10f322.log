@@ -1,0 +1,5 @@
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+EVIDENCE_RESULT format=2 status=pass role=build evidence=build-pic10f322.log lines=4 payload_sha256=d4199453ee8a94cd483fb8a9cb5d01e5f22a351c33d20ed401d4a7cbf1ecb5b9 source_commit=c8bd78278276c6b7d8e24e369f82e4641e61c1ca
