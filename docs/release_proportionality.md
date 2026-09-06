@@ -1,0 +1,230 @@
+# Release proportionality and soak attestation
+
+## What this document is
+
+A measurement of what the release path cost between `v0.9.9` and `v0.9.13`,
+and four changes that recover the confidence-per-hour that `v0.9.9` had without
+giving up any assurance about the firmware. It is a companion to
+[`docs/ci_parity.md`](ci_parity.md): that document closes the gap between what
+runs locally and what runs remotely; this one addresses how much runs at all,
+and when.
+
+## What the record shows
+
+Release machinery only -- `scripts/`, the release gates under `test/`, and
+`release.yml` -- measured at the `v0.9.9` tag and at `v0.9.13`:
+
+| | v0.9.9 | v0.9.13 | |
+|---|---:|---:|---|
+| Release machinery, lines | ~7,800 | ~21,800 | 2.8x |
+| `make-release.sh` refusal points | 111 | 273 | 2.5x |
+| -- of those, after the soak | 11 | 65 | 5.9x |
+| `release-documentation.sh` | 186 lines, 0 refusals | 1,940 lines, 91 refusals | -- |
+| -- `release_validate_claim_boundaries` alone | -- | 38 refusals | -- |
+| Published images | 21 | 21 | 1.0x |
+| Soak combinations | 18 | 18 | 1.0x |
+| Staged files per release | 60 | 64 | 1.07x |
+| `QUALIFICATION` schema | `format=1` | `format=7` | -- |
+
+The product did not grow. The apparatus around it tripled. Of the 279 commits
+in that window, 94 touched release machinery and 26 of those were `fix:`
+commits repairing that machinery -- the clearest available fragility signal.
+
+Part of the growth is a genuine new deliverable: the PIC12F675 flashing helper
+became a published artifact, and a shipped tool legitimately needs the gating
+that arrived with it. That accounts for perhaps a fifth of it, and is not the
+source of the friction.
+
+### Every failure was in the apparatus
+
+| Release | Failed where | Cause |
+|---|---|---|
+| `v0.9.10` | Tag CI, after images reproduced | a workflow-scope `env:` leaked into the preflight baseline |
+| `v0.9.12` (first attempt) | staging, after the soak | `toolchain.txt` was not staged |
+| `v0.9.12` (second attempt) | Tag CI, after images reproduced | the image-continuity declaration becomes owed only once the release directory exists |
+
+No firmware defect, and nothing a soak could have found. Two of the three were
+discovered after a full-duration soak had already been paid for.
+
+### Three of the last four releases soaked identical binaries
+
+Comparing published images pairwise:
+
+    v0.9.9  -> v0.9.10 :  2 identical, 19 changed
+    v0.9.10 -> v0.9.11 : 21 identical,  0 changed
+    v0.9.11 -> v0.9.12 : 21 identical,  0 changed
+    v0.9.12 -> v0.9.13 : 21 identical,  0 changed
+
+No soak driver changed across that span either. Three soaks re-ran the same
+binaries under the same harness in the same simulators, and could not have
+produced new information beyond another random sample.
+
+Note what a source-tree hash would have concluded: `src/` *did* change over
+those releases -- comments and compile-time guards that generate no code, which
+is exactly what `v0.9.12`'s image-continuity declaration records. A key over
+the source would have called these three releases different. The images are the
+correct key, because the images are what the soak drives.
+
+## The principle
+
+**A release must only be able to fail on something that could not have been
+known before it started.**
+
+Everything below follows from applying that to the four places it is currently
+violated.
+
+## Part 1 - no documentation check may fail a release
+
+`release-documentation.sh` was a renderer at `v0.9.9`: 186 lines, zero
+refusals. It now carries 91 refusal points across six validators, and
+`make-release.sh` calls five of them from phase 0 and one from phase 4.
+
+Every one of those refusals is decidable on any commit, by inspection of the
+tree alone. None needs a build, a gate or a soak. Gating a 25-hour operation on
+them inverts the cost of repair: a missing comparison link is a ten-second fix
+that currently surfaces only when an operator sets aside a day.
+
+The change is relocation, not deletion. The validators move into `make test`
+and per-commit CI, where a failure costs seconds and is repaired on the commit
+that caused it. By the time a release is cut they are already green, and the
+release path stops re-asking. `scripts/release-prepare.sh` already removed the
+hand-authoring half of this problem; this removes the timing half.
+
+Two of the six need care. `release_validate_staged_documentation` reads
+`release/<version>/` and therefore cannot run before staging exists -- it stays,
+and is cheap. `release_validate_development_state` is about tree state at
+release time and stays for the same reason. The other four move.
+
+## Part 2 - rehearse staging before the soak
+
+`make-release.sh` runs preconditions, builds, gates, soaks, then stages. Its
+staging phase holds 65 refusal points, up from 11. Almost none of them read a
+soak result: they validate manifest rendering, the flashing-command table,
+resource rows, helper-artifact staging and the staged document set -- all
+functions of the source tree and the built images, both of which stop changing
+at the end of the build phase.
+
+A rehearsal phase lands between the gates and the soak. It renders the complete
+staging output into a throwaway directory with the soak-derived fields stubbed,
+runs every check that does not read soak evidence, and discards the result. The
+real staging phase then re-renders with true values; anything that diverges and
+is not soak-derived is itself a defect worth failing on.
+
+Cost: seconds. It reduces the post-soak refusal surface to the handful that are
+genuinely bound to soak output -- the image-hash stability comparisons, the soak
+table, the evidence index. The `v0.9.12` `toolchain.txt` death is removed by
+construction rather than by remembering to stage a file.
+
+This overlaps `docs/ci_parity.md` Part 4 and should land with it: that part
+rehearses the artifact-commit *shape* before the soak, this one rehearses the
+staged *content*. Same phase, same argument.
+
+## Part 3 - attest the soak, and reuse it when the inputs are identical
+
+The soak is the only part of the release whose cost is measured in days, and
+the record above shows it has been re-run on unchanged inputs three times in a
+row. A soak result should be a durable, signed statement about a set of inputs
+rather than a fact about one release run.
+
+### The attestation
+
+    SOAK_ATTESTATION format=1
+    inputs_sha256=<key>
+    soak_duration_ms=86400000
+    soak_liveness_interval_ms=60000
+    combination_count=18
+    completed_utc=<ISO-8601>
+    source_commit=<informational only>
+
+`inputs_sha256` is taken over a canonical manifest of everything that can
+change what the soak observes:
+
+1. the combination names;
+2. the SHA-256 of the exact binary each combination drove -- the classic AVR and
+   ATtiny202 ELFs, and each PIC HEX;
+3. the soak driver sources, including the shared model headers they compile;
+4. simulator and harness identity -- simavr, yasimavr, libgpsim, and the host
+   compiler that built the soak binaries;
+5. `soak_duration_ms` and `soak_liveness_interval_ms`.
+
+Deliberately absent: the Git commit, `CHANGELOG.md`, `README.md`, anything
+under `docs/`, the version string, and every documentation gate. A release that
+changes only those produces an identical key.
+
+The record is stored under `release/soak-attestations/<key>` with a detached
+signature from the release signing key, alongside the digests of the retained
+soak logs, so an attestation carries the same provenance guarantee as the
+release artifacts themselves.
+
+### Reuse
+
+A `--reuse-soak` flag recomputes the key at the end of the build phase, looks
+for a matching attestation, verifies its signature, and requires its attested
+duration to be at least what the requested release mode demands. On a hit the
+soak phase is skipped, the attested logs are folded into evidence, and
+`QUALIFICATION` records `soak_provenance=attested` plus the key. On a miss the
+soak runs and *writes* a new attestation.
+
+It fails closed. Any change to an image, a driver, a simulator or a duration
+changes the key, so an attestation can never be silently over-applied; there is
+no invalidation step to remember.
+
+`MANIFEST.md` states reuse in prose. A reader must be able to see that a given
+release did not re-soak, and against which attestation it stands.
+
+### The honest limit
+
+A soak is a stochastic test. Re-running identical inputs is not strictly
+zero-information: a rare race gets another sample. Reuse trades that additional
+sample for the day it costs.
+
+The policy that keeps this honest: reuse freely when the images are unchanged,
+which is automatic since the key changes otherwise, and require a fresh
+full-duration soak whenever any image changes. Whether a minor-version bump
+should force a fresh soak regardless of image identity is a judgment for the
+maintainer, not something this scheme should decide silently.
+
+## Part 4 - scope the claim-boundary rules
+
+`release_validate_claim_boundaries` is 38 of the 91 documentation refusals and
+splits into two unlike halves.
+
+The six **fenced claim blocks** guard statements that must not silently weaken:
+that no controlled hardware-qualification record exists for any part, that the
+modular architecture overruns the PIC10F320 flash ceiling, what the PIC10F320
+assurance package does not establish. A reworded sentence that drops a "not"
+is a genuine integrity failure, the fence makes removal a visible diff, and the
+term-group form introduced at `v0.9.13` already removed the brittleness of
+pinning prose byte for byte. These stay.
+
+The six **current-fact rules** are regexes over `DESIGN_DOCUMENTATION.adoc` and
+`TOOLCHAIN.adoc` that reject restatements of release topology, unbound
+measurements, and dates or commit SHAs in durable design prose. The intent is
+sound -- one authority for the release contract -- but the mechanism is a
+repo-wide prose linter, and it is enforced by refusing to cut a release.
+Retire them, or keep them as a lint in `make test` under Part 1. They should
+not be able to stop a release.
+
+## Sequencing
+
+| # | Increment | Recovers |
+|---|-----------|----------|
+| 1 | documentation validators move to `make test` and CI | the largest friction class; failures land on the commit that caused them |
+| 2 | staging rehearsal before the soak | the post-soak failure class, at seconds of cost |
+| 3 | soak attestation and reuse | the redundant soak; a lost release can re-use its own soak |
+| 4 | current-fact rules retired or demoted to lint | a release that cannot be stopped by design prose |
+
+Increments 1 and 4 touch one file and remove no assurance. Increment 2 is
+mechanical and pairs with `docs/ci_parity.md` Part 4. Increment 3 is the only
+one carrying a real design decision, and the only one that changes what a
+release attests.
+
+## What this does not do
+
+It does not reduce firmware assurance. The formal proofs, the exhaustive model
+check, mutation testing, fault injection, the full soak matrix on changed
+images, bit-reproducible builds and signed provenance are what make this
+reference-grade, and every one of them stays exactly as it is. What changes is
+that assurance about the *documentation* of the firmware stops being enforced
+at the most expensive moment available, and that a soak is no longer repeated
+against binaries it has already qualified.
