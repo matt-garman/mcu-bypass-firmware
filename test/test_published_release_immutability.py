@@ -141,6 +141,9 @@ IMAGE_CONTINUITY = {
                        "and confirmed they reproduced bit for bit. Identical "
                        "bytes under a release that could be published is the "
                        "whole purpose of this one"),
+    "v0.9.12": (21, 0, "a documentation, test and release-tooling release: its "
+                       "firmware source changes are comments and compile-time "
+                       "guards that generate no code, so no image changed"),
 }
 
 

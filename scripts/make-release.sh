@@ -3295,9 +3295,11 @@ cat <<EOF
 
 $BOLD========== release $VERSION staged -- next steps (run by hand) ==========$RST
 
-Review the staging dir, then sign + commit + tag + push. The pushed tag triggers
-.github/workflows/release.yml, which reproduces the image hashes on a clean
-runner and publishes the GitHub Release.
+Review the staging dir, then sign and commit. Step 4b proves the commit is
+publishable and prints the tag and push commands; nothing else prints them,
+because the gates that decide publishability cannot run until the artifact
+commit exists. The pushed tag triggers .github/workflows/release.yml, which
+reproduces the image hashes on a clean runner and publishes the GitHub Release.
 
 The release commit must contain ONLY $OUTPUT_DIR plus the exact generated append
 to test/published_release_digests.txt. Tag CI requires its sole parent to be the
@@ -3305,7 +3307,7 @@ source commit qualified above, rejects every other changed path, and verifies
 that the registry kept its parent bytes and gained one canonical block. Thus
 changelog/status documentation is finalized in the PRECEDING commit -- as it
 already was, or this run would not have started.
-Until the tag below is pushed, main carries the $VERSION contract while
+Until the tag is pushed, main carries the $VERSION contract while
 release/$VERSION/ is unpublished; if you abandon or postpone the release from
 here, revert or correct that source-finalization commit rather than leaving the
 declaration standing. Ensure the remote protects v* tags from update and
@@ -3325,12 +3327,12 @@ workflow can make two separate GitHub API operations atomic.
   git add $OUTPUT_DIR test/published_release_digests.txt
   git commit -F $OUTPUT_DIR/commit_msg.txt
 
-  # 5. create a SIGNED, annotated tag on that commit
-  git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION -m "Firmware release $VERSION"
-
-  # 6. push the commit and the tag
-  git push
-  git push origin $VERSION
+  # 4b. prove that commit is publishable -- REQUIRED, and the only source of
+  #     the tag and push commands. This run qualified the SOURCE tree; the tree
+  #     the tag names is the one that CONTAINS $OUTPUT_DIR and the registry
+  #     append, and no gate has seen it yet. It refuses on failure and prints
+  #     nothing to paste.
+  ./scripts/verify-release-artifact-commit.sh $VERSION
 
 EOF
 ok "done. Nothing was committed, tagged, or pushed -- that is yours to do."

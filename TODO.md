@@ -41,6 +41,33 @@ Dependencies: exact AVR vendor datasheets. Effort: about 1 hour with the source
 documents open. Risk if deferred: incomplete reference-grade traceability, not
 a known firmware defect.
 
+### T2-ci-parity - Make local and remote CI parity structural
+
+`scripts/ci-local.sh` reconstructs `ci.yml`'s jobs from a prose comment header,
+`release.yml` keeps its own list of gate re-runs, and `test/README.md` a third.
+Nothing machine-checks that the local path covers the remote one, so "a clean
+pass here means the CI matrix will be green" is an assertion in a comment.
+[`docs/ci_parity.md`](docs/ci_parity.md) is the design: name every gate a
+workflow runs as a Make goal, have each workflow step invoke exactly one of
+them, run the same goals locally, and check that shape rather than compare two
+hand-maintained inventories. The publishability gate that document's Part 3
+describes is done; this item is Parts 1, 2 and 4.
+
+Acceptance: the Makefile declares the goal inventory; every `run:` step in both
+workflows invokes exactly one declared goal, with its required pins, and
+invokes nothing under `test/` directly; `scripts/ci-local.sh` executes the
+inventory rather than describing it; a gate parses both workflows and fails
+closed on a step with no local counterpart, on a dropped pin, and on a goal the
+Makefile does not define; and `--dry-run` produces the artifact-commit shape in
+a scratch clone so `scripts/verify-release-artifact-commit.sh` can be rehearsed
+before a soak rather than after.
+
+Dependencies: none. Effort: about 4-6 hours, one workflow job at a time with
+each step's before-and-after command compared. Risk: Medium; the restructure
+touches every CI entry point, and a mistranslated step is a gate that silently
+stops running -- which is why each goal lands as an exact wrapper of the
+command it replaces before anything is simplified.
+
 ---
 
 ## Tier 2.5 - additional software verification
@@ -771,6 +798,7 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
+| T2-ci-parity | Make local/remote CI parity structural | 2 | 4-6 h | High - a failed remote gate costs a 25-hour release |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

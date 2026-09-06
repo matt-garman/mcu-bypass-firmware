@@ -45,6 +45,37 @@ historical records and are not retroactively compacted by this policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A release must now prove the commit the tag will name before the tag
+  exists.** `scripts/make-release.sh` qualifies the source tree and stages
+  `release/vX.Y.Z/` without touching Git, so until now no gate had ever run
+  against the tree a tag actually carries -- the one that *contains* the
+  release directory and the publication-registry append. That window cost
+  `v0.9.12`, which passed every local gate, reproduced all 21 images bit for
+  bit on the clean runner, and then failed re-running the gates on the tag's
+  own tree. `scripts/verify-release-artifact-commit.sh` closes it: run after
+  the artifact commit, it repeats the two checks tag CI makes before it builds
+  and runs every gate whose verdict that commit can change
+  (`RELEASE_ARTIFACT_GATES`), and it is now the only thing that prints the tag
+  and push commands -- on success. A release that has not proved itself yields
+  no command to paste. `docs/ci_parity.md` records the design and the remaining
+  work; the script mutates nothing, as the rest of the release path does not.
+
+### Fixed
+
+- **The release-history suite no longer holds a release to a declaration no
+  tagged tree can carry.** `test-release-history` appends a synthetic future
+  prerelease to the real published set, which moved the image-continuity gate's
+  newest-release exemption off the release being cut. Every release therefore
+  failed the suite from its own artifact commit onward, for a debt that commit
+  cannot pay: it may change only `release/<version>/` and the publication
+  registry append, and a declaration written any earlier names a version that is
+  not yet published. The fixture now writes that declaration itself, in the
+  source commit of the release it appends, with the gate's own release ordering
+  and signed-list parse rather than a second copy of either. The register also
+  records what `v0.9.12` did to the images it inherited.
+
 ## [0.9.12] - 2026-09-03
 
 ### Added

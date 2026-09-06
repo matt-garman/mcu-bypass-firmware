@@ -3239,7 +3239,7 @@ TEST_GATES_LATE = \
         test-klee-build test-mutation-sandbox test-pic-build \
         test-release-images test-release-preflight test-release-provenance \
         test-release-qualification test-release-history \
-        test-published-release-immutability \
+        test-published-release-immutability test-release-artifact-commit \
         test-pic12f675-flash-helper \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
@@ -3255,6 +3255,31 @@ TEST_GATES_LATE = \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
 TEST_LONG_GATES = $(TEST_GATES_EARLY) test-mutation $(TEST_GATES_LATE)
+
+# --- Release-artifact gate inventory ------------------------------------------
+# The gates whose verdict can DIFFER between the qualified source tree and the
+# release-artifact commit a tag publishes, run by
+# scripts/verify-release-artifact-commit.sh after that commit exists and before
+# the tag is created.
+#
+# The set is bounded by what the artifact commit is ALLOWED to contain.
+# scripts/verify-release-history.sh restricts it to release/<version>/ plus one
+# canonical append to test/published_release_digests.txt, so a gate that reads
+# neither cannot decide differently there than it did during qualification.
+# Re-running the whole suite on that commit would cost hours to re-confirm
+# results that its own diff proves cannot have changed.
+#
+# MEMBERSHIP RULE: a gate belongs here if it reads anything under release/ or
+# the publication registry -- including indirectly, through a manifest, an
+# evidence log or a released image. Adding a gate that reads a published
+# release WITHOUT adding it here reopens exactly the window this list closes:
+# it is the newest release directory appearing on disk that changes those
+# verdicts, and that only ever happens in the artifact commit.
+RELEASE_ARTIFACT_GATES = \
+        test-release-history test-published-release-immutability \
+        test-release-qualification test-release-images \
+        test-release-provenance test-release-preflight \
+        test-reference-contract test-pic12f675-flash-helper
 
 # The mandatory host gates use subprocess.run(capture_output=..., text=...),
 # both added in Python 3.7. Keep this first in each aggregate so an unsupported
@@ -3417,6 +3442,12 @@ test-pic12f675-flash-helper: python-version-valid
 # Isolated proof of final source identity and per-PIC compiler attribution.
 test-release-provenance:
 	./test/test_release_provenance.sh
+
+# The last gate before a tag exists: scripts/verify-release-artifact-commit.sh
+# must refuse every unpublishable artifact commit AND print nothing pasteable
+# when it does, since it is the only source of the tag and push commands.
+test-release-artifact-commit:
+	./test/test_release_artifact_commit.sh
 
 # Host-only proof that publication requires exact clean qualification metadata,
 # the canonical retained-evidence set, and one complete result per release soak.

@@ -272,6 +272,41 @@ append_complete_registered_release() {
 	cp -a "$repo/release/$release_version" "$snapshot"
 }
 
+# The newest release this repository published, and what it did to the images
+# it inherited. Both come from the gate's own ordering and its own parse of the
+# two signed lists rather than a second implementation of either, so a fixture
+# that has to speak about them cannot drift from the file it is testing.
+newest_continuity=$(PUBLISHED_RELEASE_ROOT="$ROOT" \
+	python3 - "$IMMUTABILITY_SOURCE" <<-'PY'
+	import importlib.util
+	import sys
+
+	spec = importlib.util.spec_from_file_location("gate", sys.argv[1])
+	gate = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(gate)
+	published = gate.versions()
+	before, after = gate.payload_of(published[-2]), gate.payload_of(published[-1])
+	shared = [name for name in sorted(after)
+	          if name.endswith(".hex") and name in before]
+	same = sum(1 for name in shared if after[name] == before[name])
+	print(published[-1], same, len(shared) - same)
+	PY
+) || fail "could not read the newest published release's image continuity"
+read -r newest_published newest_republished newest_rebuilt <<<"$newest_continuity"
+[ -n "$newest_published" ] || fail "could not name the newest published release"
+
+# Write one IMAGE_CONTINUITY declaration into a copy of the gate, the way a
+# release's source commit does. Verified rather than assumed: a sed that
+# matched nothing would leave the copy silently undeclared, and the gate would
+# then fail for a reason this suite did not arrange.
+declare_image_continuity() {
+	local file=$1 declared=$2 republished=$3 rebuilt=$4 reason=$5
+	sed -i "/^IMAGE_CONTINUITY = {\$/a\\    \"$declared\": ($republished, $rebuilt, \"$reason\")," \
+		"$file"
+	grep -Fq "\"$declared\": ($republished, $rebuilt," "$file" \
+		|| fail "could not declare $declared image continuity in $file"
+}
+
 setup_complete_registered_fixture() {
 	rm -rf "$repo" "$snapshot"
 	mkdir -p "$repo/scripts" "$repo/test"
@@ -287,8 +322,23 @@ setup_complete_registered_fixture() {
 	printf 'base\n' > "$repo/base.txt"
 	git -C "$repo" add base.txt release scripts test
 	git -C "$repo" -c commit.gpgsign=false commit -qm base
+	# Appending a release NEWER than $newest_published moves the gate's
+	# newest-release continuity exemption off it, so this is also a world in
+	# which its declaration has already landed -- the superseding release's
+	# source commit is where it is owed, and this is that commit. Without
+	# this the suite fails from every real release's artifact commit onward,
+	# for a debt no tagged tree can pay: the artifact commit may change only
+	# release/<version>/ and the registry append, and a declaration written
+	# any earlier names a version that is not yet a published release.
+	if ! grep -q "^    \"$newest_published\":" \
+			"$repo/test/test_published_release_immutability.py"; then
+		declare_image_continuity \
+			"$repo/test/test_published_release_immutability.py" \
+			"$newest_published" "$newest_republished" "$newest_rebuilt" \
+			"declared by this fixture on behalf of the release it appends"
+	fi
 	printf 'qualified source\n' > "$repo/source.txt"
-	git -C "$repo" add source.txt
+	git -C "$repo" add source.txt test/test_published_release_immutability.py
 	git -C "$repo" -c commit.gpgsign=false commit -qm source
 	source_sha=$(git -C "$repo" rev-parse HEAD)
 	append_complete_registered_release "$version"
@@ -347,8 +397,9 @@ checks=$((checks + 1))
 # exemption moves to the final and the RC becomes a required predecessor.
 missing_rc_declaration="$work/immutability-without-rc-declaration.py"
 cp "$repo/test/test_published_release_immutability.py" "$missing_rc_declaration"
-sed -i '/^IMAGE_CONTINUITY = {$/a\    "v99.0.0-rc.1": (0, 0, "synthetic RC shares no image names with v0.9.11"),' \
-	"$repo/test/test_published_release_immutability.py"
+declare_image_continuity "$repo/test/test_published_release_immutability.py" \
+	v99.0.0-rc.1 0 0 \
+	"synthetic RC shares no image names with $newest_published"
 printf 'qualified final source\n' >> "$repo/source.txt"
 git -C "$repo" add source.txt test/test_published_release_immutability.py
 git -C "$repo" -c commit.gpgsign=false commit -qm final-source
@@ -365,7 +416,7 @@ if output=$(PUBLISHED_RELEASE_ROOT="$repo" \
 		python3 "$missing_rc_declaration" 2>&1); then
 	fail "final publication did not make the RC continuity declaration mandatory"
 fi
-[[ "$output" == *"v99.0.0-rc.1 inherits images from v0.9.11 and declares nothing"* ]] \
+[[ "$output" == *"v99.0.0-rc.1 inherits images from $newest_published and declares nothing"* ]] \
 	|| fail "RC continuity handoff failed for the wrong release order: $output"
 checks=$((checks + 1))
 

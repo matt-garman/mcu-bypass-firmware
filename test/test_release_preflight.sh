@@ -1583,10 +1583,14 @@ artifact_add_line=$(grep -Fn 'git add $OUTPUT_DIR test/published_release_digests
 	"$release_script" | head -1 | cut -d: -f1)
 artifact_commit_line=$(grep -Fn 'git commit -F $OUTPUT_DIR/commit_msg.txt' \
 	"$release_script" | head -1 | cut -d: -f1)
-tag_line=$(grep -Fn 'git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION' \
+# The handoff ends at the PROOF, not at the tag. scripts/make-release.sh
+# qualified the source tree; the tree a tag names is the one that contains the
+# release directory and the registry append, and no gate has read it when this
+# script stops. v0.9.12 was lost in exactly that window.
+proof_line=$(grep -Fn './scripts/verify-release-artifact-commit.sh $VERSION' \
 	"$release_script" | head -1 | cut -d: -f1)
 for handoff_step in "$sign_line" "$record_line" "$immutability_line" \
-		"$artifact_add_line" "$artifact_commit_line" "$tag_line"; do
+		"$artifact_add_line" "$artifact_commit_line" "$proof_line"; do
 	[[ "$handoff_step" =~ ^[0-9]+$ ]] \
 		|| fail "could not locate every publication-registration handoff command"
 done
@@ -1594,9 +1598,20 @@ done
 	&& [ "$record_line" -lt "$immutability_line" ] \
 	&& [ "$immutability_line" -lt "$artifact_add_line" ] \
 	&& [ "$artifact_add_line" -lt "$artifact_commit_line" ] \
-	&& [ "$artifact_commit_line" -lt "$tag_line" ] \
-	|| fail "release handoff does not sign, register, verify, stage, commit and tag in order"
+	&& [ "$artifact_commit_line" -lt "$proof_line" ] \
+	|| fail "release handoff does not sign, register, verify, stage, commit and prove in order"
 checks=$((checks + 1))
+
+# The refusal is structural or it is advice. An operator can only paste a tag
+# command that some file prints, so exactly one file may print one: the proof,
+# which prints it after the gates pass and not before. A tag recipe restored to
+# make-release.sh would let a run that never proved itself hand one over.
+! grep -Fq 'git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION' "$release_script" \
+	|| fail "make-release.sh prints a signed-tag command; only scripts/verify-release-artifact-commit.sh may print one, and only after its gates pass"
+grep -Fq 'git tag -s -u $RELEASE_SIGNING_FINGERPRINT $VERSION' \
+	"$ROOT/scripts/verify-release-artifact-commit.sh" \
+	|| fail "scripts/verify-release-artifact-commit.sh does not print the signed-tag command, so nothing does"
+checks=$((checks + 2))
 
 # R3: release/README.md is the maintained owner of the source-checkout
 # transaction, and a PUBLISHED PIC12F675 finalization command must carry the

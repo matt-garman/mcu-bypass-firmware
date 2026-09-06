@@ -270,7 +270,7 @@ every published release, and additionally pins every published file no
 
 ## How a release is sequenced
 
-A release is not one commit. Four steps produce it, in this order, and the
+A release is not one commit. Five steps produce it, in this order, and the
 separation between the first and the third is enforced rather than conventional.
 
 1. **Source finalization.** One ordinary commit on `main` finalizes
@@ -293,7 +293,19 @@ separation between the first and the third is enforced rather than conventional.
    qualified source commit changes only `release/vX.Y.Z/` and that exact
    append-only registration. The history gate preserves every prior registry
    byte and independently regenerates the new block from the committed release.
-4. **Signed tag and push.** The annotated tag names the artifact commit; tag CI
+4. **Publishability proof.** `scripts/verify-release-artifact-commit.sh vX.Y.Z`
+   runs against that commit -- the first tree any gate has seen that *contains*
+   `release/vX.Y.Z/` and the registry append. It repeats the two checks tag CI
+   makes before it builds anything (the detached checksum signature, and the
+   history rule above against `HEAD`), then runs every gate whose verdict this
+   commit can change: `RELEASE_ARTIFACT_GATES` in the `Makefile`, bounded by
+   what step 3 is allowed to contain. It prints the tag and push commands on
+   success and nothing on failure, and `scripts/make-release.sh` no longer
+   prints them at all -- so a release that has not proved itself yields no
+   command to paste. `v0.9.12` was lost to precisely this window: it passed
+   every gate on the source tree, and its tag CI then failed re-running them on
+   the tree the tag named.
+5. **Signed tag and push.** The annotated tag names the artifact commit; tag CI
    rebuilds from it and publishes only if the image bytes reproduce. A bare
    `vX.Y.Z` tag publishes as an ordinary GitHub release; an accepted suffixed
    tag (`vX.Y.Z-rc.1`) publishes as a **prerelease**, so a candidate can never
@@ -307,7 +319,7 @@ commit already contains `release/vX.Y.Z/QUALIFICATION`. The source tree that
 and the two identities stay distinct: the **source commit** is what was
 qualified, the **artifact commit** is what the tag publishes.
 
-**The pre-tag window.** Between steps 1 and 4, `main` carries the `vX.Y.Z`
+**The pre-tag window.** Between steps 1 and 5, `main` carries the `vX.Y.Z`
 contract while `release/vX.Y.Z/` is unpublished. That window is intended and is
 bounded by the qualification run. Two things keep it honest:
 
