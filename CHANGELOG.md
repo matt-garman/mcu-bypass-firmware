@@ -45,6 +45,8 @@ historical records and are not retroactively compacted by this policy.
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-09-06
+
 ### Added
 
 - **A release must now prove the commit the tag will name before the tag
