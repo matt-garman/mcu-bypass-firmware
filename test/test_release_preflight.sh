@@ -93,8 +93,20 @@ declare -F release_validate_hardware_claims >/dev/null \
 	|| { printf 'FAIL: hardware evidence classifier is missing\n' >&2; exit 1; }
 declare -F release_validate_pic12f675_flashing_helper >/dev/null \
 	|| { printf 'FAIL: PIC12F675 flashing-helper contract is missing\n' >&2; exit 1; }
+declare -F release_current_contract_version >/dev/null \
+	|| { printf 'FAIL: current-contract version reader is missing\n' >&2; exit 1; }
+declare -F release_validate_current_fact_rules >/dev/null \
+	|| { printf 'FAIL: current-fact rule scanner is missing\n' >&2; exit 1; }
 declare -F release_require_main_branch >/dev/null \
 	|| { printf 'FAIL: release main-branch validator is missing\n' >&2; exit 1; }
+# Every live-tree assertion below is held to the version release/README.md
+# declares, never to a version written here. A literal goes stale silently: the
+# checked-in tree keeps passing a contract check aimed at a release two cuts
+# ago, which is the same defect class as a fixture that hardcodes the newest
+# published version and stops moving with it.
+live_contract_version=$(release_current_contract_version "$ROOT") \
+	|| { printf 'FAIL: could not read the declared current release contract version\n' >&2; exit 1; }
+
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-preflight.XXXXXX")
 fakebin="$work/bin"
 bootstrap_bin="$work/bootstrap-bin"
@@ -1954,8 +1966,9 @@ checks=$((checks + 1))
 # The live checked-in tree must satisfy the contract, including the generated
 # documentation this repository would render today. This is the check that
 # actually pins README.md and release/README.md.
-release_validate_pic12f675_finalization "$ROOT" v0.9.11 >"$output" 2>&1 \
-	|| fail "the checked-in tree fails the PIC12F675 finalization contract: $(<"$output")"
+release_validate_pic12f675_finalization "$ROOT" "$live_contract_version" \
+	>"$output" 2>&1 \
+	|| fail "the checked-in tree fails the PIC12F675 finalization contract at $live_contract_version: $(<"$output")"
 checks=$((checks + 1))
 
 # --- hardware-evidence classification ----------------------------------------
@@ -2264,8 +2277,40 @@ assert_boundaries_rejects() {
 	checks=$((checks + 1))
 }
 
+# The current-fact rules are a SEPARATE validator, and deliberately so: they
+# police prose that restates a fact release/README.md owns, ages out of true, or
+# pins itself to a moment. Every one is a real drift this project has had, and
+# none of them is a defect in a release -- so they run here, on every commit,
+# and make-release.sh does not call them. Keeping their cases beside the claim
+# boundaries keeps the two contracts readable together while the gate that can
+# stop a release stays the smaller one.
+assert_current_facts_rejects() {
+	local description=$1 expected=$2
+	if release_validate_current_fact_rules "$boundaries_root" >"$output" 2>&1; then
+		fail "current-fact contract accepted $description"
+	fi
+	grep -Fq 'release documentation:' "$output" \
+		|| fail "$description was rejected without a documentation diagnostic"
+	grep -Fq "$expected" "$output" \
+		|| fail "$description was rejected for the wrong reason: $(<"$output")"
+	checks=$((checks + 1))
+}
+
+# A current-fact violation must NOT reach the validator the release path calls.
+# If it ever does, the split has collapsed and design prose can stop a release
+# again.
+assert_boundaries_ignores() {
+	local description=$1
+	release_validate_claim_boundaries "$boundaries_root" >"$output" 2>&1 \
+		|| fail "the release-path claim contract rejected $description, which is a current-fact rule and not its concern: $(<"$output")"
+	checks=$((checks + 1))
+}
+
 write_boundaries_fixture
 assert_boundaries_accepts 'the shipped documents'
+release_validate_current_fact_rules "$boundaries_root" >"$output" 2>&1 \
+	|| fail "the current-fact contract rejected the shipped documents: $(<"$output")"
+checks=$((checks + 1))
 
 # 1. PRESENCE. Each claim is fenced in the document that owns it, and the fence
 #    is deleted, emptied, unbalanced, gutted -- and rewritten.
@@ -2416,45 +2461,48 @@ assert_boundaries_accepts 'a rewritten PIC10F320 overrun record'
 write_boundaries_fixture
 printf '\nMeasured 2026-06-26 with the pinned toolchain, the shell built at 356 words.\n' \
 	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_boundaries_rejects 'a design guide dating its own prose' \
+assert_current_facts_rejects 'a design guide dating its own prose' \
 	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
+assert_boundaries_ignores 'a design guide dating its own prose'
 
 write_boundaries_fixture
 printf '\nThat was established at source commit `0b44c0d` on the pinned toolchain.\n' \
 	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_boundaries_rejects 'a design guide pinning its own prose to a revision' \
+assert_current_facts_rejects 'a design guide pinning its own prose to a revision' \
 	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
+assert_boundaries_ignores 'a design guide pinning its own prose to a revision'
 
 # 2. CURRENT FACTS. Stable design/tool behavior remains in these documents;
 # changing release topology and source-dependent results do not.
 write_boundaries_fixture
 printf '\nThe firmware has eight MCU release targets.\n' \
 	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_boundaries_rejects 'a design guide restating the current target count' \
+assert_current_facts_rejects 'a design guide restating the current target count' \
 	'DESIGN_DOCUMENTATION.adoc restates current release topology outside release/README.md'
+assert_boundaries_ignores 'a design guide restating the current target count'
 
 write_boundaries_fixture
 printf '\nA release is the eight-part, 24-image, 20-soak-combination product set.\n' \
 	>> "$boundaries_root/TOOLCHAIN.adoc"
-assert_boundaries_rejects 'a toolchain guide restating the current product shape' \
+assert_current_facts_rejects 'a toolchain guide restating the current product shape' \
 	'TOOLCHAIN.adoc restates current release topology outside release/README.md'
 
 write_boundaries_fixture
 printf '\n.Table Measured worst pet-to-pet interval, real image in simavr\n' \
 	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_boundaries_rejects 'an unbound live-image watchdog measurement' \
+assert_current_facts_rejects 'an unbound live-image watchdog measurement' \
 	'DESIGN_DOCUMENTATION.adoc carries an unbound source-dependent measurement'
 
 write_boundaries_fixture
 printf '\nThe per-tick sanity work is only ~211 instruction cycles.\n' \
 	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_boundaries_rejects 'an unbound PIC loop-cycle measurement' \
+assert_current_facts_rejects 'an unbound PIC loop-cycle measurement' \
 	'DESIGN_DOCUMENTATION.adoc carries an unbound source-dependent measurement'
 
 write_boundaries_fixture
 printf '\nMeasured on one source, -O0 used more words than -O2.\n' \
 	>> "$boundaries_root/TOOLCHAIN.adoc"
-assert_boundaries_rejects 'an unbound compiler optimization comparison' \
+assert_current_facts_rejects 'an unbound compiler optimization comparison' \
 	'TOOLCHAIN.adoc carries an unbound source-dependent measurement'
 
 # 3. ABSENCE. The claim the sentinel forbids, in each way it can arrive.
@@ -2509,6 +2557,33 @@ checks=$((checks + 1))
 # The live checked-in tree must satisfy the contract.
 release_validate_claim_boundaries "$ROOT" >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the bounded-claim contract: $(<"$output")"
+checks=$((checks + 1))
+
+current_facts_rc=0
+release_validate_current_fact_rules >"$output" 2>&1 || current_facts_rc=$?
+[ "$current_facts_rc" -eq 2 ] \
+	|| fail "current-fact contract accepted a missing repository argument"
+checks=$((checks + 1))
+
+# The live checked-in tree must satisfy the current-fact rules too. This is the
+# assertion that replaces their release-time enforcement: the rules did not get
+# weaker, they stopped being able to stop a release.
+release_validate_current_fact_rules "$ROOT" >"$output" 2>&1 \
+	|| fail "the checked-in tree fails the current-fact contract: $(<"$output")"
+checks=$((checks + 1))
+
+# ...and the release path must NOT call it. The whole point of the split is
+# that a drifted sentence in a design document cannot stop a release, so a
+# future edit that "restores" this call for symmetry has to fail here rather
+# than be discovered by an operator who set a day aside.
+! grep -Fq 'release_validate_current_fact_rules' "$RELEASE" \
+	|| fail "make-release.sh calls the current-fact scanner; design prose can stop a release again"
+checks=$((checks + 1))
+
+# The claim boundaries, by contrast, stay on the release path: they guard
+# statements a release must not publish more strongly than its evidence.
+grep -Fq 'release_validate_claim_boundaries "$REPO_ROOT"' "$RELEASE" \
+	|| fail "make-release.sh no longer validates the bounded claims before a release"
 checks=$((checks + 1))
 
 # ---------------------------------------------------------------------------
@@ -2877,8 +2952,9 @@ grep -Fq 'requested version is not vX.Y.Z' "$output" \
 checks=$((checks + 1))
 
 # The live checked-in tree must satisfy the contract.
-release_validate_pic12f675_flashing_helper "$ROOT" v1.2.3 >"$output" 2>&1 \
-	|| fail "the checked-in tree fails the PIC12F675 flashing contract: $(<"$output")"
+release_validate_pic12f675_flashing_helper "$ROOT" "$live_contract_version" \
+	>"$output" 2>&1 \
+	|| fail "the checked-in tree fails the PIC12F675 flashing contract at $live_contract_version: $(<"$output")"
 checks=$((checks + 1))
 
 # Run the real preflight against a shadow documentation root. A stale bounded

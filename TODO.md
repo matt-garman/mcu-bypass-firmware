@@ -70,35 +70,6 @@ command it replaces before anything is simplified.
 
 ---
 
-### T2-release-doc-gates - Validate documentation on commit, not at release time
-
-`scripts/release-documentation.sh` was a 186-line renderer with no refusals at
-`v0.9.9` and now carries 91 refusal points across six validators, five of which
-`scripts/make-release.sh` calls before it will start. Every one of them is
-decidable from the tree alone: none needs a build, a gate or a soak. Gating a
-25-hour operation on checks that repair in ten seconds inverts the cost of
-repair, and it is why a missing comparison link surfaces only when an operator
-has set aside a day. [`docs/release_proportionality.md`](docs/release_proportionality.md)
-is the design; this is its Part 1 and Part 4.
-
-Acceptance: `release_validate_current_documentation`,
-`release_validate_hardware_claims`, `release_validate_claim_boundaries` and
-`release_reject_branch_only_documents` run under `make test` and in per-commit
-CI, and the release path no longer calls them;
-`release_validate_staged_documentation` and `release_validate_development_state`
-stay in the release path, because they read state that does not exist earlier;
-the six fenced claim blocks keep their present strength; and the six
-current-fact regexes over `DESIGN_DOCUMENTATION.adoc` and `TOOLCHAIN.adoc` are
-retired or demoted to the same commit-time lint. No refusal is deleted without
-a recorded reason.
-
-Dependencies: none. Effort: about 3-4 hours. Risk: Low; the checks are
-unchanged, only their caller and their timing move, and a validator that ran
-at release time passes identically at commit time or the move exposed a real
-dependency worth naming.
-
----
-
 ### T2-release-stage-rehearsal - Rehearse the staged output before the soak
 
 `scripts/make-release.sh` holds 65 refusal points in its staging phase, up from
@@ -146,8 +117,8 @@ attested logs into evidence and records `soak_provenance` and the key in
 states reuse in prose; and any change to an image, driver, simulator or duration
 changes the key, so reuse fails closed with no invalidation step to remember.
 
-Dependencies: none, though it is most useful after T2-release-doc-gates, since
-the releases it would have helped were documentation and tooling releases.
+Dependencies: none. It is the highest-value remaining item: every release it
+would have helped was a documentation or tooling release that changed no image.
 Effort: about 6-8 hours. Risk: Medium; the key's input set is the whole design,
 and an input omitted from it is an attestation that outlives its own validity.
 A soak is also stochastic, so reuse trades an additional random sample for the
@@ -885,7 +856,6 @@ The stable ID in each row matches exactly one open section above.
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T2-ci-parity | Make local/remote CI parity structural | 2 | 4-6 h | High - a failed remote gate costs a 25-hour release |
-| T2-release-doc-gates | Validate documentation on commit, not at release time | 2 | 3-4 h | High - removes the largest release-time friction class |
 | T2-release-stage-rehearsal | Rehearse the staged output before the soak | 2 | 4-6 h | High - removes the post-soak failure class |
 | T2-soak-attestation | Attest soak results and reuse them on identical inputs | 2 | 6-8 h | High - a doc-only release stops re-soaking unchanged images |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |

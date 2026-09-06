@@ -3,8 +3,10 @@
 ## What this document is
 
 A measurement of what the release path cost between `v0.9.9` and `v0.9.13`,
-and four changes that recover the confidence-per-hour that `v0.9.9` had without
-giving up any assurance about the firmware. It is a companion to
+and what recovers the confidence-per-hour that `v0.9.9` had without giving up
+any assurance about the firmware. Part 1 is a finding rather than a change --
+the continuous validation it proposed already existed. Part 4 has landed;
+Parts 2 and 3 are open. It is a companion to
 [`docs/ci_parity.md`](ci_parity.md): that document closes the gap between what
 runs locally and what runs remotely; this one addresses how much runs at all,
 and when.
@@ -70,30 +72,63 @@ correct key, because the images are what the soak drives.
 **A release must only be able to fail on something that could not have been
 known before it started.**
 
-Everything below follows from applying that to the four places it is currently
-violated.
+Everything below follows from applying that. Part 1 records where it was
+already satisfied and where the first draft of this document was wrong about
+that; Parts 2 to 4 are the places it was not.
 
-## Part 1 - no documentation check may fail a release
+## Part 1 - documentation is validated continuously, not on release day
 
 `release-documentation.sh` was a renderer at `v0.9.9`: 186 lines, zero
 refusals. It now carries 91 refusal points across six validators, and
-`make-release.sh` calls five of them from phase 0 and one from phase 4.
+`make-release.sh` calls five of them before it will start.
 
-Every one of those refusals is decidable on any commit, by inspection of the
-tree alone. None needs a build, a gate or a soak. Gating a 25-hour operation on
-them inverts the cost of repair: a missing comparison link is a ten-second fix
-that currently surfaces only when an operator sets aside a day.
+The first draft of this document proposed moving those calls to commit time.
+That was wrong, and the correction matters more than the proposal: **they are
+already there.** Every one of the six asserts against the live checked-in tree
+inside `test/test_release_preflight.sh`, which is a member of `TEST_GATES` and
+therefore runs in the default `make test`:
 
-The change is relocation, not deletion. The validators move into `make test`
-and per-commit CI, where a failure costs seconds and is repaired on the commit
-that caused it. By the time a release is cut they are already green, and the
-release path stops re-asking. `scripts/release-prepare.sh` already removed the
-hand-authoring half of this problem; this removes the timing half.
+| validator | live-tree assertion |
+|---|---|
+| `release_validate_current_documentation` | through `development_state`, at the declared version |
+| `release_validate_development_state` | direct |
+| `release_validate_hardware_claims` | direct |
+| `release_validate_claim_boundaries` | direct |
+| `release_validate_pic12f675_finalization` | direct |
+| `release_validate_pic12f675_flashing_helper` | direct |
 
-Two of the six need care. `release_validate_staged_documentation` reads
-`release/<version>/` and therefore cannot run before staging exists -- it stays,
-and is cheap. `release_validate_development_state` is about tree state at
-release time and stays for the same reason. The other four move.
+`release_validate_development_state` exists for exactly this purpose, and says
+so: the declaration is held "continuously rather than on release day", with the
+version taken from `release/README.md` and the counts from the Makefile, so a
+declaration cannot pass by agreeing with itself.
+
+Two consequences follow.
+
+**`release_reject_branch_only_documents` must stay on the release path.** It
+refuses a release cut from an un-merged polish branch, where a branch-only
+working document legitimately exists. Moving it to commit time would fail every
+polish branch -- the exact hostility this document argues against. The preflight
+suite already calls it on the live tree deliberately non-asserting, checking
+only that the durable-document allowlist has not drifted.
+
+**The `v0.9.13` friction was not missing coverage.** The tree is validated
+against the version `release/README.md` declares. A release asked for a
+different version before `scripts/release-prepare.sh` had moved that
+declaration is a tree that has not been prepared yet, and the validator says
+so, naming the repair. `make test` was green because the tree was consistent
+for the version it actually claimed to be.
+
+What was genuinely wrong here was smaller and is fixed: two live-tree
+assertions passed hardcoded versions -- `v0.9.11`, two releases stale, and a
+fictional `v1.2.3`. Both now read `release_current_contract_version`, which
+`release_validate_development_state` also uses instead of its own copy of the
+parse. Being exact about the value: the version is not load-bearing for either
+of those two validators today, so this removes a literal that would rot rather
+than closing a coverage gap.
+
+The five phase-0 calls stay. They cost seconds, fail before anything is built,
+and duplicating a check that `make test` already proves is cheap insurance
+rather than a cost worth removing.
 
 ## Part 2 - rehearse staging before the soak
 
@@ -184,37 +219,43 @@ full-duration soak whenever any image changes. Whether a minor-version bump
 should force a fresh soak regardless of image identity is a judgment for the
 maintainer, not something this scheme should decide silently.
 
-## Part 4 - scope the claim-boundary rules
+## Part 4 - scope the claim-boundary rules (done)
 
-`release_validate_claim_boundaries` is 38 of the 91 documentation refusals and
-splits into two unlike halves.
+`release_validate_claim_boundaries` was 38 of the 91 documentation refusals and
+held two unlike contracts in one function.
 
 The six **fenced claim blocks** guard statements that must not silently weaken:
 that no controlled hardware-qualification record exists for any part, that the
 modular architecture overruns the PIC10F320 flash ceiling, what the PIC10F320
-assurance package does not establish. A reworded sentence that drops a "not"
-is a genuine integrity failure, the fence makes removal a visible diff, and the
+assurance package does not establish. A reworded sentence that drops a "not" is
+a genuine integrity failure, the fence makes removal a visible diff, and the
 term-group form introduced at `v0.9.13` already removed the brittleness of
-pinning prose byte for byte. These stay.
+pinning prose byte for byte. A release must not publish a claim stronger than
+the evidence it ships, so these keep their release-time enforcement.
 
 The six **current-fact rules** are regexes over `DESIGN_DOCUMENTATION.adoc` and
-`TOOLCHAIN.adoc` that reject restatements of release topology, unbound
-measurements, and dates or commit SHAs in durable design prose. The intent is
-sound -- one authority for the release contract -- but the mechanism is a
-repo-wide prose linter, and it is enforced by refusing to cut a release.
-Retire them, or keep them as a lint in `make test` under Part 1. They should
-not be able to stop a release.
+`TOOLCHAIN.adoc` rejecting restatements of release topology, unbound
+measurements, and dates or commit SHAs in durable design prose. Each is a real
+drift this project has had. None of them is a defect in a release.
+
+They now live in `release_validate_current_fact_rules`, which runs on every
+commit and which `make-release.sh` does not call. No rule was weakened: the
+same six patterns, the same diagnostics, the same live-tree assertion. What was
+added is the proof that the split holds -- a control asserting a current-fact
+violation is *not* rejected by the contract the release path calls, and a
+structural check that the release script never names the new function. A future
+edit restoring that call for symmetry fails in `make test` rather than being
+discovered by an operator who set a day aside.
 
 ## Sequencing
 
 | # | Increment | Recovers |
 |---|-----------|----------|
-| 1 | documentation validators move to `make test` and CI | the largest friction class; failures land on the commit that caused them |
+| 1 | current-fact rules split out of the release path (**done**) | a release that cannot be stopped by design prose |
 | 2 | staging rehearsal before the soak | the post-soak failure class, at seconds of cost |
 | 3 | soak attestation and reuse | the redundant soak; a lost release can re-use its own soak |
-| 4 | current-fact rules retired or demoted to lint | a release that cannot be stopped by design prose |
 
-Increments 1 and 4 touch one file and remove no assurance. Increment 2 is
+Increment 1 touched one file and removed no assurance. Increment 2 is
 mechanical and pairs with `docs/ci_parity.md` Part 4. Increment 3 is the only
 one carrying a real design decision, and the only one that changes what a
 release attests.

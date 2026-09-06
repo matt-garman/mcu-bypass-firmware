@@ -313,12 +313,20 @@ _release_reject_extra_current_blocks() {
 # commit, which is a worse property than a disclosure that understates. The next
 # source finalization rewrites the line for its own version, which is where a
 # stale one is caught.
-release_validate_development_state() {
-	[ "$#" -eq 3 ] || return 2
-	local repo_root=$1 image_count=$2 soak_count=$3
+# Echo the version release/README.md declares as the current release contract.
+#
+# The declaration is the one authority for the release contract, so anything
+# that must hold the LIVE tree to a version -- rather than to a version a
+# caller chose -- has to read it from there. A caller that names its own
+# version instead checks the tree against a number the tree never claimed,
+# which is how a live-tree assertion goes on passing two releases after the
+# version it names stopped being current.
+release_current_contract_version() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1
 	local designated=release/README.md
 	local document="$repo_root/$designated"
-	local block plain version version_count transition_line retained_record
+	local block plain version version_count
 
 	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
 		|| _release_documentation_error "designated current-release document is not a regular nonempty file: $designated" || return
@@ -334,6 +342,20 @@ release_validate_development_state() {
 		|| _release_documentation_error "$designated must declare exactly one current release contract version; found $version_count" || return
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 		|| _release_documentation_error "$designated declares a version that is not vX.Y.Z: $version" || return
+
+	printf '%s\n' "$version"
+}
+
+release_validate_development_state() {
+	[ "$#" -eq 3 ] || return 2
+	local repo_root=$1 image_count=$2 soak_count=$3
+	local designated=release/README.md
+	local document="$repo_root/$designated"
+	local block plain version transition_line retained_record
+
+	version=$(release_current_contract_version "$repo_root") || return
+	block=$(_release_current_block "$document") || return
+	plain=$(awk '{ sub(/^>[[:space:]]*/, ""); print }' <<<"$block") || return
 
 	# The counts come from the Makefile, so the exact-contract-line check inside
 	# this call compares the declaration with the build rather than with itself.
@@ -886,12 +908,61 @@ release_validate_hardware_claims() {
 # Published release/vX.Y.Z/ directories are immutable artifacts and are pruned;
 # so are the root-level branch-only working documents, which quote the banned
 # wording in order to describe banning it.
+# Reject prose that restates a fact this tree owns somewhere else.
+#
+# WHY THIS IS SEPARATE FROM THE CLAIM BOUNDARIES. The fenced blocks in
+# release_validate_claim_boundaries guard statements that must not silently
+# weaken: what no part has completed, what the PIC10F320 assurance package does
+# not establish, what reproducing an image proves. Losing one of those changes
+# what the project asserts about itself, so a release that ships it is publishing
+# a stronger claim than its evidence supports, and the release path checks it.
+#
+# These rules are a different kind. They keep durable design prose from
+# restating release topology that release/README.md owns, from carrying a
+# measurement bound to nothing that would age out of true, and from pinning
+# itself to a date or a revision. Every one of those is a drift this project has
+# actually had -- but a drifted sentence in DESIGN_DOCUMENTATION.adoc is a
+# documentation defect, not a defect in the release, and a release is the most
+# expensive moment available at which to discover one.
+#
+# So this runs on every commit and NOT from the release path: the repair lands
+# on the commit that caused it, at the cost of a grep, and a release is never
+# stopped by design prose.
+release_validate_current_fact_rules() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1
+	local document label flowed entry pattern description rc=0
+	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
+	# alternation available without inventing an escaping convention.
+	local -a current_fact_rules=(
+		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+(MCU[[:space:]]+)?release[[:space:]]+(targets|parts)\trestates current release topology outside release/README.md'
+		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+targets[[:space:]]+use[[:space:]]+the[[:space:]]+modular[[:space:]]+architecture|all[[:space:]]+[0-9]+[[:space:]]+images|([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+shell[[:space:]]+source[[:space:]]+files\trestates current release topology outside release/README.md'
+		$'TOOLCHAIN.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)-part,[[:space:]]*[0-9]+-image,[[:space:]]*[0-9]+-soak-combination[[:space:]]+product[[:space:]]+set|build(s|ing)?[[:space:]]+(its[[:space:]]+)?([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+images[[:space:]]+into[[:space:]]+the[[:space:]]+published[[:space:]]+product[[:space:]]+set\trestates current release topology outside release/README.md'
+		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
+		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
+		$'DESIGN_DOCUMENTATION.adoc\t[0-9]{4}-[0-9]{2}-[0-9]{2}|(at|on)[[:space:]]+(source[[:space:]]+)?commit[[:space:]]+.?[0-9a-f]{7}|(main|HEAD)[[:space:]]+at[[:space:]]+.?[0-9a-f]{7}\tbinds durable design prose to a date or a source revision'
+	)
+
+	for entry in "${current_fact_rules[@]}"; do
+		IFS=$'\t' read -r label pattern description <<<"$entry"
+		document="$repo_root/$label"
+		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+			|| { _release_documentation_error "current-fact document is not a regular nonempty file: $label" || rc=1; continue; }
+		flowed=$(_release_flowed_text "$document") || return
+		if grep -Eiq -- "$pattern" <<<"$flowed"; then
+			_release_documentation_error "$label $description" || rc=1
+		fi
+	done
+
+	return "$rc"
+}
+
 release_validate_claim_boundaries() {
 	[ "$#" -eq 1 ] || return 2
 	local repo_root=$1
 	local log="$repo_root/HARDWARE_VALIDATION_LOG.md"
 	local sentinel='**No controlled hardware-qualification record exists for any part.**'
-	local document label flowed entry pattern description find_pid rc=0
+	local document label flowed entry find_pid rc=0
 	local marker terms terms_text block group
 	local -a claim_offenders=()
 	# Adjective-plus-noun only; see the ABSENCE note above for why.
@@ -917,30 +988,9 @@ release_validate_claim_boundaries() {
 		$'release/README.md\timage-attestation\tstatement of what the reproducibility check publicly attests\tattest(ation|s|ed)? binaries|images source compil(es|ed|ation|e) reproduc(ibility|ible|es|ed|tion|e)|rebuild(s|ing)?'
 		$'release/README.md\thistorical-images\tstatement of why superseded images stay published\tretain(ed|s)? historical integrity reproduc(ibility|ible|es|ed|tion|e)'
 	)
-	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
-	# alternation available without inventing an escaping convention.
-	local -a current_fact_rules=(
-		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+(MCU[[:space:]]+)?release[[:space:]]+(targets|parts)\trestates current release topology outside release/README.md'
-		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+targets[[:space:]]+use[[:space:]]+the[[:space:]]+modular[[:space:]]+architecture|all[[:space:]]+[0-9]+[[:space:]]+images|([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+shell[[:space:]]+source[[:space:]]+files\trestates current release topology outside release/README.md'
-		$'TOOLCHAIN.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)-part,[[:space:]]*[0-9]+-image,[[:space:]]*[0-9]+-soak-combination[[:space:]]+product[[:space:]]+set|build(s|ing)?[[:space:]]+(its[[:space:]]+)?([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+images[[:space:]]+into[[:space:]]+the[[:space:]]+published[[:space:]]+product[[:space:]]+set\trestates current release topology outside release/README.md'
-		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
-		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
-		$'DESIGN_DOCUMENTATION.adoc\t[0-9]{4}-[0-9]{2}-[0-9]{2}|(at|on)[[:space:]]+(source[[:space:]]+)?commit[[:space:]]+.?[0-9a-f]{7}|(main|HEAD)[[:space:]]+at[[:space:]]+.?[0-9a-f]{7}\tbinds durable design prose to a date or a source revision'
-	)
 
 	for entry in "${claim_blocks[@]}"; do
 		_release_check_claim_block "$repo_root" "$entry" || rc=1
-	done
-
-	for entry in "${current_fact_rules[@]}"; do
-		IFS=$'\t' read -r label pattern description <<<"$entry"
-		document="$repo_root/$label"
-		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
-			|| { _release_documentation_error "current-fact document is not a regular nonempty file: $label" || rc=1; continue; }
-		flowed=$(_release_flowed_text "$document") || return
-		if grep -Eiq -- "$pattern" <<<"$flowed"; then
-			_release_documentation_error "$label $description" || rc=1
-		fi
 	done
 
 	[ -f "$log" ] && [ -s "$log" ] && [ ! -L "$log" ] \

@@ -45,6 +45,34 @@ historical records and are not retroactively compacted by this policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **Design prose can no longer stop a release.** Six of the rules inside the
+  bounded-claim contract were not claim boundaries at all: they reject prose in
+  `DESIGN_DOCUMENTATION.adoc` and `TOOLCHAIN.adoc` that restates release
+  topology `release/README.md` owns, carries a measurement bound to nothing, or
+  pins durable design prose to a date or a revision. Each is a real drift this
+  project has had, and none of them is a defect in a release -- but they were
+  enforced by refusing to cut one. They now live in
+  `release_validate_current_fact_rules`, which runs on every commit and which
+  `scripts/make-release.sh` does not call; a gate asserts that it does not, so
+  the split cannot quietly collapse. No rule was weakened: the same six
+  patterns, the same diagnostics, the same live-tree assertion, plus a control
+  proving a current-fact violation no longer reaches the release path. The six
+  fenced claim blocks -- what no part has completed, what the PIC10F320
+  assurance package does not establish, what reproducing an image proves --
+  keep their release-time enforcement, because a release must not publish a
+  claim stronger than the evidence it ships.
+  [`docs/release_proportionality.md`](docs/release_proportionality.md) records
+  the reasoning.
+
+- **Live-tree documentation assertions read the version the tree declares.**
+  The two PIC12F675 contract checks that run against the checked-in tree passed
+  hardcoded versions -- `v0.9.11`, two releases stale, and a fictional
+  `v1.2.3`. Both now derive it from `release/README.md` through a new
+  `release_current_contract_version`, which `release_validate_development_state`
+  also uses in place of its own copy of the parse.
+
 ## [0.9.13] - 2026-09-06
 
 ### Added
