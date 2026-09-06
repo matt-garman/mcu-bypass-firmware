@@ -57,6 +57,17 @@ mid-range") and PIC12F675 ("classic mid-range") parts have different harware
 cores, so their hardware-specific implementations ("shell") differ. See
 <<pic12f675-architecture>> for design considerations unique to the PIC12F675.
 
+// pic12f675-disposition:start
+The PIC12F675 is *release-supported from `v0.9.9`*: release images, a place in
+the default `all` goal, the full release pipeline, and a guarded bench
+programming target (`make pic12f675-program`).  Like every part here, it has
+*not* completed controlled hardware qualification -- its release rests on
+simulation, formal proof and static analysis, with that qualification deferred
+to the `1.x.y` pass (TODO `T3-pic12f675-bench`).  No field-use report exists for
+this part either; for the parts that have one, see `HARDWARE_VALIDATION_LOG.md`,
+which keeps the two kinds of evidence apart.
+// pic12f675-disposition:end
+
 
 
 == High-Level Functional Description

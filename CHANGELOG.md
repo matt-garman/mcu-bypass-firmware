@@ -49,6 +49,21 @@ historical records and are not retroactively compacted by this policy.
 
 ### Added
 
+- **`make release-prepare` writes the derived release lines instead of refusing
+  them.** Cutting a release meant hand-editing seven lines across
+  `CHANGELOG.md` and `release/README.md` -- the dated heading, the
+  `[Unreleased]` section that must survive the rename, both comparison links,
+  the bounded contract line and the pre-tag transition line -- until the
+  validator stopped objecting. Each is a pure function of the version being
+  cut, the version before it and the date, and none records a decision.
+  `scripts/release-prepare.sh` renders them through the same `release_render_*`
+  functions the validator compares against, so writer and checker cannot
+  disagree about a format and a mismatch has one repair. It writes structure,
+  never prose: it refuses when `[Unreleased]` says nothing about the release,
+  and refuses outright for a version already tagged or already holding a
+  retained record. Every existing check stays; what goes away is the hand
+  authoring, not the verification.
+
 - **A release must now prove the commit the tag will name before the tag
   exists.** `scripts/make-release.sh` qualifies the source tree and stages
   `release/vX.Y.Z/` without touching Git, so until now no gate had ever run
@@ -64,7 +79,42 @@ historical records and are not retroactively compacted by this policy.
   no command to paste. `docs/ci_parity.md` records the design and the remaining
   work; the script mutates nothing, as the rest of the release path does not.
 
+### Changed
+
+- **Documentation gates hold claims to their terms, not to their sentences.**
+  Roughly seventeen places pinned the maintainer's own prose byte for byte, and
+  the cost was not theoretical: capitalizing one letter of a README heading
+  produced five test failures, and changing a period to a semicolon in a
+  sentence that altered no claim, no number and no part failed a safety gate. A
+  rule an author cannot satisfy by writing correctly eventually gets satisfied
+  by deleting it. Nine fenced claims replace those pinned sentences. A claim is
+  now bound by a named marker pair and held to the terms it must still state, so
+  deleting the fence, emptying it, leaving it unclosed, inverting the claim, or
+  keeping a denial while dropping what it denies each fail with the marker
+  named -- and every rule carries an accept case that rewrites the same
+  commitment in another voice. No property is dropped; only the technique
+  changes.
+
+- **`DESIGN_DOCUMENTATION.adoc` no longer carries a date or a source
+  revision.** The PIC10F320 modular-build overrun was the last byte-pinned
+  passage, mitigated by pinning its provenance because a measurement sat in
+  durable prose. The measurement is gone -- it restated a conclusion the same
+  sentence already drew -- and what remains is fenced as the overrun it records.
+  A current-fact rule now refuses ISO dates and commit bindings in that
+  document, so the mitigation cannot return in place of moving a measurement
+  out. Git records when a thing was written and against what.
+
 ### Fixed
+
+- **`v0.9.12` was tagged and never published: its own release-history gate
+  refused it.** Tag CI rebuilt every image from the tagged source and confirmed
+  all 21 reproduced bit for bit, then failed re-running `make test-long`.
+  `test-release-history` requires a superseded release to declare what it did to
+  the images it inherited, and a release's artifact commit is the one commit in
+  which that declaration cannot land -- see the fixture defect below.
+  `Publish GitHub Release` never ran. The signed tag and `release/v0.9.12/` are
+  retained as the record of that cut rather than rewritten, so its
+  `CHANGELOG.md` section and comparison link stay resolvable.
 
 - **The release-history suite no longer holds a release to a declaration no
   tagged tree can carry.** `test-release-history` appends a synthetic future
@@ -4060,7 +4110,8 @@ historical records and are not retroactively compacted by this policy.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.12...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.13...HEAD
+[0.9.13]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...v0.9.11
 [0.9.10]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.9...v0.9.10

@@ -146,9 +146,20 @@ programmer, and software flashing tool are needed.
      [FLASHING.md](FLASHING.md) for the exact command to use,
      **_as there are per-part unique options._**
 
-**Note:** the PIC12F675 is a special case; it additionally
-requires use of a dedicated Python script (`flash-pic12f675.py`,
-available with the release images).
+<!-- pic12f675-helper-required:start -->
+**Note:** the PIC12F675 is a special case. Writing a released image to it
+additionally requires Python 3 and the release's dedicated helper script
+(`flash-pic12f675.py`, available with the release images), because the part's
+per-device factory calibration must be preserved and verified rather than
+overwritten by a raw programmer write.
+<!-- pic12f675-helper-required:end -->
+
+<!-- pic12f675-helper-status:start -->
+That helper's `ipecmd` route is published and software-tested, but it is not
+hardware-qualified, and the board must be externally powered.
+[FLASHING.md](FLASHING.md) carries the full transaction and everything it
+requires.
+<!-- pic12f675-helper-status:end -->
 
 
 ### Building from Source and Development
@@ -157,6 +168,14 @@ The number of supported devices results in a rather large
 development toolchain.  Toolchain details are available in
 [TOOLCHAIN.adoc](TOOLCHAIN.adoc).  All tools are free; many (but not
 all) are open-source.
+
+Every lane needs a host C compiler (GCC 10 or newer, or Clang), a
+matching `gcov`, Python 3.7 or newer, and Bash.  The per-part lanes
+add their own: `pic10f322-*`, `pic10f320-*` and `pic12f675-*` need the
+Microchip XC8 compiler, the PIC10-12Fxxx device pack, `gpsim` and
+`gpsim-dev`; `attiny202-*` needs avr-gcc plus the fetched-on-demand
+Microchip device files and the patched `yasimavr` that
+`scripts/fetch_yasimavr.sh` builds.
 
 Once the toolchain is available, you should be able to build the
 firmware from source via:

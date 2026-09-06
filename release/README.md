@@ -14,9 +14,9 @@ There are two routes into it -- one for a downloaded release, one for a source
 checkout -- and both are under "Flash a chip" below.
 
 <!-- current-release:start -->
-> **Current release contract:** `v0.9.12`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+> **Current release contract:** `v0.9.13`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 > The images cover three output stages; PIC10F320 is the self-contained target.
-> **Pre-tag transition:** `release/v0.9.12/` is created by the release cut and published with the signed `v0.9.12` tag, so the source tree that declares this contract does not contain it yet.
+> **Pre-tag transition:** `release/v0.9.13/` is created by the release cut and published with the signed `v0.9.13` tag, so the source tree that declares this contract does not contain it yet.
 <!-- current-release:end -->
 
 That block is the project's single live declaration of the release contract; no
@@ -162,6 +162,15 @@ validation suite — backs these binaries, through two mechanisms:
    the record of that cut rather than rewritten, so its `CHANGELOG.md` section
    and comparison link stay resolvable. Its retained `test-long` summary carries
    no machine-readable result record.
+
+   `v0.9.12` is tagged but was never published either, and no GitHub release
+   exists for it. Its tag CI also reproduced every image bit-for-bit and then
+   failed re-running the gates, this time on a gate that required a declaration
+   its artifact commit could not carry; [`CHANGELOG.md`](../CHANGELOG.md)
+   records the cause under `0.9.13`. Its signed tag and `release/v0.9.12/` are
+   retained on the same terms. The publishability proof in step 4 below is what
+   closes the window both cuts were lost in: it runs the gates against the
+   artifact commit, before a tag exists to spend.
 
    The signed version tag points to a dedicated release-artifact commit. Tag CI
    fetches the exact remote annotated-tag object and verifies its OpenPGP
