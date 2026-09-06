@@ -78,9 +78,9 @@ PIC-specific machine-level passes behind a PRO license, so `-Os` is accepted
 and then downgraded with advisory 2051: *"the current license does not permit
 the selected optimization level, using optimization level 2"*. Exact image size
 is source-dependent and belongs in retained release evidence. The historical
-fit experiment that selected PIC10F320's self-contained architecture is bound
-to its source commit, XC8 version and device pack in "PIC10F320: the constrained
-target" in DESIGN_DOCUMENTATION.adoc.
+fit experiment that selected PIC10F320's self-contained architecture is
+recorded, as history rather than as a current measurement, in "PIC10F320: the
+constrained target" in DESIGN_DOCUMENTATION.adoc.
 
 This is worth stating because the obvious workarounds do not exist.  The passes
 that would shrink 8-bit PIC code -- compiled-stack overlay, bank and page

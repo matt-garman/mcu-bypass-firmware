@@ -38,6 +38,72 @@ _release_transition_line() {
 		"$1" "$1"
 }
 
+
+# ============================================================================
+# DERIVED RELEASE LINES
+# ============================================================================
+#
+# Everything below renders a line that is a pure function of the version being
+# cut, the version before it, the release date, and the canonical inventory
+# counts. No human decides any of these bytes.
+#
+# WHY THEY ARE FUNCTIONS. They used to be string literals inside the validator,
+# and a release was prepared by hand-editing documents until that validator
+# stopped objecting. Preparing v0.9.12 took four commits to converge on seven
+# lines -- the wrong heading form, then the right one, then the [Unreleased]
+# section that has to survive the rename, then both compare links and the
+# contract line. Every one of those was derivable, and none of them was
+# derived: the only feedback channel was a gate that said no.
+#
+# So the same functions now serve two callers. scripts/release-prepare.sh
+# WRITES these lines into the working tree, and the validator below COMPARES
+# what it finds against them. That keeps the drift check the development-state
+# gate depends on -- release/README.md's declaration is verified continuously,
+# not only on release day -- while removing the hand authoring entirely. The
+# format is stated once, here, so the writer and the checker cannot disagree
+# about it, and the repair for a mismatch is to re-run the preparer rather than
+# to guess at a diagnostic.
+#
+# The topology words are constants HERE rather than in the validator, which is
+# where the single copy used to live. They change only when a part is added,
+# which is a reviewed event; deriving them from the Makefile's canonical maps
+# is worth doing, but it is a separate change from removing the hand edit.
+
+# The project's canonical remote. Both compare links are built from it, and it
+# appeared twice as a literal before.
+_RELEASE_COMPARE_BASE='https://github.com/matt-garman/mcu-bypass-firmware/compare'
+
+# The bounded declaration's one line. `image_count` and `soak_count` come from
+# the Makefile's canonical sets at release time and from the staged inventory
+# afterwards, so this line compares the declaration against the build rather
+# than against itself.
+release_render_contract_line() {
+	[ "$#" -eq 3 ] || return 2
+	printf '**Current release contract:** `%s`; seven release parts; %s images; %s soak combinations; six modular targets; four shell source files.\n' \
+		"$1" "$2" "$3"
+}
+
+# `## [X.Y.Z] - YYYY-MM-DD`. The release number carries no leading `v`; the
+# compare links and the contract line do. Getting that backwards is the first
+# thing a hand edit gets wrong, which is why nothing hand-writes it now.
+release_render_changelog_heading() {
+	[ "$#" -eq 2 ] || return 2
+	printf '## [%s] - %s\n' "${1#v}" "$2"
+}
+
+# The moving link: always the version just cut, compared against HEAD.
+release_render_unreleased_link() {
+	[ "$#" -eq 1 ] || return 2
+	printf '[Unreleased]: %s/%s...HEAD\n' "$_RELEASE_COMPARE_BASE" "$1"
+}
+
+# The frozen link a release adds once. Its label is the release number and its
+# range is tag-to-tag, so both spellings of the version appear in one line.
+release_render_release_link() {
+	[ "$#" -eq 2 ] || return 2
+	printf '[%s]: %s/%s...%s\n' "${1#v}" "$_RELEASE_COMPARE_BASE" "$2" "$1"
+}
+
 release_validate_current_documentation() {
 	[ "$#" -ge 4 ] && [ "$#" -le 5 ] || return 2
 	local repo_root=$1 version=$2 image_count=$3 soak_count=$4
@@ -45,6 +111,7 @@ release_validate_current_documentation() {
 	local release_number=${version#v} changelog="$repo_root/CHANGELOG.md"
 	local document block contract_line section_count previous_version link_count
 	local transition_line referenced release_heading dated_heading unreleased_heading
+	local expected_line
 	# ONE human authority for the release contract. It was four documents, then
 	# two, and every copy was correct only because this validator held all of
 	# them to the same canonical counts -- controlled duplication is still
@@ -127,14 +194,19 @@ release_validate_current_documentation() {
 	' "$changelog") || return
 	[[ "$previous_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 		|| _release_documentation_error "CHANGELOG.md [$release_number] section has no preceding-release section" || return
-	link_count=$(grep -Fxc "[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/$version...HEAD" "$changelog" || true)
+	# Both links are compared against the renderer that writes them, so the
+	# format lives in exactly one place and a mismatch has one repair:
+	# `make release-prepare VERSION=<version>`. Neither is ever hand-authored.
+	expected_line=$(release_render_unreleased_link "$version") || return
+	link_count=$(grep -Fxc "$expected_line" "$changelog" || true)
 	[ "$link_count" -eq 1 ] \
-		|| _release_documentation_error "CHANGELOG.md has no exact $version...HEAD Unreleased link" || return
-	link_count=$(grep -Fxc "[$release_number]: https://github.com/matt-garman/mcu-bypass-firmware/compare/$previous_version...$version" "$changelog" || true)
+		|| _release_documentation_error "CHANGELOG.md has no exact $version...HEAD Unreleased link; re-run release-prepare for $version" || return
+	expected_line=$(release_render_release_link "$version" "$previous_version") || return
+	link_count=$(grep -Fxc "$expected_line" "$changelog" || true)
 	[ "$link_count" -eq 1 ] \
-		|| _release_documentation_error "CHANGELOG.md has no exact $previous_version...$version release link" || return
+		|| _release_documentation_error "CHANGELOG.md has no exact $previous_version...$version release link; re-run release-prepare for $version" || return
 
-	contract_line="**Current release contract:** \`$version\`; seven release parts; $image_count images; $soak_count soak combinations; six modular targets; four shell source files."
+	contract_line=$(release_render_contract_line "$version" "$image_count" "$soak_count") || return
 	# A bounded declaration states the SOURCE contract; retained evidence lives
 	# in a release directory that a source commit provably cannot carry. The cut
 	# creates release/<version>/, and scripts/verify-release-history.sh rejects a
@@ -461,17 +533,28 @@ _release_unquoted_prose() {
 	sed -e 's/`[^`]*`/ /g' -e 's/"[^"]*"/ /g' -- "$1"
 }
 
-# Extract one bounded section of HARDWARE_VALIDATION_LOG.md by marker name.
-_release_hardware_block() {
+# Extract one bounded block by marker name, in either markup this project
+# writes: "<!-- name:start -->" in Markdown, "// name:start" in AsciiDoc. Both
+# spellings are accepted in either file type rather than selected by extension,
+# so a block cannot fail to be found because a document was renamed. Indentation
+# around a marker is ignored, because a claim that lives inside a list item has
+# to be fenced at the list's indent or the marker breaks the list.
+#
+# Fails (nonempty exit) unless the block opens exactly once, closes exactly
+# once, and is not nested. An absent block and a malformed one are both
+# failures: the caller must not be able to read "no fence" as "nothing to
+# check".
+_release_marker_block() {
 	[ "$#" -eq 2 ] || return 2
 	awk -v marker="$1" '
-		$0 == "<!-- " marker ":start -->" {
+		{ line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line) }
+		line == "<!-- " marker ":start -->" || line == "// " marker ":start" {
 			starts++
 			if (starts != 1 || inside) bad=1
 			inside=1
 			next
 		}
-		$0 == "<!-- " marker ":end -->" {
+		line == "<!-- " marker ":end -->" || line == "// " marker ":end" {
 			ends++
 			if (ends != 1 || !inside) bad=1
 			inside=0
@@ -480,6 +563,70 @@ _release_hardware_block() {
 		inside { print }
 		END { exit !(starts == 1 && ends == 1 && !inside && !bad) }
 	' "$2"
+}
+
+# Reduce a claim block to the text its keyword set is matched against: one
+# flowed line, with the markup an author is free to change removed. Emphasis,
+# backticks and link syntax are all editorial -- "*controlled*", "`controlled`"
+# and "controlled" make the same claim -- so none of them may decide whether a
+# gate passes. Underscores are deliberately NOT stripped: "_" is already a word
+# boundary for the term matcher, so "_emphasis_" matches anyway, while removing
+# it would silently mangle every SNAKE_CASE filename a block names. A link
+# contributes BOTH its label and its target, so a block can be required to point
+# at the document that owns the underlying record without also dictating how the
+# sentence around that link is written.
+_release_claim_terms_text() {
+	[ "$#" -eq 0 ] || return 2
+	sed -e 's/\[\([^]]*\)\](\([^)]*\))/\1 \2/g' -e 's/[`*]//g' \
+		| tr '\n\t' '  ' | tr -s ' '
+}
+
+# Does a block satisfy one required-term group?
+#
+# A group is an extended regular expression -- usually a plain alternation like
+# "alt1|alt2" -- satisfied by any one alternative, matched case-insensitively
+# and bounded to whole words. A single-word group is therefore just a required
+# keyword, and the two ideas need only one implementation. Being an ERE also
+# lets one group cover a word's inflections ("results?") without listing them
+# as separate claims.
+#
+# This is the whole editorial contract: inside a fenced block the author picks
+# the words, the sentence order and the emphasis; the gate holds only that the
+# claim's load-bearing terms are still present. A claim cannot quietly become
+# its own opposite, and it also cannot be frozen against ordinary rewriting.
+_release_claim_has_term() {
+	[ "$#" -eq 2 ] || return 2
+	grep -Eqi -- "(^|[^[:alnum:]])(${1})([^[:alnum:]]|$)" <<<"$2"
+}
+
+# Hold one fenced claim to its required terms.
+#
+# The entry is "<document><TAB><marker><TAB><what the block owns><TAB><term
+# groups>", and every claim this project fences is checked through here, so the
+# editorial contract is defined once rather than once per validator.
+_release_check_claim_block() {
+	[ "$#" -eq 2 ] || return 2
+	local repo_root=$1 entry=$2
+	local label marker description terms document block terms_text group rc=0
+	local -a groups=()
+
+	IFS=$'\t' read -r label marker description terms <<<"$entry"
+	read -ra groups <<<"$terms"
+	document="$repo_root/$label"
+	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
+		|| { _release_documentation_error "document owning a bounded claim is not a regular nonempty file: $label" || rc=1; return "$rc"; }
+	# An absent fence and a malformed one fail identically. Reporting them
+	# apart would tell an author which one silences the gate.
+	block=$(_release_marker_block "$marker" "$document") \
+		|| { _release_documentation_error "$label must carry exactly one well-formed $marker block, which owns the $description (open it with \"<!-- $marker:start -->\" or \"// $marker:start\")" || rc=1; return "$rc"; }
+	terms_text=$(_release_claim_terms_text <<<"$block") || return 2
+	[ -n "${terms_text//[[:space:]]/}" ] \
+		|| { _release_documentation_error "$label has an empty $marker block; it must still state the $description" || rc=1; return "$rc"; }
+	for group in "${groups[@]}"; do
+		_release_claim_has_term "$group" "$terms_text" \
+			|| _release_documentation_error "$label's $marker block no longer states the $description; nothing in it says ${group//|/ or }" || rc=1
+	done
+	return "$rc"
 }
 
 # Keep the two kinds of hardware evidence this project holds from being read as
@@ -583,7 +730,7 @@ release_validate_hardware_claims() {
 	[ -z "$structure" ] \
 		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md classification is broken: $structure" || return
 
-	block=$(_release_hardware_block controlled-qualification "$log") \
+	block=$(_release_marker_block controlled-qualification "$log") \
 		|| _release_documentation_error "HARDWARE_VALIDATION_LOG.md has no bounded controlled-qualification section" || return
 	for field in "${required_fields[@]}"; do
 		grep -Fq -- "- **$field**" <<<"$block" \
@@ -723,7 +870,12 @@ release_validate_hardware_claims() {
 #      bounded declaration in release/README.md, while current timing, size and
 #      current-draw results belong to build output or source/toolchain-bound
 #      release evidence. Focused lexical rules reject the concrete result and
-#      inventory forms removed from those two live specifications.
+#      inventory forms removed from those two live specifications, and
+#      DESIGN_DOCUMENTATION.adoc additionally carries no date and no source
+#      revision: binding durable prose to either one is the mitigation a
+#      misplaced measurement asks for, so the rule that removes the measurement
+#      has to close that door behind it. Git already records when a thing was
+#      written and against what.
 #
 # The ban is conditional on the sentinel, so it lifts by itself. When a part
 # does complete controlled qualification the sentinel goes, and calling that
@@ -739,19 +891,31 @@ release_validate_claim_boundaries() {
 	local repo_root=$1
 	local log="$repo_root/HARDWARE_VALIDATION_LOG.md"
 	local sentinel='**No controlled hardware-qualification record exists for any part.**'
-	local document label flowed entry required pattern description find_pid rc=0
+	local document label flowed entry pattern description find_pid rc=0
+	local marker terms terms_text block group
 	local -a claim_offenders=()
 	# Adjective-plus-noun only; see the ABSENCE note above for why.
 	local attributive_claim='hardware[-[:space:]](qualified|validated) (firmware|images?|binaries|parts?|releases?)'
-	# "<document>|<sentence>". No bounded claim contains a pipe.
-	local -a bounded_claims=(
-		"README.md|**No part has completed controlled hardware qualification** — a bench run against a written procedure whose source/image identity, configuration bytes, instrument readings and acceptance result are retained."
-		"DESIGN_DOCUMENTATION.adoc|the general output-**latch** match was not, because in every formulation that preserves its meaning it overruns 256 words on two of the three variants."
-		"DESIGN_DOCUMENTATION.adoc|The general output-latch check is absent, as above."
-		"DESIGN_DOCUMENTATION.adoc|The seam remains a seam: everything above is a behavioural assurance argument, and however thorough it is, it is a different kind of statement from \"the verified code is the shipped code\"."
-		"DESIGN_DOCUMENTATION.adoc|Measured 2026-06-26 at source commit \`0b44c0d\` with free-tier XC8 V3.10 and PIC10-12Fxxx DFP V1.9.189"
-		"release/README.md|That check is the public attestation that *these binaries are exactly what the tested source compiles to*"
-		"release/README.md|These images are retained only for historical integrity and reproducibility."
+	# <document><TAB><marker><TAB><what the block owns><TAB><required term groups>.
+	#
+	# Each claim is fenced in the document that owns it, and what is required of
+	# the fence is a set of terms, not a sentence. A group is "alt1|alt2" and is
+	# satisfied by any one alternative, so an author may reword, re-emphasize,
+	# reorder or re-wrap freely; what may not happen is the claim losing a
+	# load-bearing term and quietly becoming a weaker or opposite statement.
+	#
+	# The fence is also what makes removal reviewable. A deleted marker block is
+	# a visible diff hunk and a named gate failure; a reworded sentence is
+	# neither, which is how the pre-v0.9.10 conflation survived as long as it
+	# did. Deleting the fence to silence the gate is therefore not a shortcut --
+	# it is the loudest possible failure.
+	local -a claim_blocks=(
+		$'README.md\tqualification-status\tstatement that controlled hardware qualification is outstanding\tcontrolled qualifications? bench(top)? procedures? identit(y|ies) config(uration)?s? readings? results? retain(s|ed|ing)?|captur(e|es|ed|ing)|record(s|ed|ing)?|keep(s|ing)?|kept HARDWARE_VALIDATION_LOG remaining|outstanding|deferred|pending|awaits|awaiting|unqualified|incomplete|not|yet|never|no[[:space:]]part'
+		$'DESIGN_DOCUMENTATION.adoc\tpic10f320-flash-overrun\trecord that the modular architecture overruns the PIC10F320 flash ceiling\tmodular 256 words? (does|did|would|will|can|could)[[:space:]]not[[:space:]](fit|link|build|compile)|cannot[[:space:]](fit|link|build|compile)|never[[:space:]](fit|fits|fitted|link|links|linked)|too[[:space:]](big|large)|over[[:space:]]256|beyond[[:space:]]256|overrun(s|ning)?|exceed(s|ed|ing)?|no[[:space:]]room|out[[:space:]]of[[:space:]](flash|room|space)|link[[:space:]]failures?|fail(s|ed|ing)?[[:space:]]to[[:space:]]link measur(e|es|ed|ement|ements)|priced|built|observ(e|ed|ation)|compil(e|ed|es|ation)'
+		$'DESIGN_DOCUMENTATION.adoc\tpic10f320-recorded-omission\trecord of which PIC10F320 context check was left out and why\tlatch(es)? TRISA 256 words? not|absent|omitted|omission|omit(s|ted)? variants?'
+		$'DESIGN_DOCUMENTATION.adoc\tpic10f320-assurance-seam\tstatement of what the PIC10F320 assurance package does not establish\tseams? behaviou?r(al)? verif(y|ied|ies|ication) ship(s|ped|ping)? latch(es)? absent|not simulat(ed|or|ors|ion|ions|e)'
+		$'release/README.md\timage-attestation\tstatement of what the reproducibility check publicly attests\tattest(ation|s|ed)? binaries|images source compil(es|ed|ation|e) reproduc(ibility|ible|es|ed|tion|e)|rebuild(s|ing)?'
+		$'release/README.md\thistorical-images\tstatement of why superseded images stay published\tretain(ed|s)? historical integrity reproduc(ibility|ible|es|ed|tion|e)'
 	)
 	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
 	# alternation available without inventing an escaping convention.
@@ -761,19 +925,11 @@ release_validate_claim_boundaries() {
 		$'TOOLCHAIN.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)-part,[[:space:]]*[0-9]+-image,[[:space:]]*[0-9]+-soak-combination[[:space:]]+product[[:space:]]+set|build(s|ing)?[[:space:]]+(its[[:space:]]+)?([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+images[[:space:]]+into[[:space:]]+the[[:space:]]+published[[:space:]]+product[[:space:]]+set\trestates current release topology outside release/README.md'
 		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
 		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
+		$'DESIGN_DOCUMENTATION.adoc\t[0-9]{4}-[0-9]{2}-[0-9]{2}|(at|on)[[:space:]]+(source[[:space:]]+)?commit[[:space:]]+.?[0-9a-f]{7}|(main|HEAD)[[:space:]]+at[[:space:]]+.?[0-9a-f]{7}\tbinds durable design prose to a date or a source revision'
 	)
 
-	for entry in "${bounded_claims[@]}"; do
-		label=${entry%%|*}
-		required=${entry#*|}
-		document="$repo_root/$label"
-		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
-			|| { _release_documentation_error "document owning a bounded claim is not a regular nonempty file: $label" || rc=1; continue; }
-		flowed=$(_release_flowed_text "$document") || return
-		case "$flowed" in
-			*"$required"*) ;;
-			*) _release_documentation_error "$label no longer states its bounded claim: $required" || rc=1 ;;
-		esac
+	for entry in "${claim_blocks[@]}"; do
+		_release_check_claim_block "$repo_root" "$entry" || rc=1
 	done
 
 	for entry in "${current_fact_rules[@]}"; do
@@ -1190,8 +1346,26 @@ release_validate_pic12f675_flashing_helper() {
 	local repo_root=$1 version=$2
 	local helper_name='flash-pic12f675.py'
 	local helper_source='scripts/flash-pic12f675.py'
-	local claim='PIC12F675 additionally requires Python 3 and the release'\''s flashing helper because its per-device factory calibration must be preserved and verified.'
-	local document label rendered flowed find_pid rc=0
+	# Two facts, each fenced in the documents that publish the procedure, because
+	# a reader given one without the other is misled either way: the helper
+	# requirement without its reason reads as bureaucracy, and the published route
+	# without its status reads as qualified.
+	#
+	# <document><TAB><marker><TAB><what the block owns><TAB><required term groups>
+	local -a helper_blocks=(
+		$'README.md\tpic12f675-helper-required\treason the PIC12F675 needs the release helper rather than a programmer\tPIC12F675 Python helpers?|flash-pic12f675 calibrations? preserv(e|ed|es|ing|ation) verif(y|ied|ies|ication)'
+		$'FLASHING.md\tpic12f675-helper-required\treason the PIC12F675 needs the release helper rather than a programmer\tPIC12F675 Python helper|flash-pic12f675 calibration preserv(e|ed|es|ing) verif(y|ied|ies|ication)'
+		$'README.md\tpic12f675-helper-status\tstatus of the helper ipecmd route: published, software-tested, not hardware-qualified\tpublished.{0,160}software[-[:space:]]tested.{0,160}(not|never|no).{0,160}hardware[-[:space:]]qualified'
+		$'FLASHING.md\tpic12f675-helper-status\tstatus of the helper ipecmd route: published, software-tested, not hardware-qualified\tpublished.{0,160}software[-[:space:]]tested.{0,160}(not|never|no).{0,160}hardware[-[:space:]]qualified'
+		$'release/README.md\tpic12f675-helper-status\tstatus of the helper ipecmd route: published, software-tested, not hardware-qualified\tpublished.{0,160}software[-[:space:]]tested.{0,160}(not|never|no).{0,160}hardware[-[:space:]]qualified'
+	)
+	# The status is one ORDERED pattern rather than three keywords on purpose: the
+	# claim is a conjunction, and three independent keywords would be satisfied by
+	# a block that kept two parts and dropped the third -- which is exactly the
+	# half-a-claim defect the sentence was written to close. Ordering the three
+	# parts inside one window lets the connective prose be rewritten freely while
+	# still requiring all three to be present, in a single statement.
+	local document label rendered flowed entry find_pid rc=0
 	# Always scanned, so deleting the helper instruction from any of them is a
 	# failure with a precise diagnostic rather than a silently empty scan.
 	local -a publishers=("README.md" "FLASHING.md" "release/README.md")
@@ -1202,15 +1376,18 @@ release_validate_pic12f675_flashing_helper() {
 		'needs no toolchain at all'
 		'no build toolchain, no clone of this repository'
 	)
-	# The one sentence that resolves the contradiction B6 found, required
-	# verbatim of every document that presents the helper's procedure.
+	# The sentence that resolves the contradiction B6 found. The selected policy
+	# is "helper published now, software-tested, not hardware-qualified", and
+	# each half of it was being dropped somewhere: FLASHING.md published the
+	# ipecmd procedure while README.md and TOOLCHAIN.adoc said no ipecmd
+	# procedure was published at all, and a reader who believed either one was
+	# misled about the other.
 	#
-	# The selected policy is "helper published now, software-tested, not
-	# hardware-qualified", and each half of it was being dropped somewhere.
-	# FLASHING.md published the ipecmd procedure while README.md and
-	# TOOLCHAIN.adoc said no ipecmd procedure was published at all -- a reader
-	# who believed either one was misled about the other. This states both
-	# halves in one sentence so a document cannot carry half of it.
+	# The maintained DOCUMENTS are now held to this claim as a form family
+	# (helper_blocks above), so it can be said in anyone's words. This exact
+	# spelling survives for the GENERATED per-release guidance alone, where it
+	# is not prose an author writes but bytes a renderer emits -- the same
+	# distinction release-prepare draws for the derived release lines.
 	local helper_status='The helper'"'"'s `ipecmd` route is published and software-tested, but it is not hardware-qualified.'
 	# The blanket denial the sentence above replaces. It is banned as a form
 	# family rather than as three exact sentences, because the same false claim
@@ -1246,25 +1423,19 @@ release_validate_pic12f675_flashing_helper() {
 		grep -Fq "$helper_name" "$document" \
 			|| _release_documentation_error "$label does not name the release-shipped PIC12F675 flashing helper $helper_name" || rc=1
 		flowed=$(_release_flowed_text "$document") || return
-		case "$label" in
-			README.md|FLASHING.md)
-				case "$flowed" in
-					*"$claim"*) ;;
-					*) _release_documentation_error "$label does not carry the exact downloaded-release programming claim (PIC12F675 additionally requires Python 3 and the flashing helper)" || rc=1 ;;
-				esac
-				;;
-		esac
 		for retired in "${retired_claims[@]}"; do
 			case "$flowed" in
 				*"$retired"*)
 					_release_documentation_error "$label still publishes the retired universal claim: $retired" || rc=1 ;;
 			esac
 		done
-		case "$flowed" in
-			*"$helper_status"*) ;;
-			*) _release_documentation_error "$label presents the PIC12F675 flashing helper without the exact published/software-tested/not-hardware-qualified status: $helper_status" || rc=1 ;;
-		esac
 		_release_pic12f675_raw_writer_scan "$label" < "$document" || rc=1
+	done
+
+	# The two published claims, each in its own fence, held to their terms
+	# rather than to their wording.
+	for entry in "${helper_blocks[@]}"; do
+		_release_check_claim_block "$repo_root" "$entry" || rc=1
 	done
 
 	# 4. FLASHING.md says it in its heading, where a reader skimming for the

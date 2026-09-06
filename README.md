@@ -101,12 +101,14 @@ DG413) or relays (e.g. Kemet EC2-3TNU).
 
 Every item above runs on a host or in a simulator.
 
+<!-- qualification-status:start -->
 A remaining validation step is a *controlled hardware
 qualification*, i.e. a physical test bench run against a written
 procedure that captures source/image identity, configuration bytes,
 instrument readings and acceptance result(s).  However, the
 firmwares are being deployed in the field, see
 [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).
+<!-- qualification-status:end -->
 
 The project is using the `0.9.x` release versioning until all
 firmwares have been validated on the bench; the `1.x.y` version is
@@ -220,6 +222,7 @@ Every durable documentation authority named in the map above has exactly one
 label below. The label decides how it is edited and when it may be deleted;
 publication as a hosted asset is a distribution fact, not a second lifecycle.
 
+<!-- document-lifecycle:start -->
 | Label | How it is treated | Where it lives |
 |---|---|---|
 | Live specification | Edited in place as the design changes; describes only the current state | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc`, `test/README.md` |
@@ -235,6 +238,7 @@ publication as a hosted asset is a distribution fact, not a second lifecycle.
 | Release result record | Source-bound provenance and observed evidence. The tag fixes the original bytes; a current-tree copy may differ only by the registered safety-amendment process in `release/README.md` | `release/<version>/QUALIFICATION`, `release/<version>/MANIFEST.md`, `release/<version>/README.md`, `release/<version>/evidence/*` |
 | Release payload artifact | Firmware and required programming helpers; their signed byte identity is never corrected in place | `release/<version>/*.hex`, `release/<version>/flash-*.py` |
 | Release authentication record | The checksum list and its detached signature; retained byte-for-byte | `release/<version>/SHA256SUMS`, `release/<version>/SHA256SUMS.asc` |
+<!-- document-lifecycle:end -->
 
 Branch-only work plans are not durable authorities. They carry the required
 opening banner, coordinate one branch, and are deleted before release source

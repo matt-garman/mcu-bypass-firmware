@@ -98,22 +98,34 @@ for required in \
 	grep -Fq "$required" <<<"$pic12f675_bench_one_line" \
 		|| fail "TODO.md T3-pic12f675-bench omits release/residual-risk semantics: $required"
 done
-pic12f675_disposition=$(awk '
-	/^A third PIC, the PIC12F675,/ { keep=1 }
-	keep && /^== / { exit }
-	keep { print }
-' "$DESIGN_DOCUMENTATION") \
-	|| fail "design documentation could not be scanned for the PIC12F675 disposition"
-[ -n "$pic12f675_disposition" ] \
-	|| fail "design documentation states no PIC12F675 release disposition"
+# The disposition is bounded by an explicit marker rather than anchored on the
+# sentence "A third PIC, the PIC12F675," that used to open it. That anchor was a
+# first line of prose, so rewriting the paragraph's opening -- which is an
+# editorial act -- silently emptied the scan and left this gate reporting that
+# the design document states no disposition at all. What must survive is the
+# disposition's terms, not its phrasing.
+pic12f675_disposition=$(_release_marker_block pic12f675-disposition \
+	"$DESIGN_DOCUMENTATION") \
+	|| fail "DESIGN_DOCUMENTATION.adoc must carry exactly one well-formed pic12f675-disposition block stating the part's release disposition (open it with \"// pic12f675-disposition:start\")"
 pic12f675_disposition_one_line=$(printf '%s\n' "$pic12f675_disposition" \
-	| tr '\n' ' ' | tr -s ' ')
+	| _release_claim_terms_text)
+[ -n "${pic12f675_disposition_one_line//[[:space:]]/}" ] \
+	|| fail "DESIGN_DOCUMENTATION.adoc has an empty pic12f675-disposition block"
+# Three facts, each free to be worded any way: the part IS released; it has NOT
+# been hardware-qualified; and that qualification is deferred to a named TODO.
+# Dropping any one of them is how a supported part quietly becomes an
+# unsupported one, or an unqualified one quietly becomes qualified.
 for required in \
-		'**release-supported from `v0.9.9`**' \
-		'has **not** completed controlled hardware qualification' \
-		'deferred to the `1.x.y` pass (TODO `T3-pic12f675-bench`)'; do
-	grep -Fq "$required" <<<"$pic12f675_disposition_one_line" \
-		|| fail "design documentation omits the PIC12F675 release disposition: $required"
+		'release-supported|release[[:space:]]supported' \
+		'v0.9.9' \
+		'not|never|no' \
+		'controlled' \
+		'qualifications?' \
+		'deferr(ed|al|ing)|defer(s)?' \
+		'1.x.y' \
+		'T3-pic12f675-bench'; do
+	_release_claim_has_term "$required" "$pic12f675_disposition_one_line" \
+		|| fail "the pic12f675-disposition block omits part of the PIC12F675 release disposition; nothing in it says ${required//|/ or }"
 done
 if grep -Eiq '(PIC12F675|the part|this part) (is|remains) (intentionally )?(not release-supported|(absent from|excluded from|not included in) (the )?(default `all` goal|CI|release integration|(canonical )?([0-9]+-image )?release set))|(^|[.!?] )((the|this|a) )?(workflow|programmer|pk2cmd|ipecmd) (preserves|guarantees|ensures)([ .]|$)|(^|[.!?] )(factory trim|factory values|OSCCAL|BG) (is|are) preserved([ .]|$)' \
 		<<<"$pic12f675_bench_one_line $pic12f675_disposition_one_line"; then
@@ -123,26 +135,71 @@ checks=$((checks + 1))
 
 # Pin the safety-relevant multi-MCU distinctions: PIC12F675's longer sample
 # period, the polled PIC architecture, and the fixed low BOD threshold.
-# Normalize wrapping so AsciiDoc line breaks remain editorial rather than API.
+#
+# Each row is "<what must still be stated><TAB><ordered pattern>". The pattern
+# keeps every number and every part association and lets the prose between them
+# be rewritten, because what is safety-relevant here is the FACT, not the
+# sentence that carries it. These were exact sentences until this branch, and
+# the cost of that was concrete: changing one period to a semicolon in
+# "...sample cadence. PIC12F675 uses 1.024ms" -- an edit that altered no claim,
+# no number and no part -- failed this gate. A rule an author cannot satisfy by
+# writing correctly is a rule that will eventually be satisfied by deleting it.
+#
+# Wrapping is normalized first, so AsciiDoc line breaks stay editorial.
 design_contract=$(tr '\n' ' ' < "$DESIGN_DOCUMENTATION" | tr -s ' ')
-for required in \
-		'Every implementation except PIC12F675 uses a nominal 1ms timer-derived sample cadence. PIC12F675 uses 1.024ms' \
-		'the PIC implementations poll their timer flags' \
-		'the 1ms targets span roughly 0.909-1.111ms per sample and PIC12F675 spans roughly 0.931-1.138ms' \
-		'8 * 1.138ms = 9.11ms on PIC12F675' \
-		'the PIC12F675 counterpart is 7 * 0.931ms = 6.52ms' \
-		'33ms/38ms/45ms for PIC10F32x and approximately 33.8ms/38.8ms/45.8ms for PIC12F675' \
-		'latched `T0IF` supplies only the first of four required 256us rollover observations' \
-		'PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip range' \
-		'this part has no `BORV` selection' \
-		'It therefore cannot enforce the >4v peripheral-safe floor either' \
-		'External supply supervision is required' \
-		'The implementations span four core generations' \
-		'Most use the modular architecture, with shell ownership separated by peripheral family' \
-		'the polled PIC implementations pause sampling during a blocking output actuation'; do
-	grep -Fq "$required" <<<"$design_contract" \
-		|| fail "design documentation omits PIC12F675 safety/topology semantics: $required"
-done
+while IFS=$'\t' read -r description pattern; do
+	[ -n "$description" ] || continue
+	grep -Eiq -- "$pattern" <<<"$design_contract" \
+		|| fail "design documentation omits PIC12F675 safety/topology semantics: $description"
+done <<'DESIGN_CONTRACT'
+PIC12F675's sample cadence is 1.024ms where every other implementation is a nominal 1ms	except PIC12F675.{0,80}nominal 1ms.{0,60}cadence.{0,30}PIC12F675.{0,20}1\.024ms
+the PIC implementations poll their timer flags	PIC implementations poll.{0,30}timer flags
+the per-sample spans: 0.909-1.111ms on the 1ms targets, 0.931-1.138ms on PIC12F675	1ms targets span.{0,20}0\.909-1\.111ms.{0,80}PIC12F675 spans.{0,20}0\.931-1\.138ms
+the 8-sample worst case on PIC12F675 is 8 * 1.138ms = 9.11ms	8 \* 1\.138ms = 9\.11ms on PIC12F675
+the 7-sample PIC12F675 counterpart is 7 * 0.931ms = 6.52ms	PIC12F675 counterpart is 7 \* 0\.931ms = 6\.52ms
+the blocking-actuation budgets: 33/38/45ms on PIC10F32x, 33.8/38.8/45.8ms on PIC12F675	33ms/38ms/45ms for PIC10F32x.{0,40}33\.8ms/38\.8ms/45\.8ms for PIC12F675
+a latched T0IF supplies only the first of the four required 256us rollover observations	latched .?T0IF.? supplies only the first of four required 256us rollover observations
+PIC12F675 BOD is fixed at the 2.025-2.175v trip range with BOREN=ON	PIC12F675::.{0,60}BOD is enabled.{0,30}BOREN=ON.{0,40}2\.025-2\.175v
+PIC12F675 has no BORV selection	no .?BORV.? selection
+PIC12F675 cannot enforce the >4v peripheral-safe floor	cannot enforce the >4v peripheral-safe floor
+external supply supervision is required	external supply supervision is required
+the implementations span four core generations	implementations span four core generations
+shell ownership in the modular architecture is separated by peripheral family	modular architecture.{0,30}shell ownership separated by peripheral family
+the polled PIC implementations pause sampling during a blocking output actuation	polled PIC implementations pause sampling during a blocking output actuation
+DESIGN_CONTRACT
+# Negative coverage, generated from the table itself rather than hand-written
+# per row: delete the span a rule matches, and that rule must stop matching. A
+# pattern that still matches after its own match is removed was never anchored
+# on the fact it names -- it was matching connective prose that happens to
+# appear elsewhere -- which is the way a loosened rule silently stops being a
+# rule at all.
+while IFS=$'\t' read -r description pattern; do
+	[ -n "$description" ] || continue
+	# SOH as the s/// delimiter: these patterns contain both "/" (33ms/38ms/45ms)
+	# and "|" (alternations), and no design document contains a control byte.
+	spoiled=$(sed -E "s"$'\001'"$pattern"$'\001'$'\001'"Ig" <<<"$design_contract") \
+		|| fail "design-contract rule could not be spoiled for its negative case: $description"
+	if grep -Eiq -- "$pattern" <<<"$spoiled"; then
+		fail "design-contract rule matches text other than the fact it names: $description"
+	fi
+	checks=$((checks + 1))
+done <<'DESIGN_CONTRACT_NEGATIVE'
+PIC12F675's sample cadence is 1.024ms where every other implementation is a nominal 1ms	except PIC12F675.{0,80}nominal 1ms.{0,60}cadence.{0,30}PIC12F675.{0,20}1\.024ms
+the PIC implementations poll their timer flags	PIC implementations poll.{0,30}timer flags
+the per-sample spans: 0.909-1.111ms on the 1ms targets, 0.931-1.138ms on PIC12F675	1ms targets span.{0,20}0\.909-1\.111ms.{0,80}PIC12F675 spans.{0,20}0\.931-1\.138ms
+the 8-sample worst case on PIC12F675 is 8 * 1.138ms = 9.11ms	8 \* 1\.138ms = 9\.11ms on PIC12F675
+the 7-sample PIC12F675 counterpart is 7 * 0.931ms = 6.52ms	PIC12F675 counterpart is 7 \* 0\.931ms = 6\.52ms
+the blocking-actuation budgets: 33/38/45ms on PIC10F32x, 33.8/38.8/45.8ms on PIC12F675	33ms/38ms/45ms for PIC10F32x.{0,40}33\.8ms/38\.8ms/45\.8ms for PIC12F675
+a latched T0IF supplies only the first of the four required 256us rollover observations	latched .?T0IF.? supplies only the first of four required 256us rollover observations
+PIC12F675 BOD is fixed at the 2.025-2.175v trip range with BOREN=ON	PIC12F675::.{0,60}BOD is enabled.{0,30}BOREN=ON.{0,40}2\.025-2\.175v
+PIC12F675 has no BORV selection	no .?BORV.? selection
+PIC12F675 cannot enforce the >4v peripheral-safe floor	cannot enforce the >4v peripheral-safe floor
+external supply supervision is required	external supply supervision is required
+the implementations span four core generations	implementations span four core generations
+shell ownership in the modular architecture is separated by peripheral family	modular architecture.{0,30}shell ownership separated by peripheral family
+the polled PIC implementations pause sampling during a blocking output actuation	polled PIC implementations pause sampling during a blocking output actuation
+DESIGN_CONTRACT_NEGATIVE
+
 if grep -Eiq 'All targets use a nominal 1ms timer-derived sample cadence|while both PIC implementations poll|On both PIC parts, the footswitch loop|For both polled PIC implementations|six MCU release targets across three core generations|both polled PIC implementations qualify press timing|PIC12F675[^.]*T0IF[^.]*(next sample|post-block sample)[^.]*immediate|PIC12F675[^.]*immediate[^.]*T0IF' \
 		<<<"$design_contract"; then
 	fail "design documentation still describes the pre-PIC12F675 timing/topology"

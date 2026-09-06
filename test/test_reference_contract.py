@@ -88,7 +88,15 @@ MD_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
 HTML_ANCHOR = re.compile(r"<a\s+(?:id|name)=\"([^\"]+)\"")
 CODE_SPAN = re.compile(r"`([^`]+)`")
 
-LIFECYCLE_HEADING = "### Document lifecycle"
+# The lifecycle table is found by an explicit marker pair, not by its heading
+# text. It used to be anchored on the literal heading "### Document lifecycle",
+# which meant capitalizing one letter of a heading in the maintainer's own
+# README broke this rule and, through the self-tests that use the checked-in
+# table as their control fixture, four more with it. The heading is prose and
+# belongs to whoever writes the README; the marker is the contract.
+LIFECYCLE_MARKER = "document-lifecycle"
+LIFECYCLE_OPEN = "<!-- %s:start -->" % LIFECYCLE_MARKER
+LIFECYCLE_CLOSE = "<!-- %s:end -->" % LIFECYCLE_MARKER
 LIFECYCLE_AUTHORITIES = {
     "DESIGN_DOCUMENTATION.adoc": "Live specification",
     "TOOLCHAIN.adoc": "Live specification",
@@ -223,18 +231,17 @@ def link_violations(name, text, anchors):
 
 def lifecycle_violations(text):
     """Return defects in README.md's durable-authority lifecycle table."""
-    lines = text.splitlines()
+    lines = [line.strip() for line in text.splitlines()]
     starts = [number for number, line in enumerate(lines)
-              if line == LIFECYCLE_HEADING]
-    if len(starts) != 1:
-        return ["expected one %r heading, found %d"
-                % (LIFECYCLE_HEADING, len(starts))]
+              if line == LIFECYCLE_OPEN]
+    ends = [number for number, line in enumerate(lines)
+            if line == LIFECYCLE_CLOSE]
+    if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+        return ["expected exactly one bounded %r block, found %d start and "
+                "%d end markers" % (LIFECYCLE_MARKER, len(starts), len(ends))]
 
-    start = starts[0] + 1
-    end = next((number for number in range(start, len(lines))
-                if lines[number].startswith("### ")), len(lines))
     classified = {}
-    for line in lines[start:end]:
+    for line in lines[starts[0] + 1:ends[0]]:
         if not line.startswith("|"):
             continue
         cells = line.split("|")
@@ -304,6 +311,20 @@ def self_test():
     check(any("assigns every retained file" in item
               for item in lifecycle_violations(broad)),
           "negative case -- overlapping whole-release classifications were accepted")
+    # The fence is what makes the table findable, so losing it must fail rather
+    # than silently classify nothing. Both halves are checked: a table with no
+    # markers at all, and one whose fence is left open.
+    unfenced = readme.replace(LIFECYCLE_OPEN, "").replace(LIFECYCLE_CLOSE, "")
+    check(any("bounded" in item for item in lifecycle_violations(unfenced)),
+          "negative case -- a lifecycle table with no marker block was accepted")
+    unclosed = readme.replace(LIFECYCLE_CLOSE, "")
+    check(any("bounded" in item for item in lifecycle_violations(unclosed)),
+          "negative case -- a lifecycle block that is never closed was accepted")
+    # And the property the marker exists for: renaming the heading above the
+    # table is an editorial act and must stay one.
+    renamed = readme.replace("### Document Lifecycle", "### How documents are kept")
+    check(lifecycle_violations(renamed) == [],
+          "control case -- renaming the lifecycle heading was rejected")
 
 
 def main():

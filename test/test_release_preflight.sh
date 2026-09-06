@@ -2198,6 +2198,53 @@ drop_claim_line() {
 	mv "$kept" "$boundaries_root/$document"
 }
 
+# Delete a fenced claim block outright, fence and all. This is the spoiling that
+# matters now: what is forbidden is LOSING a claim, and this is what losing one
+# looks like in a diff.
+drop_claim_block_at() {
+	local root=$1 document=$2 marker=$3
+	# Two statements: `local` expands every argument before it assigns any of
+	# them, so `kept` cannot be written in terms of `root` on the same line.
+	local kept="$root/.kept"
+	"$REAL_AWK" -v marker="$marker" '
+		{ line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line) }
+		line == "<!-- " marker ":start -->" || line == "// " marker ":start" { inside=1; next }
+		line == "<!-- " marker ":end -->" || line == "// " marker ":end" { inside=0; next }
+		inside { next }
+		{ print }
+	' "$root/$document" > "$kept" \
+		|| fail "could not drop the $marker block from $document"
+	mv "$kept" "$root/$document"
+}
+
+drop_claim_block() {
+	drop_claim_block_at "$boundaries_root" "$1" "$2"
+}
+
+# Replace a fenced block's body, keeping the fence: what an editor does when
+# rewriting prose. Passing an empty body empties the block.
+reword_claim_block_at() {
+	local root=$1 document=$2 marker=$3 body=$4
+	local kept="$root/.kept"
+	"$REAL_AWK" -v marker="$marker" -v body="$body" '
+		{ line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line) }
+		line == "<!-- " marker ":start -->" || line == "// " marker ":start" {
+			print; if (body != "") print body; inside=1; next
+		}
+		line == "<!-- " marker ":end -->" || line == "// " marker ":end" {
+			inside=0; print; next
+		}
+		inside { next }
+		{ print }
+	' "$root/$document" > "$kept" \
+		|| fail "could not reword the $marker block in $document"
+	mv "$kept" "$root/$document"
+}
+
+reword_claim_block() {
+	reword_claim_block_at "$boundaries_root" "$1" "$2" "$3"
+}
+
 assert_boundaries_accepts() {
 	local description=$1
 	release_validate_claim_boundaries "$boundaries_root" >"$output" 2>&1 \
@@ -2220,53 +2267,163 @@ assert_boundaries_rejects() {
 write_boundaries_fixture
 assert_boundaries_accepts 'the shipped documents'
 
-# 1. PRESENCE. Each bounded claim, dropped from the document that owns it.
+# 1. PRESENCE. Each claim is fenced in the document that owns it, and the fence
+#    is deleted, emptied, unbalanced, gutted -- and rewritten.
 #
+#    The last of those is the point. Until this branch every claim here was
+#    pinned as an exact sentence, which made a rewording and a deletion fail
+#    identically. That taught an author the offence was touching the prose, when
+#    the actual offence is losing the claim. Each claim below therefore carries
+#    a REWRITE case that must be ACCEPTED alongside the spoilings that must be
+#    rejected; if an accept case ever starts failing, the gate has quietly gone
+#    back to pinning prose and this contract has stopped meaning what it says.
+
 # The root README is where a reader arrives, and its denial was the one the log's
 # sentinel did not cover.
 write_boundaries_fixture
-drop_claim_line README.md '**No part has completed'
-assert_boundaries_rejects 'a README that no longer denies controlled qualification' \
-	'README.md no longer states its bounded claim'
+drop_claim_block README.md qualification-status
+assert_boundaries_rejects 'a README with no qualification-status block' \
+	'README.md must carry exactly one well-formed qualification-status block'
+
+write_boundaries_fixture
+reword_claim_block README.md qualification-status ''
+assert_boundaries_rejects 'a README whose qualification-status block was emptied' \
+	'README.md has an empty qualification-status block'
+
+# An unbalanced fence is not a lesser fault than a missing one. It is how a
+# block stops bounding anything while still looking fenced in review.
+write_boundaries_fixture
+drop_claim_line README.md '<!-- qualification-status:end -->'
+assert_boundaries_rejects 'a README whose qualification-status fence never closes' \
+	'README.md must carry exactly one well-formed qualification-status block'
+
+# The claim inverted. No amount of rewording licenses this one.
+write_boundaries_fixture
+reword_claim_block README.md qualification-status \
+	'Every part has completed controlled hardware qualification: a bench run against a written procedure whose source/image identity, configuration bytes, instrument readings and acceptance results are retained. See [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).'
+assert_boundaries_rejects 'a README that turns the qualification denial into a claim' \
+	"README.md's qualification-status block no longer states"
+
+# The denial kept, the definition dropped. "Not qualified yet", with no statement
+# of what qualification would have required, is a weaker commitment wearing the
+# same words -- and it is the shape the pre-v0.9.10 conflation actually took.
+write_boundaries_fixture
+reword_claim_block README.md qualification-status \
+	'No part has been through this yet; see [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).'
+assert_boundaries_rejects 'a README that keeps the denial but drops what qualification means' \
+	"README.md's qualification-status block no longer states"
+
+# The block must also keep pointing at the record that owns the underlying fact,
+# which is a structural requirement rather than a wording one.
+write_boundaries_fixture
+reword_claim_block README.md qualification-status \
+	'No part has completed a controlled hardware qualification yet: a bench run against a written procedure whose source/image identity, configuration bytes, instrument readings and acceptance results are retained.'
+assert_boundaries_rejects 'a README qualification denial that cites no validation record' \
+	'nothing in it says HARDWARE_VALIDATION_LOG'
+
+# ACCEPTED: the same commitment, another voice, different emphasis, different
+# sentence order, different wrapping.
+write_boundaries_fixture
+reword_claim_block README.md qualification-status \
+	'Nothing here has been through a controlled hardware qualification yet. By that I mean a real bench run, against a written procedure, where the source and image identity, the configuration bytes, the instrument readings and the acceptance results all get retained afterwards. What has happened instead is field use, logged in [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).'
+assert_boundaries_accepts 'a README qualification denial rewritten in another voice'
 
 # PIC10F320 ships a general defence its 256 words could not hold. Both halves of
-# that record are pinned: what was not ported, and the restatement in the
+# that record are fenced: what was not ported, and the restatement in the
 # "what this package does not establish" list a reader is pointed to.
 write_boundaries_fixture
-drop_claim_line DESIGN_DOCUMENTATION.adoc 'the general output-**latch** match was'
+drop_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-recorded-omission
 assert_boundaries_rejects 'a design document that drops the PIC10F320 latch omission' \
-	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+	'DESIGN_DOCUMENTATION.adoc must carry exactly one well-formed pic10f320-recorded-omission block'
 
+# The capacity reason is the whole justification. Without it the omission reads
+# as an oversight somebody should simply fix.
 write_boundaries_fixture
-drop_claim_line DESIGN_DOCUMENTATION.adoc 'The general output-latch check is absent'
-assert_boundaries_rejects 'a design document that drops the restated latch omission' \
-	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-recorded-omission \
+	'The exact-TRISA direction check was ported here; the general output-latch match was not, for reasons of taste on the three variants.'
+assert_boundaries_rejects 'a design document that drops why the latch check was omitted' \
+	"DESIGN_DOCUMENTATION.adoc's pic10f320-recorded-omission block no longer states"
 
-# The equivalence argument is a behavioural argument. Losing this sentence turns
-# a hand-inlined part's assurance case into a byte-identity claim it never made.
+# ACCEPTED: the same record, rewritten.
 write_boundaries_fixture
-drop_claim_line DESIGN_DOCUMENTATION.adoc 'The seam remains a seam'
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-recorded-omission \
+	'I ported the exact-TRISA direction check, which costs one word per variant. I did not port the general output-latch match: every formulation of it that keeps its meaning blows past 256 words on two of the three variants, and a partial version is worse than none.'
+assert_boundaries_accepts 'a rewritten PIC10F320 omission record'
+
+# The equivalence argument is a behavioural argument. Losing it turns a
+# hand-inlined part's assurance case into a byte-identity claim it never made.
+write_boundaries_fixture
+drop_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-assurance-seam
 assert_boundaries_rejects 'a design document that drops the inlining-seam limit' \
-	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+	'DESIGN_DOCUMENTATION.adoc must carry exactly one well-formed pic10f320-assurance-seam block'
 
 write_boundaries_fixture
-drop_claim_line DESIGN_DOCUMENTATION.adoc 'Measured 2026-06-26 at source commit'
-assert_boundaries_rejects 'a historical sizing result that drops its source/toolchain binding' \
-	'DESIGN_DOCUMENTATION.adoc no longer states its bounded claim'
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-assurance-seam \
+	'The verified code is the shipped code, and the general output-latch check is absent as above; the hardware-bench properties are simulated.'
+assert_boundaries_rejects 'a design document that closes the inlining seam by assertion' \
+	"DESIGN_DOCUMENTATION.adoc's pic10f320-assurance-seam block no longer states"
 
 # Reproducing an image proves the bytes match the tested source. It does not
-# qualify the firmware, and the sentence that says so is the only thing standing
-# between the two claims for a reader of the release documentation.
+# qualify the firmware, and this block is the only thing standing between the
+# two claims for a reader of the release documentation.
 write_boundaries_fixture
-drop_claim_line release/README.md 'attestation that *these binaries are exactly'
+drop_claim_block release/README.md image-attestation
 assert_boundaries_rejects 'release documentation that drops what reproduction proves' \
-	'release/README.md no longer states its bounded claim'
+	'release/README.md must carry exactly one well-formed image-attestation block'
 
 # Retaining a known-unsafe image for reproducibility is not endorsing it.
 write_boundaries_fixture
-drop_claim_line release/README.md 'These images are retained only for historical'
+drop_claim_block release/README.md historical-images
 assert_boundaries_rejects 'release documentation that drops the retention limit' \
-	'release/README.md no longer states its bounded claim'
+	'release/README.md must carry exactly one well-formed historical-images block'
+
+# ACCEPTED: the retention limit, rewritten.
+write_boundaries_fixture
+reword_claim_block release/README.md historical-images \
+	'They stay published purely so the historical record stays whole and every past release still reproduces; nothing about keeping them is an endorsement, and their integrity is all that is retained.'
+assert_boundaries_accepts 'a rewritten retention limit'
+
+# The PIC10F320 exists as a hand-inlined single file for exactly one reason,
+# and that reason is a measured overrun. A reader who loses it is left with an
+# unexplained departure from every other target's architecture.
+write_boundaries_fixture
+drop_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun
+assert_boundaries_rejects 'a design document that drops why the PIC10F320 is hand-inlined' \
+	'DESIGN_DOCUMENTATION.adoc must carry exactly one well-formed pic10f320-flash-overrun block'
+
+# The direction is the claim. A block naming the architecture, the ceiling and
+# the measurement, but no longer saying the one overran the other, has inverted
+# the record while keeping every noun in it.
+write_boundaries_fixture
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun \
+	'The modular firmware for this part was measured at 256 words for the simple, mute and relay variants, so the modular architecture was kept.'
+assert_boundaries_rejects 'a design document whose PIC10F320 sizing record no longer overruns' \
+	"DESIGN_DOCUMENTATION.adoc's pic10f320-flash-overrun block no longer states"
+
+# ACCEPTED: the same overrun, another voice, and a different member of the
+# does-not-fit family than the shipped prose leans on.
+write_boundaries_fixture
+reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun \
+	'I did not guess at this. The modular firmware simply does not fit: I built all three variants, each came out roughly a hundred words too large for the 256 this part has, and the linker refused outright rather than missing narrowly.'
+assert_boundaries_accepts 'a rewritten PIC10F320 overrun record'
+
+# A3 retired the last exact-sentence pin in this project. It existed because a
+# measurement had been placed in durable design prose and binding its
+# provenance was the mitigation; the rule's own remedy is that the measurement
+# leaves. These two keep the mitigation from creeping back in its place --
+# nothing in this document is dated, and nothing in it is pinned to a revision,
+# because git already records both.
+write_boundaries_fixture
+printf '\nMeasured 2026-06-26 with the pinned toolchain, the shell built at 356 words.\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'a design guide dating its own prose' \
+	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
+
+write_boundaries_fixture
+printf '\nThat was established at source commit `0b44c0d` on the pinned toolchain.\n' \
+	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
+assert_boundaries_rejects 'a design guide pinning its own prose to a revision' \
+	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
 
 # 2. CURRENT FACTS. Stable design/tool behavior remains in these documents;
 # changing release topology and source-dependent results do not.
@@ -2435,14 +2592,21 @@ for missing_doc in FLASHING.md README.md release/README.md; do
 		"$missing_doc does not name the release-shipped PIC12F675 flashing helper"
 done
 
-# 3. The precise claim, in the two entry-point documents. "Typically" and
-#    "needs no toolchain at all" are the escape clauses this replaces.
+# 3. The reason the helper exists, in the two entry-point documents. "Typically"
+#    and "needs no toolchain at all" are the escape clauses this replaces. The
+#    claim is fenced and held to its terms, so the wording is the author's; what
+#    may not go missing is the part, the interpreter, the helper, and the reason
+#    -- that a per-device factory calibration must be preserved and verified.
 for claim_doc in FLASHING.md README.md; do
 	write_flashing_fixture
-	"$REAL_AWK" '{ gsub(/PIC12F675 additionally requires Python 3/, "Some parts may require Python 3"); print }' \
+	"$REAL_AWK" '{ gsub(/factory calibration/, "factory settings"); print }' \
 		"$ROOT/$claim_doc" > "$flashing_root/$claim_doc"
-	assert_flashing_rejects "$claim_doc without the exact programming claim" \
-		"$claim_doc does not carry the exact downloaded-release programming claim"
+	assert_flashing_rejects "$claim_doc without the reason the helper is required" \
+		"$claim_doc's pic12f675-helper-required block no longer states"
+	write_flashing_fixture
+	drop_claim_block_at "$flashing_root" "$claim_doc" pic12f675-helper-required
+	assert_flashing_rejects "$claim_doc with no pic12f675-helper-required block" \
+		"$claim_doc must carry exactly one well-formed pic12f675-helper-required block"
 done
 
 write_flashing_fixture
@@ -2638,15 +2802,39 @@ assert_flashing_rejects 'an undeclared root-level document publishing a raw writ
 # B6: the status the helper's procedure is published under. FLASHING.md
 # published an ipecmd procedure while README.md and TOOLCHAIN.adoc said no
 # ipecmd procedure was published at all, so a reader believing either one was
-# misled about the other. Both halves are now pinned -- the exact status
-# sentence in every publisher, and the blanket denial banned everywhere.
+# misled about the other. Both halves are still held -- the status in every
+# publisher, and the blanket denial banned everywhere.
+#
+# The status is a conjunction: published, AND software-tested, AND not
+# hardware-qualified. It is required as one ordered pattern rather than as three
+# keywords precisely so that dropping ONE part fails, which is what these cases
+# check -- a block keeping two parts out of three is the original defect.
 for status_doc in FLASHING.md README.md release/README.md; do
 	write_flashing_fixture
-	"$REAL_AWK" '{ gsub(/route is published and software-tested/, "route works"); print }' \
+	"$REAL_AWK" '{ gsub(/is published and software-tested/, "works"); print }' \
 		"$ROOT/$status_doc" > "$flashing_root/$status_doc"
-	assert_flashing_rejects "$status_doc without the helper status sentence" \
-		"$status_doc presents the PIC12F675 flashing helper without the exact published/software-tested/not-hardware-qualified status"
+	assert_flashing_rejects "$status_doc without the helper status" \
+		"$status_doc's pic12f675-helper-status block no longer states"
+	# Rewritten through the fence rather than by a line-wise substitution: every
+	# publisher wraps this sentence differently, and "...but it is not" /
+	# "hardware-qualified." straddles a line break in two of the three.
+	write_flashing_fixture
+	reword_claim_block_at "$flashing_root" "$status_doc" pic12f675-helper-status \
+		'The helper'"'"'s `ipecmd` route is published and software-tested, and it is hardware-qualified.'
+	assert_flashing_rejects "$status_doc claiming the route is hardware-qualified" \
+		"$status_doc's pic12f675-helper-status block no longer states"
+	write_flashing_fixture
+	drop_claim_block_at "$flashing_root" "$status_doc" pic12f675-helper-status
+	assert_flashing_rejects "$status_doc with no pic12f675-helper-status block" \
+		"$status_doc must carry exactly one well-formed pic12f675-helper-status block"
 done
+
+# ACCEPTED: the same three-part status, rewritten. This is the case that fails
+# if the status is ever quietly re-pinned to a sentence.
+write_flashing_fixture
+reword_claim_block_at "$flashing_root" FLASHING.md pic12f675-helper-status \
+	'That route is published here and has been software-tested end to end; it is still not hardware-qualified, and nothing below should be read as saying otherwise.'
+assert_flashing_accepts 'a rewritten PIC12F675 helper status'
 
 # The last spelling is the natural one for these documents -- every one of them
 # writes the tool as a code span -- so a scan that blanked spans would let the
