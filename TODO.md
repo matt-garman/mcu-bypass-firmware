@@ -70,31 +70,6 @@ command it replaces before anything is simplified.
 
 ---
 
-### T2-release-stage-rehearsal - Rehearse the rest of the staged output
-
-The programming-command table, the per-image facts and their gates now run
-before the soak and again at staging, which must match them byte for byte.
-[`docs/release_proportionality.md`](docs/release_proportionality.md) Part 2 is
-the design. What is rehearsed is the largest cluster of post-soak refusals, not
-all of them: helper-artifact staging, the retained-evidence copy loop, the
-resource-row rendering and the staged-document validator still run only after
-the soak, and each is a function of the tree and the built images rather than of
-any soak result.
-
-Acceptance: the staging phase renders its complete output into a throwaway
-directory before the soak, with the soak-derived fields stubbed, and runs every
-check that does not read soak evidence; the real staging phase re-renders and
-any divergence that is not soak-derived fails; and the surviving post-soak
-refusals are only those genuinely bound to soak output -- the image-hash
-stability comparisons, the soak table, and the evidence index.
-
-Dependencies: pairs with [`docs/ci_parity.md`](docs/ci_parity.md) Part 4, which
-rehearses the artifact-commit shape in the same phase. Effort: about 3-4 hours.
-Risk: Medium; the remaining renderers must become callable twice in one run
-without carrying state between calls, and one that silently depends on staging
-having already happened is the failure to watch for.
-
----
 
 ### T2-soak-attestation - Bind the reused soak logs by content, not by size
 
@@ -118,7 +93,8 @@ log against it; and a same-length, same-result body substituted into a source
 release is refused by name.
 
 Dependencies: touches the evidence contract, so it lands as its own schema
-revision rather than inside a feature. Effort: about 2-3 hours. Risk: Low; the
+revision rather than inside a feature. It is also what would let a staging
+rehearsal reach the evidence-bound refusals, which today it cannot. Effort: about 2-3 hours. Risk: Low; the
 mechanism already exists for four other roles.
 
 ---
@@ -852,7 +828,6 @@ The stable ID in each row matches exactly one open section above.
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T2-ci-parity | Make local/remote CI parity structural | 2 | 4-6 h | High - a failed remote gate costs a 25-hour release |
-| T2-release-stage-rehearsal | Rehearse the rest of the staged output | 2 | 3-4 h | Medium - the largest post-soak cluster is already rehearsed |
 | T2-soak-attestation | Bind reused soak logs by content, not by size | 2 | 2-3 h | Medium - closes the one weak link in soak reuse |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |

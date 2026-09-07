@@ -2073,6 +2073,30 @@ ok "resource records parse, close on their own arithmetic, and cover every relea
 # from the move: the command table is appended to $FLASHCMDS rather than one
 # hardcoded path, and img_row reads image digests from $IMAGE_SUMS_FILE rather
 # than from the staged SHA256SUMS, which does not exist yet at rehearsal time.
+# Stage the required non-image artifacts and prove each is the tracked source
+# byte for byte. No compiler produces these, so the copy IS the only place their
+# identity can be established -- and they are checksummed in the same file,
+# under the same signature, as the firmware they program.
+#
+# Takes the directory so the rehearsal can run it against a throwaway one: what
+# it establishes is a property of the tree, not of the soak, and a helper that
+# cannot be staged should stop a release in its first minutes.
+stage_release_helpers() {
+	[ "$#" -eq 1 ] || die "stage_release_helpers takes a destination directory"
+	local dest=$1 helper_base helper_src staged_helper_digest source_helper_digest
+	for helper_base in "${RELEASE_HELPER_NAMES[@]}"; do
+		helper_src="$REPO_ROOT/${RELEASE_HELPER_SOURCE[$helper_base]}"
+		cp -p -- "$helper_src" "$dest/$helper_base" \
+			|| die "could not stage required release artifact $helper_base"
+		staged_helper_digest=$(sha256sum -- "$dest/$helper_base") \
+			|| die "could not hash staged release artifact $helper_base"
+		source_helper_digest=$(sha256sum -- "$helper_src") \
+			|| die "could not hash release artifact source ${RELEASE_HELPER_SOURCE[$helper_base]}"
+		[ "${staged_helper_digest%% *}" = "${source_helper_digest%% *}" ] \
+			|| die "staged release artifact $helper_base differs from ${RELEASE_HELPER_SOURCE[$helper_base]}"
+	done
+}
+
 FLASHCMDS="$WORK/flashcmds.txt"
 IMAGE_SUMS_FILE="$OUTPUT_DIR/SHA256SUMS"
 
@@ -2455,6 +2479,62 @@ REHEARSAL_FLASHCMDS="$REHEARSAL_DIR/flashcmds.txt"
 ) || die "the staged programming commands and image facts do not pass their own gates.
 This failed BEFORE the soak, which is the point: fix it and re-run, with nothing spent."
 ok "staged programming commands and image facts rehearse clean ($(grep -c . "$REHEARSAL_FLASHCMDS") published commands)."
+# The required non-image artifacts, staged into the same throwaway directory.
+# A helper that is missing, unreadable, or not identical to its tracked source
+# is a defect in the tree, and the tree stopped changing before the build.
+stage_release_helpers "$REHEARSAL_DIR"
+ok "required release artifacts stage clean (${#RELEASE_HELPER_NAMES[@]}: ${RELEASE_HELPER_NAMES[*]})."
+
+# The MANIFEST's toolchain table was authored output: fifteen rows printed from
+# the TC_* captures with no machine authority behind them and nothing checking
+# them, so a wrong compiler version was a provenance error that passed every
+# gate. Write the captures once, here, as the canonical record; the table is
+# rendered FROM this file, and verify-release-qualification.sh holds the
+# rendered rows back to it in both directions.
+#
+# Tab-separated because a version string can contain anything but a tab -- these
+# are `--version` first lines and dpkg-query output -- while the label may
+# contain the backticks, slashes and `=` that make a Markdown cell. The digest
+# goes into QUALIFICATION exactly as the resource and matrix digests do.
+#
+# Written BEFORE the soak. Every TC_* capture above was taken in phase 0, so
+# nothing here has depended on a soak result at any point -- yet this ran after
+# one. That is not hypothetical: v0.9.12's first attempt died in staging on an
+# unstaged toolchain.txt, 24 hours after the last input to it stopped changing.
+{
+	printf 'TOOLCHAIN format=1 source_commit=%s\n' "$GIT_SHA"
+	printf '%s\t%s\n' \
+		'avr-gcc' "$TC_AVR_GCC" \
+		'binutils-avr (objcopy)' "$TC_AVR_BU" \
+		'avr-libc (pkg)' "$TC_AVR_LIBC" \
+		'host cc' "$TC_HOST_CC" \
+		"PIC10F322/PIC12F675 XC8 (\`PIC_CC=$PIC_CC\`)" "$TC_XC8_322" \
+		"PIC10F320 XC8 (\`PIC10F320_CC=$PIC10F320_CC\`)" "$TC_XC8_320" \
+		'PIC10F322/PIC12F675 DFP (`PIC_DFP`)' "$PIC_DFP" \
+		'PIC10F320 DFP (`PIC10F320_DFP`)' "$PIC10F320_DFP" \
+		'gpsim' "$TC_GPSIM" \
+		'libsimavr-dev (pkg)' "$TC_SIMAVR" \
+		'yasimavr (patched venv: version sdist patchset)' "$TC_YASIMAVR" \
+		'cppcheck' "$TC_CPPCHECK" \
+		'cbmc' "$TC_CBMC" \
+		'clang' "$TC_CLANG" \
+		'python3' "$TC_PY" \
+		'PIC12F675 Python' "$TC_PIC12F675_PY"
+	printf 'TOOLCHAIN_RESULT format=1 status=pass rows=%d source_commit=%s\n' \
+		16 "$GIT_SHA"
+} > "$EVID/toolchain.txt" \
+	|| die "could not record the toolchain evidence"
+toolchain_rows=$(grep -c $'\t' "$EVID/toolchain.txt") \
+	|| die "could not count toolchain evidence rows"
+[ "$toolchain_rows" -eq 16 ] \
+	|| die "toolchain evidence records $toolchain_rows rows, expected 16"
+if grep -q '^[[:space:]]*$' "$EVID/toolchain.txt"; then
+	die "toolchain evidence contains a blank line"
+fi
+toolchain_sha256=$(sha256sum -- "$EVID/toolchain.txt") \
+	|| die "could not hash the toolchain evidence"
+toolchain_sha256=${toolchain_sha256%% *}
+ok "toolchain evidence records $toolchain_rows tools; the MANIFEST table renders from it."
 
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
@@ -2963,51 +3043,6 @@ resource_tables_sha256=${resource_tables_sha256%% *}
 ok "final resource evidence covers all images and retained RAM/stack measurements."
 
 # --- the toolchain, as evidence rather than as prose -------------------------
-# The MANIFEST's toolchain table was authored output: fifteen rows printed from
-# the TC_* captures with no machine authority behind them and nothing checking
-# them, so a wrong compiler version was a provenance error that passed every
-# gate. Write the captures once, here, as the canonical record; the table is
-# rendered FROM this file, and verify-release-qualification.sh holds the
-# rendered rows back to it in both directions.
-#
-# Tab-separated because a version string can contain anything but a tab -- these
-# are `--version` first lines and dpkg-query output -- while the label may
-# contain the backticks, slashes and `=` that make a Markdown cell. The digest
-# goes into QUALIFICATION exactly as the resource and matrix digests do.
-{
-	printf 'TOOLCHAIN format=1 source_commit=%s\n' "$GIT_SHA"
-	printf '%s\t%s\n' \
-		'avr-gcc' "$TC_AVR_GCC" \
-		'binutils-avr (objcopy)' "$TC_AVR_BU" \
-		'avr-libc (pkg)' "$TC_AVR_LIBC" \
-		'host cc' "$TC_HOST_CC" \
-		"PIC10F322/PIC12F675 XC8 (\`PIC_CC=$PIC_CC\`)" "$TC_XC8_322" \
-		"PIC10F320 XC8 (\`PIC10F320_CC=$PIC10F320_CC\`)" "$TC_XC8_320" \
-		'PIC10F322/PIC12F675 DFP (`PIC_DFP`)' "$PIC_DFP" \
-		'PIC10F320 DFP (`PIC10F320_DFP`)' "$PIC10F320_DFP" \
-		'gpsim' "$TC_GPSIM" \
-		'libsimavr-dev (pkg)' "$TC_SIMAVR" \
-		'yasimavr (patched venv: version sdist patchset)' "$TC_YASIMAVR" \
-		'cppcheck' "$TC_CPPCHECK" \
-		'cbmc' "$TC_CBMC" \
-		'clang' "$TC_CLANG" \
-		'python3' "$TC_PY" \
-		'PIC12F675 Python' "$TC_PIC12F675_PY"
-	printf 'TOOLCHAIN_RESULT format=1 status=pass rows=%d source_commit=%s\n' \
-		16 "$GIT_SHA"
-} > "$EVID/toolchain.txt" \
-	|| die "could not record the toolchain evidence"
-toolchain_rows=$(grep -c $'\t' "$EVID/toolchain.txt") \
-	|| die "could not count toolchain evidence rows"
-[ "$toolchain_rows" -eq 16 ] \
-	|| die "toolchain evidence records $toolchain_rows rows, expected 16"
-if grep -q '^[[:space:]]*$' "$EVID/toolchain.txt"; then
-	die "toolchain evidence contains a blank line"
-fi
-toolchain_sha256=$(sha256sum -- "$EVID/toolchain.txt") \
-	|| die "could not hash the toolchain evidence"
-toolchain_sha256=${toolchain_sha256%% *}
-ok "toolchain evidence records $toolchain_rows tools; the MANIFEST table renders from it."
 
 # Builds and parallel soaks can run for 24 hours. The Make lock protects shared
 # artifacts from other Make invocations, but intentionally cannot prevent a
@@ -3065,21 +3100,7 @@ staged_xt_image_hashes=$(hash_xt_image_set "${STAGED_XT_IMAGES[@]}")
 release_basenames=()
 for img in "${IMAGES[@]}"; do release_basenames+=("$(basename "$img")"); done
 
-# Stage the required non-image artifacts beside the images and prove each is the
-# tracked source byte for byte. No compiler produces these, so the copy IS the
-# only place their identity can be established -- and they are checksummed in
-# the same file, under the same signature, as the firmware they program.
-for helper_base in "${RELEASE_HELPER_NAMES[@]}"; do
-	helper_src="$REPO_ROOT/${RELEASE_HELPER_SOURCE[$helper_base]}"
-	cp -p -- "$helper_src" "$OUTPUT_DIR/$helper_base" \
-		|| die "could not stage required release artifact $helper_base"
-	staged_helper_digest=$(sha256sum -- "$OUTPUT_DIR/$helper_base") \
-		|| die "could not hash staged release artifact $helper_base"
-	source_helper_digest=$(sha256sum -- "$helper_src") \
-		|| die "could not hash release artifact source ${RELEASE_HELPER_SOURCE[$helper_base]}"
-	[ "${staged_helper_digest%% *}" = "${source_helper_digest%% *}" ] \
-		|| die "staged release artifact $helper_base differs from ${RELEASE_HELPER_SOURCE[$helper_base]}"
-done
+stage_release_helpers "$OUTPUT_DIR"
 
 ( cd "$OUTPUT_DIR" && sha256sum -- "${release_basenames[@]}" \
 	"${RELEASE_HELPER_NAMES[@]}" > SHA256SUMS ) \

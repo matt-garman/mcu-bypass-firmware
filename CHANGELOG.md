@@ -69,6 +69,22 @@ historical records and are not retroactively compacted by this policy.
   this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
   Part 3 is the design.
 
+- **The toolchain record is written before the soak, not after it.** Every
+  `TC_*` capture it prints is taken in phase 0, so it never depended on a soak
+  result -- yet it was written after one. That is exactly what cost `v0.9.12`
+  its first attempt: the run died in staging on an unstaged `toolchain.txt`, 24
+  hours after the last input to it stopped changing. A gate asserts the new
+  position.
+
+- **The required non-image artifacts are staged in the rehearsal too.** Staging
+  them is now a function taking a destination, so a helper that is missing,
+  unreadable, or not byte-identical to its tracked source fails in the first
+  minutes rather than after the soak. With this and the command table, the
+  staging phase is down from 65 refusal points to 36; what remains is either
+  soak-bound by definition or bound to evidence this run produces, chiefly
+  `evidence/INDEX`, which lists the 18 soak logs and so cannot be built before
+  they exist.
+
 - **The staged programming commands and image facts are rehearsed before the
   soak.** The staging phase carried 65 refusal points and almost none of them
   read a soak result: the programming-command table, the per-image facts and the

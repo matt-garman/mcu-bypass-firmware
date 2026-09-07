@@ -2693,6 +2693,26 @@ grep -Fq 'IMAGE_SUMS_FILE="$OUTPUT_DIR/SHA256SUMS"' "$RELEASE" \
 	|| fail "make-release.sh does not carry a redirectable image-digest source"
 checks=$((checks + 1))
 
+# The required non-image artifacts are a property of the tree, so a helper that
+# cannot be staged is a defect that was true before the build started. The
+# staging loop is a function taking a destination, and the rehearsal runs it
+# against the throwaway directory.
+grep -Fq 'stage_release_helpers "$REHEARSAL_DIR"' "$RELEASE" \
+	|| fail "make-release.sh does not rehearse staging the required release artifacts"
+grep -Fq 'stage_release_helpers "$OUTPUT_DIR"' "$RELEASE" \
+	|| fail "make-release.sh does not stage the required release artifacts for real"
+checks=$((checks + 1))
+
+# The toolchain record is written from captures taken in phase 0 and has never
+# depended on a soak result -- yet it ran after the soak, which is what cost
+# v0.9.12 its first attempt. Position is the fix, so position is asserted.
+toolchain_write_line=$(grep -Fn '} > "$EVID/toolchain.txt"' "$RELEASE" | head -1 | cut -d: -f1)
+[[ "$toolchain_write_line" =~ ^[0-9]+$ ]] \
+	|| fail "could not locate the toolchain evidence record"
+[ "$toolchain_write_line" -lt "$soak_section_line" ] \
+	|| fail "the toolchain evidence record is still written after the soak"
+checks=$((checks + 1))
+
 # ---------------------------------------------------------------------------
 # The PIC12F675 flashing contract.
 #

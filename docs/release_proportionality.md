@@ -5,8 +5,8 @@
 A measurement of what the release path cost between `v0.9.9` and `v0.9.13`,
 and what recovers the confidence-per-hour that `v0.9.9` had without giving up
 any assurance about the firmware. Part 1 is a finding rather than a change --
-the continuous validation it proposed already existed. Part 4 and Part 3 have
-landed; Part 2 is partly done. It is a companion to
+the continuous validation it proposed already existed. Parts 2, 3 and 4 have
+landed. It is a companion to
 [`docs/ci_parity.md`](ci_parity.md): that document closes the gap between what
 runs locally and what runs remotely; this one addresses how much runs at all,
 and when.
@@ -130,7 +130,7 @@ The five phase-0 calls stay. They cost seconds, fail before anything is built,
 and duplicating a check that `make test` already proves is cheap insurance
 rather than a cost worth removing.
 
-## Part 2 - rehearse staging before the soak (partly done)
+## Part 2 - rehearse staging before the soak (done)
 
 `make-release.sh` runs preconditions, builds, gates, soaks, then stages. Its
 staging phase holds 65 refusal points, up from 11. Almost none of them read a
@@ -150,18 +150,37 @@ genuinely bound to soak output -- the image-hash stability comparisons, the soak
 table, the evidence index. The `v0.9.12` `toolchain.txt` death is removed by
 construction rather than by remembering to stage a file.
 
-**What has landed.** The programming-command table and the per-image facts --
-`flash_row`, `img_row`, `release_producer_source_command_valid` and
-`check_flash_commands`, the largest single cluster of post-soak refusals -- now
-run before the soak against the built images, with the output discarded, and
-again for real at staging, which requires the two command tables to be
-byte-identical. Two indirections made the double run possible: the command table
-writes to `$FLASHCMDS`, and `img_row` reads digests from `$IMAGE_SUMS_FILE`
-rather than from a staged checksum list that does not exist yet.
+**What has landed.** The staging phase's refusal points are down from 65 to 36.
 
-Still after the soak, and each a function of the tree and the built images
-rather than of any soak result: helper-artifact staging, the retained-evidence
-copy loop, the resource-row rendering, and the staged-document validator.
+The programming-command table and the per-image facts -- `flash_row`,
+`img_row`, `release_producer_source_command_valid` and `check_flash_commands`,
+the largest single cluster -- run before the soak against the built images with
+the output discarded, and again for real at staging, which requires the two
+command tables to be byte-identical. Two indirections made the double run
+possible: the command table writes to `$FLASHCMDS`, and `img_row` reads digests
+from `$IMAGE_SUMS_FILE` rather than from a staged checksum list that does not
+exist yet.
+
+Staging the required non-image artifacts is a function taking a destination, so
+the rehearsal runs it against the throwaway directory. A helper that is missing,
+unreadable, or not byte-identical to its tracked source now fails in the first
+minutes.
+
+The toolchain record moved wholesale. Every `TC_*` capture it prints is taken in
+phase 0, so it never depended on a soak result -- yet it was written after one,
+which is precisely what cost `v0.9.12` its first attempt. It is now written
+before the soak, and a gate asserts that position.
+
+**What necessarily stays after the soak**, and why. The remaining 36 refusals
+divide into two kinds, neither of which a rehearsal can reach. The first are
+soak-bound by definition: that each staged image is the one its soak drove, the
+soak summary table, and staging the soak key. The second are bound to evidence
+this run produces: the retained-evidence copy loop, the per-transcript payload
+seals, and `evidence/INDEX` -- which lists the 18 soak logs, so it cannot be
+built before they exist. The staged-document validator and the final
+qualification verification read the completed directory and belong there too.
+Rehearsing those would mean synthesising soak evidence, and a rehearsal that
+passes on fiction is worse than no rehearsal.
 
 This overlaps `docs/ci_parity.md` Part 4 and should land with it: that part
 rehearses the artifact-commit *shape* before the soak, this one rehearses the
@@ -179,7 +198,7 @@ match. The attestation is the published release itself rather than a separate
 signed store -- `SHA256SUMS` already covers `SOAK_KEY` and the release signature
 already signs it, so reuse needs no second trust root and no extra signing step.
 The limitation that buys: only a soak that reached a staged release is reusable,
-which is the failure `T2-release-stage-rehearsal` exists to prevent.
+which is the failure the staging rehearsal in Part 2 exists to prevent.
 
 Reuse skips the execution, never the check: every adopted log is re-validated by
 the same `validate_soak_result` the live path uses, at the attested duration.
