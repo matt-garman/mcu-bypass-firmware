@@ -69,6 +69,28 @@ historical records and are not retroactively compacted by this policy.
   this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
   Part 3 is the design.
 
+- **`CI_GOALS` names the gates each CI job runs.** Parity between the local path
+  and the hosted runner was an assertion in a comment: `scripts/ci-local.sh`
+  reconstructed `ci.yml`'s jobs from a prose header, `release.yml` kept its own
+  list and `test/README.md` a third, and nothing machine-checked that the local
+  path covered the remote one. `ci-verify`, `ci-stress`, `ci-pic`, `ci-mutation`
+  and `ci-attiny202` are exact wrappers of the commands those jobs run today,
+  owning gate composition and fixed policy -- `STRICT_TOOLS`,
+  `MUTATION_ALLOW_SKIP`, the image assertion and the soak's PASS-count check
+  that were loose shell in a `run:` block no local run executed. They
+  deliberately do not own the host paths or the independent CI pins, and a goal
+  refuses to run when a pin it names was not supplied on the command line:
+  `$(origin)` distinguishes a caller's pin from this file's default, so a
+  workflow that dropped one fails instead of silently agreeing with the default
+  it was meant to be checked against.
+
+  The goals are inert until a workflow invokes one. Wiring them is the next
+  increment, and it is not separable from the parity gate:
+  `test/test_workflow_syntax.sh` locates each job's strict-suite step by its
+  literal command and anchors seven ordering assertions to it, so a job's goal
+  and that job's detection have to move in the same change.
+  [`docs/ci_parity.md`](docs/ci_parity.md) records that.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

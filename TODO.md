@@ -51,9 +51,17 @@ pass here means the CI matrix will be green" is an assertion in a comment.
 workflow runs as a Make goal, have each workflow step invoke exactly one of
 them, run the same goals locally, and check that shape rather than compare two
 hand-maintained inventories. The publishability gate that document's Part 3
-describes is done; this item is Parts 1, 2 and 4.
+describes is done, and `CI_GOALS` now declares the five `ci.yml` gate jobs as
+exact wrappers; what remains is wiring the workflows to them, the local mirror,
+the parity gate and Part 4.
 
-Acceptance: the Makefile declares the goal inventory; every `run:` step in both
+The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
+locates each job's strict-suite step by its literal command and anchors seven
+ordering assertions to it, so pointing two steps at their goals produced 16
+failures reporting only that the known shape had changed. A job's goal and that
+job's detection move together.
+
+Acceptance: every `run:` step in both
 workflows invokes exactly one declared goal, with its required pins, and
 invokes nothing under `test/` directly; `scripts/ci-local.sh` executes the
 inventory rather than describing it; a gate parses both workflows and fails
@@ -62,8 +70,9 @@ Makefile does not define; and `--dry-run` produces the artifact-commit shape in
 a scratch clone so `scripts/verify-release-artifact-commit.sh` can be rehearsed
 before a soak rather than after.
 
-Dependencies: none. Effort: about 4-6 hours, one workflow job at a time with
-each step's before-and-after command compared. Risk: Medium; the restructure
+Dependencies: none. Effort: about 4-5 hours remaining, one workflow job at a
+time, each step's before-and-after command compared and that job's detection in
+`test_workflow_syntax.sh` moved in the same change. Risk: Medium; the restructure
 touches every CI entry point, and a mistranslated step is a gate that silently
 stops running -- which is why each goal lands as an exact wrapper of the
 command it replaces before anything is simplified.

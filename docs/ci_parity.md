@@ -32,11 +32,13 @@ them. Every gate a workflow runs becomes a named Make goal; the workflow step
 invokes that goal and nothing else; the local mirror invokes the same goals.
 Parity stops being a claim and becomes the shape of the file.
 
-The Makefile declares the set:
+The Makefile declares the set. As of the first increment it holds the five
+gate jobs `ci.yml` runs:
 
-    CI_GOALS = ci-preflight ci-verify ci-stress ci-pic ci-mutation \
-               ci-attiny202 ci-build-attiny13a ci-build-attiny45 \
-               ci-build-attiny85 ci-release-images ci-release-gates
+    CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202
+
+The build-matrix job's goals and the release-side goals join it as those jobs
+are converted.
 
 Each goal owns *gate composition and fixed policy flags* -- `STRICT_TOOLS=1`,
 `MUTATION_ALLOW_SKIP=0`, `PIC12F675_FLASH_IMAGES=build`, the soak's PASS-count
@@ -51,6 +53,13 @@ One change of substance goes with the move: a `ci-*` goal must FAIL when a pin
 it declares is unset, rather than falling back to the Makefile default. Today a
 workflow that dropped `XT_STATIC_RAM_LIMIT` would silently lose the
 independence the two-value scheme exists to provide.
+
+Non-emptiness is not the test, and assuming it was is the first thing that went
+wrong in implementation: every one of these pins has a default in the Makefile,
+so a goal checking only for a value passes on the default -- which is precisely
+the failure the two-value scheme exists to catch. `$(origin VAR)` is what
+distinguishes a caller's pin from this file's own answer, and the check requires
+`command line` specifically.
 
 `scripts/ci-local.sh` then executes `$(CI_LOCAL_SEQUENCE)` read from the
 Makefile instead of a comment header, and its CI-JOB MAPPING block shrinks to
@@ -155,9 +164,24 @@ soak. Both `v0.9.12` failures would have surfaced there, with nothing spent.
 
 ## Sequencing
 
+**Parts 1 and 2 cannot land separately.** The sequencing below proposed
+converting one workflow job at a time, with the parity gate arriving afterwards.
+That is not possible: `test/test_workflow_syntax.sh` already locates each job's
+strict-suite step by matching its literal command -- `make test STRICT_TOOLS=1`,
+`make stress STRICT_TOOLS=1` -- and anchors seven ordering assertions per job to
+the step it found. Pointing two steps at `ci-verify` and `ci-stress` produced 16
+failures from those two substitutions alone, none of them a defect: the gate was
+correctly reporting that the shape it knows had changed.
+
+So the unit of work is a job's goal *and* the gate's detection for that job,
+together. The goals can be defined ahead of the wiring -- they are inert until a
+workflow invokes one -- but no workflow step moves until the gate learns the new
+shape.
+
 | # | Increment | Catches |
 |---|-----------|---------|
-| 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands, one job at a time, before/after command diffed per step | nothing yet -- pure restructure |
+| 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
+| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change | nothing yet -- pure restructure |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |

@@ -3308,6 +3308,108 @@ RELEASE_ARTIFACT_GATES = \
         test-release-provenance test-release-preflight \
         test-reference-contract test-pic12f675-flash-helper
 
+# --- CI goals: one named goal per workflow gate step --------------------------
+# Parity between what runs here and what runs on the hosted runner used to be an
+# assertion in a comment: scripts/ci-local.sh reconstructed ci.yml's jobs from a
+# prose header, release.yml kept its own list, and test/README.md a third.
+# Nothing machine-checked that the local path covered the remote one.
+#
+# These goals remove one of the copies. A workflow step invokes exactly one of
+# them and nothing else, and the local mirror invokes the same goals, so parity
+# stops being a claim and becomes the shape of the file.
+#
+# WHAT A ci-* GOAL OWNS: gate composition and fixed policy flags -- STRICT_TOOLS,
+# MUTATION_ALLOW_SKIP, the soak's PASS-count assertion. Those are decisions about
+# how the project is verified, and they belong with the project.
+#
+# WHAT IT DOES NOT OWN: the host paths and the independent CI pins. PIC_CC,
+# PIC_DFP, PIC10F320_CC, PIC10F320_DFP, XT_STATIC_RAM_LIMIT, XT_STACK_MAX_FRAME
+# and PIC12F675_DATA_LIMIT stay command-line variables the caller supplies,
+# because their whole purpose is to be pinned independently of this file's
+# defaults so a mismatch FAILS instead of agreeing with itself.
+#
+# A goal therefore refuses to run when a pin it names is unset, rather than
+# falling back to the default: a workflow that dropped XT_STATIC_RAM_LIMIT would
+# otherwise silently lose the independence the two-value scheme exists for.
+CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202
+
+# Non-emptiness is NOT the test. Every pin below has a default in this file, so
+# a goal that only checked for a value would pass on the default -- which is the
+# exact failure the two-value scheme exists to catch. $(origin) is what
+# distinguishes a caller's pin from this file's own answer.
+ci_pin = $(if $(filter command line,$(origin $(1))),,$(error $@ requires $(1) to be supplied on the command line; it is pinned by the caller so a mismatch with this Makefile's default fails instead of agreeing with itself))
+
+.PHONY: $(CI_GOALS)
+
+ci-verify:
+	$(MAKE) test STRICT_TOOLS=1
+
+ci-stress:
+	$(MAKE) stress STRICT_TOOLS=1
+
+ci-pic:
+	$(call ci_pin,PIC_CC)
+	$(call ci_pin,PIC_DFP)
+	$(call ci_pin,PIC10F320_CC)
+	$(call ci_pin,PIC10F320_DFP)
+	$(call ci_pin,PIC12F675_DATA_LIMIT)
+	$(MAKE) pic10f322-test STRICT_TOOLS=1 \
+		PIC_CC="$(PIC_CC)" PIC_DFP="$(PIC_DFP)"
+	$(MAKE) pic10f322-test-target-variants STRICT_TOOLS=1 \
+		PIC_CC="$(PIC_CC)" PIC_DFP="$(PIC_DFP)"
+	$(MAKE) pic10f320-test STRICT_TOOLS=1 \
+		PIC10F320_CC="$(PIC10F320_CC)" PIC10F320_DFP="$(PIC10F320_DFP)"
+	$(MAKE) pic10f320-test-target-variants STRICT_TOOLS=1 \
+		PIC10F320_CC="$(PIC10F320_CC)" PIC10F320_DFP="$(PIC10F320_DFP)"
+	$(MAKE) pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
+		PIC_CC="$(PIC_CC)" PIC_DFP="$(PIC_DFP)" \
+		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)"
+
+# MUTATION_ALLOW_SKIP=0 is the whole point of running this separately: a
+# mutation lane that skips because a prerequisite is missing must fail.
+ci-mutation:
+	$(call ci_pin,PIC_CC)
+	$(call ci_pin,PIC_DFP)
+	$(call ci_pin,PIC10F320_CC)
+	$(call ci_pin,PIC10F320_DFP)
+	$(call ci_pin,XT_STATIC_RAM_LIMIT)
+	$(call ci_pin,PIC12F675_DATA_LIMIT)
+	$(MAKE) test-mutation STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
+		PIC_CC="$(PIC_CC)" PIC_DFP="$(PIC_DFP)" \
+		PIC10F320_CC="$(PIC10F320_CC)" PIC10F320_DFP="$(PIC10F320_DFP)" \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
+		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)"
+
+# The three assertions the workflow carried as loose shell -- that every
+# declared image was actually built, and that the soak PASSed once per supported
+# variant rather than skipping -- are decisions about what the gate proves, so
+# they live here rather than in a `run:` block no local run executes.
+ci-attiny202:
+	$(call ci_pin,XT_STATIC_RAM_LIMIT)
+	$(call ci_pin,XT_STACK_MAX_FRAME)
+	$(MAKE) attiny202-test STRICT_TOOLS=1 \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
+		XT_STACK_MAX_FRAME="$(XT_STACK_MAX_FRAME)"
+	@for hex in $(XT_RELEASE_IMAGES); do \
+		test -f "$(XT_BUILD_DIR)/$$hex" \
+			|| { echo "FAIL: missing $(XT_BUILD_DIR)/$$hex (DFP fetch or build failed)" >&2; exit 1; }; \
+	done
+	$(MAKE) attiny202-test-target STRICT_TOOLS=1 \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)"
+	@set -o pipefail; \
+	n=$$(printf '%s\n' $(XT_VARIANTS_SUPPORTED) | grep -c .); \
+	$(MAKE) attiny202-soak XT_SOAK_DURATION_MS=$(CI_XT_SOAK_DURATION_MS) \
+		XT_SOAK_PROGRESS_INTERVAL_MS=$(CI_XT_SOAK_DURATION_MS) \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
+		2>&1 | tee ci-attiny202-soak.log; \
+	p=$$(grep -c "SOAK PASS" ci-attiny202-soak.log || true); \
+	[ "$$p" -eq "$$n" ] \
+		|| { echo "FAIL: attiny202-soak: $$p/$$n variants PASSed (skip or fail)" >&2; exit 1; }
+
+# The smoke soak's duration is policy, not a host pin: it says how much soak a
+# CI run is worth, which is the project's decision and the same everywhere.
+CI_XT_SOAK_DURATION_MS = 300000
+
 # The mandatory host gates use subprocess.run(capture_output=..., text=...),
 # both added in Python 3.7. Keep this first in each aggregate so an unsupported
 # host gets the actionable contract diagnostic before any Python child gate.
