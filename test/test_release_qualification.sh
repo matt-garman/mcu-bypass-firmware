@@ -828,7 +828,7 @@ write_evidence_index() {
 	for name in "${!fixture_role[@]}"; do
 		role=${fixture_role[$name]}
 		case "$role" in
-			build|final-image-build|initial-image-build|target-test) ;;
+			build|final-image-build|initial-image-build|target-test|soak) ;;
 			*) continue ;;
 		esac
 		grep -q '^EVIDENCE_RESULT ' "$release/evidence/$name" && continue
@@ -845,10 +845,8 @@ write_evidence_index() {
 			role=${fixture_role[$name]}
 			size=$(stat -c%s "$release/evidence/$name")
 			case "$role" in
-				build|final-image-build|initial-image-build|target-test)
+				build|final-image-build|initial-image-build|target-test|soak)
 					record=$(grep -m1 '^EVIDENCE_RESULT ' "$release/evidence/$name") ;;
-				soak)
-					record=$(grep -m1 '^SOAK_RESULT ' "$release/evidence/$name") ;;
 				test-long)
 					record=$(grep -m1 '^TEST_LONG_RESULT ' "$release/evidence/$name") ;;
 				resource)
@@ -899,6 +897,24 @@ restate_index_row() {
 # The index binds every member's size and terminal record, so a control that
 # legitimately rewrites evidence to reach a LATER check has to re-render it --
 # exactly as the toolchain and resource digests have to be re-pinned.
+# Re-seal the soak transcripts in another commit's name, which is what an
+# ADOPTED soak looks like: the seals were written by the run that produced them,
+# and this release stands on that record rather than replacing it.
+reseal_soak_evidence() {
+	local sealing_commit=$1 name lines payload_digest
+	for name in "${!fixture_role[@]}"; do
+		[ "${fixture_role[$name]}" = soak ] || continue
+		sed -i '/^EVIDENCE_RESULT /d' "$release/evidence/$name"
+		lines=$(wc -l < "$release/evidence/$name")
+		payload_digest=$(sha256sum -- "$release/evidence/$name")
+		payload_digest=${payload_digest%% *}
+		printf 'EVIDENCE_RESULT format=2 status=pass role=soak evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+			"$name" "$lines" "$payload_digest" "$sealing_commit" \
+			>> "$release/evidence/$name"
+	done
+	refresh_evidence_index
+}
+
 refresh_evidence_index() {
 	local old_digest new_digest
 	old_digest=$(awk -F= '$1 == "evidence_index_sha256" { print $2 }' \
@@ -1121,18 +1137,54 @@ expect_fail "duration inside the soak key payload" \
 reuse_source=$(basename "$(ls -d "$ROOT"/release/v*/ | tail -1)")
 reuse_source=${reuse_source%/}
 
+reuse_commit=$(awk -F= '$1 == "source_commit" { print $2 }' \
+	"$ROOT/release/$reuse_source/QUALIFICATION")
+reset_fixture
+sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
+sed -i "s|^- \*\*Soak provenance:\*\* run for this release$|- **Soak provenance:** reused from \`$reuse_source\`, whose signed record covers the identical soak inputs above|" \
+	"$release/MANIFEST.md"
+reseal_soak_evidence "$reuse_commit"
+expect_pass "qualification standing on a published soak attestation"
+
+# ...and the seals must be the attested release's, not this one's. A release
+# that re-sealed adopted transcripts in its own name would have destroyed the
+# binding that makes the reuse checkable.
 reset_fixture
 sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
 sed -i "s|^- \*\*Soak provenance:\*\* run for this release$|- **Soak provenance:** reused from \`$reuse_source\`, whose signed record covers the identical soak inputs above|" \
 	"$release/MANIFEST.md"
 reseal_provenance
-expect_pass "qualification standing on a published soak attestation"
+expect_fail "adopted soak transcripts resealed in this release's name" \
+	"payload digest or result metadata does not match its transcript"
+
+# The defect the soak seal exists for. Before it, a soak log was bound by its
+# index row -- terminal record and byte size -- so a body of identical length
+# still carrying an identical SOAK_RESULT passed every check. Substitute exactly
+# that: same line count, same length, same verdict, different content.
+reset_fixture
+soak_victim="$release/evidence/soak-${soak_names[0]}.log"
+python3 - "$soak_victim" <<'SUBSTITUTE'
+import sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    lines = handle.read().split("\n")
+for index, line in enumerate(lines):
+    if line.startswith("SOAK START"):
+        lines[index] = "S" * len(line)
+        break
+else:
+    raise SystemExit("fixture has no substitutable payload line")
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write("\n".join(lines))
+SUBSTITUTE
+expect_fail "same-length soak payload substituted under an unchanged verdict" \
+	"payload digest or result metadata does not match its transcript"
 
 # The disclosure is not optional. A release that reuses a soak and says it ran
 # one is the single most misleading thing this record could contain.
 reset_fixture
 sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
-reseal_provenance
+reseal_soak_evidence "$reuse_commit"
 expect_fail "undisclosed soak reuse" \
 	"does not disclose that this release reused the soak"
 

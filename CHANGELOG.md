@@ -69,6 +69,25 @@ historical records and are not retroactively compacted by this policy.
   this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
   Part 3 is the design.
 
+- **Soak transcripts are sealed by payload digest, like every other retained
+  log.** The `soak` evidence role never carried one: a log was bound by its
+  `evidence/INDEX` row -- terminal record and byte size -- so a substituted body
+  of identical length still carrying an identical `SOAK_RESULT` satisfied every
+  check. That was harmless while every log came from the run that consumed it,
+  and stopped being harmless when `--reuse-soak` made a log arrive from a tree
+  the current run did not produce. `soak` joins `RELEASE_EVIDENCE_RESULT_ROLES`,
+  each transcript is sealed after the run has a verdict, and its index row
+  carries the seal.
+
+  Adopted transcripts are deliberately **not** resealed. The seal names the
+  commit whose run produced it, so a release that re-sealed adopted logs in its
+  own name would destroy the binding that makes the reuse checkable at all. Both
+  the qualification verifier and the staging re-derivation therefore expect the
+  attested release's commit for soak evidence, read from the record this tree
+  retains for it; `release_reuse_soak_attestation` rehashes each adopted payload
+  against the seal before adopting it. The controls include the defect itself --
+  a same-length, same-verdict payload substitution, now refused by name.
+
 - **The toolchain record is written before the soak, not after it.** Every
   `TC_*` capture it prints is taken in phase 0, so it never depended on a soak
   result -- yet it was written after one. That is exactly what cost `v0.9.12`

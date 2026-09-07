@@ -201,10 +201,13 @@ The limitation that buys: only a soak that reached a staged release is reusable,
 which is the failure the staging rehearsal in Part 2 exists to prevent.
 
 Reuse skips the execution, never the check: every adopted log is re-validated by
-the same `validate_soak_result` the live path uses, at the attested duration.
-One link is weaker than the rest and is now filed as its own item -- a soak log
-is bound by its evidence-index row, terminal record and byte size, rather than
-by a content digest, because the `soak` evidence role has never had one.
+the same `validate_soak_result` the live path uses, at the attested duration,
+and rehashed against the payload digest its own seal states. Soak transcripts
+are now sealed like every other retained log, which closes the last weak link --
+before it, a log was bound by its evidence-index row, terminal record and byte
+size, so a substituted body of identical length carrying an identical verdict
+would have passed. Adopted transcripts keep the seal the attested release wrote,
+because a seal names the run that produced it.
 <!-- name-contract: exempt-end -->
 
 The soak is the only part of the release whose cost is measured in days, and

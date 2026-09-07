@@ -8164,7 +8164,7 @@ override RELEASE_EVIDENCE_ROLES := \
 # that predates this one and is stronger: a digest named in QUALIFICATION, or a
 # terminal record the verifier already matched exactly. Nothing is bound twice.
 override RELEASE_EVIDENCE_RESULT_ROLES := \
-	build final-image-build initial-image-build target-test
+	build final-image-build initial-image-build target-test soak
 
 # --- the immutable production release identity -------------------------------
 # WHAT A RELEASE IS, written as literal text that no caller can move.

@@ -46,6 +46,7 @@ release_reuse_soak_attestation() {
 	local source_dir=$1 expected_key=$2 expected_duration=$3 evid=$4 soak_names=$5
 	local scripts_dir declared_key declared_duration payload_digest index_digest
 	local declared_index name log row row_size row_record actual_size actual_record
+	local sealed_digest actual_digest payload_lines
 	local label
 	label=$(basename -- "$source_dir")
 
@@ -106,11 +107,32 @@ release_reuse_soak_attestation() {
 		[ "$actual_size" = "$row_size" ] \
 			|| { printf 'FATAL: %s soak log for %s is %s bytes, not the %s its signed index records\n' \
 				"$label" "$name" "$actual_size" "$row_size" >&2; return 1; }
-		actual_record=$(grep '^SOAK_RESULT ' "$log") \
-			|| { printf 'FATAL: %s soak log for %s carries no terminal record\n' \
+		# The seal, not the size, is what binds the body. Recompute the payload
+		# digest and require the transcript's own seal to state it: a substituted
+		# body of identical length carrying an identical SOAK_RESULT satisfies
+		# every other check here, and this is the one it cannot satisfy.
+		actual_record=$(grep '^EVIDENCE_RESULT ' "$log") \
+			|| { printf 'FATAL: %s soak log for %s carries no payload seal\n' \
+				"$label" "$name" >&2; return 1; }
+		[ "$(tail -n 1 -- "$log")" = "$actual_record" ] \
+			|| { printf 'FATAL: %s soak log for %s does not end with its payload seal\n' \
 				"$label" "$name" >&2; return 1; }
 		[ "$actual_record" = "$row_record" ] \
-			|| { printf 'FATAL: %s soak log for %s does not carry the result its signed index records\n' \
+			|| { printf 'FATAL: %s soak log for %s does not carry the seal its signed index records\n' \
+				"$label" "$name" >&2; return 1; }
+		sealed_digest=${actual_record##* payload_sha256=}
+		sealed_digest=${sealed_digest%% *}
+		[[ "$sealed_digest" =~ ^[0-9a-f]{64}$ ]] \
+			|| { printf 'FATAL: %s soak log for %s carries no payload digest in its seal\n' \
+				"$label" "$name" >&2; return 1; }
+		payload_lines=$(wc -l < "$log") || return 1
+		actual_digest=$(head -n "$(( payload_lines - 1 ))" -- "$log" | sha256sum) || return 1
+		[ "${actual_digest%% *}" = "$sealed_digest" ] \
+			|| { printf 'FATAL: %s soak log for %s does not hash to the payload digest its seal states\n' \
+				"$label" "$name" >&2; return 1; }
+		# The verdict still has to be there, and there must be exactly one.
+		[ "$(grep -c '^SOAK_RESULT ' "$log")" -eq 1 ] \
+			|| { printf 'FATAL: %s soak log for %s does not carry exactly one soak result\n' \
 				"$label" "$name" >&2; return 1; }
 		cp -p -- "$log" "$evid/soak-$name.log" \
 			|| { printf 'FATAL: could not adopt the attested soak log for %s\n' "$name" >&2; return 1; }

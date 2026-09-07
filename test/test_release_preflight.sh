@@ -2638,6 +2638,23 @@ if [ ! -f "$reuse_legacy/SOAK_KEY" ]; then
 	checks=$((checks + 1))
 fi
 
+# The soak role is sealed like every other retained transcript, so an adopted
+# log is bound by its payload digest rather than by its byte size. Before that,
+# a substituted body of identical length carrying an identical SOAK_RESULT
+# satisfied every check reuse made.
+grep -Fq 'carries no payload seal' "$ROOT/scripts/release-provenance.sh" \
+	|| fail "soak reuse does not require an adopted log to carry a payload seal"
+grep -Fq 'does not hash to the payload digest its seal states' \
+	"$ROOT/scripts/release-provenance.sh" \
+	|| fail "soak reuse does not rehash an adopted log against its seal"
+checks=$((checks + 1))
+
+# Sealing is the run's own act, so a reused soak must NOT be resealed: the seal
+# the attested release wrote is the binding this release stands on.
+grep -Fq 'adopted soak transcripts keep the seals' "$RELEASE" \
+	|| fail "make-release.sh reseals adopted soak transcripts"
+checks=$((checks + 1))
+
 # Nothing may be adopted by a refused reuse.
 [ -z "$(ls -A "$reuse_scratch")" ] \
 	|| fail "a refused soak reuse left adopted logs behind: $(ls -A "$reuse_scratch")"

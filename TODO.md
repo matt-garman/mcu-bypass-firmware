@@ -71,33 +71,6 @@ command it replaces before anything is simplified.
 ---
 
 
-### T2-soak-attestation - Bind the reused soak logs by content, not by size
-
-`--reuse-soak` adopts a published release's soak when this run's
-`soak_inputs_sha256` matches its own, verifying that release's signature, its
-signed checksum manifest, its `SOAK_KEY` payload digest and its evidence index,
-then re-validating every adopted log. One link in that chain is weaker than the
-rest: a soak log is bound by its `evidence/INDEX` row -- terminal record and
-byte size -- and not by a content digest, because the `soak` evidence role has
-never had one. A tampered body of identical length carrying an identical
-`SOAK_RESULT` line would satisfy every check above.
-
-That gap predates reuse and was harmless while every log was produced by the run
-that consumed it. Reuse is what makes it reachable: the logs now come from a
-tree the current run did not produce.
-
-Acceptance: the `soak` evidence role carries a payload digest the way build
-transcripts already do; `release_terminal_record` and the qualification verifier
-hold it to that digest; `release_reuse_soak_attestation` verifies each adopted
-log against it; and a same-length, same-result body substituted into a source
-release is refused by name.
-
-Dependencies: touches the evidence contract, so it lands as its own schema
-revision rather than inside a feature. It is also what would let a staging
-rehearsal reach the evidence-bound refusals, which today it cannot. Effort: about 2-3 hours. Risk: Low; the
-mechanism already exists for four other roles.
-
----
 
 ## Tier 2.5 - additional software verification
 
@@ -828,7 +801,6 @@ The stable ID in each row matches exactly one open section above.
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T2-ci-parity | Make local/remote CI parity structural | 2 | 4-6 h | High - a failed remote gate costs a 25-hour release |
-| T2-soak-attestation | Bind reused soak logs by content, not by size | 2 | 2-3 h | Medium - closes the one weak link in soak reuse |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

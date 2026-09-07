@@ -885,8 +885,8 @@ RELEASE_EVIDENCE_RESULT_ROLES=$(mkv RELEASE_EVIDENCE_RESULT_ROLES)
 [ -n "${RELEASE_EVIDENCE_RESULT_ROLES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_RESULT_ROLES is empty"
 [ "$(printf '%s\n' $RELEASE_EVIDENCE_RESULT_ROLES | LC_ALL=C sort)" \
-	= $'build\nfinal-image-build\ninitial-image-build\ntarget-test' ] \
-	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, and target-test"
+	= $'build\nfinal-image-build\ninitial-image-build\nsoak\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, soak, and target-test"
 declare -A RELEASE_EVIDENCE_ROLE=()
 for role_entry in $RELEASE_EVIDENCE_ROLES; do
 	role_base=${role_entry%%=*}
@@ -1481,8 +1481,11 @@ seal_evidence_result() {
 }
 
 expected_evidence_result() {
-	[ "$#" -eq 3 ] || return 2
-	local path=$1 base=$2 role=$3 total_lines payload_lines digest
+	[ "$#" -ge 3 ] && [ "$#" -le 4 ] || return 2
+	# The commit whose run produced the transcript, which is not always this one:
+	# an adopted soak transcript keeps the seal the attested release wrote.
+	local path=$1 base=$2 role=$3 sealing_commit=${4:-$GIT_SHA}
+	local total_lines payload_lines digest
 	[ -f "$path" ] && [ ! -L "$path" ] && [ -s "$path" ] || return 1
 	[ -z "$(tail -c 1 "$path")" ] || return 1
 	total_lines=$(wc -l < "$path") || return 1
@@ -1491,7 +1494,7 @@ expected_evidence_result() {
 	digest=$(head -n "$payload_lines" "$path" | sha256sum) || return 1
 	digest=${digest%% *}
 	printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
-		"$role" "$base" "$payload_lines" "$digest" "$GIT_SHA"
+		"$role" "$base" "$payload_lines" "$digest" "$sealing_commit"
 }
 
 # ============================================================================
@@ -2835,6 +2838,7 @@ JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
 # be caught. Closing that means giving the soak role a payload digest, which is
 # a change to the evidence contract rather than to this feature.
 SOAK_SOURCE=this-run
+SOAK_EVIDENCE_COMMIT=$GIT_SHA
 if [ "$REUSE_SOAK" -eq 1 ]; then
 	log "looking for a published release soaked on these exact inputs..."
 	reuse_candidate=""
@@ -2870,6 +2874,13 @@ if [ "$REUSE_SOAK" -eq 1 ]; then
 			"$reuse_duration" "$EVID" "$RELEASE_SOAK_NAMES" \
 			|| die "refusing to reuse the soak recorded by $(basename "$reuse_candidate") (see the diagnostic above)."
 		SOAK_SOURCE=$(basename "$reuse_candidate")
+		# The adopted transcripts keep the seals that release wrote, so every
+		# later check of them has to expect ITS commit, not this run's.
+		SOAK_EVIDENCE_COMMIT=$(awk -F= '$1 == "source_commit" { print $2 }' \
+			"$reuse_candidate/QUALIFICATION") \
+			|| die "could not read the source commit of $(basename "$reuse_candidate")"
+		[[ "$SOAK_EVIDENCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+			|| die "$(basename "$reuse_candidate") declares no usable source commit"
 		# Record what was actually soaked, not what was asked for. The release
 		# says 24 h because these inputs WERE soaked for 24 h -- in the run that
 		# produced $SOAK_SOURCE, which its signature attests to.
@@ -2963,6 +2974,26 @@ if [ "$SOAK_FAILS" -ne 0 ]; then
 	die "$SOAK_FAILS soak combo(s) FAILED. No release staged. Logs in $WORK (preserved)."
 fi
 ok "all $NCOMBOS soak combos passed (wall-clock ${SOAK_WALL}s)."
+
+# Seal each soak transcript by SHA-256, exactly as every build transcript is
+# sealed. Until now the soak role carried no payload digest: a log was bound by
+# its index row -- terminal record and byte size -- so a tampered body of
+# identical length carrying an identical SOAK_RESULT satisfied every check. That
+# was harmless while every log came from the run that consumed it, and stopped
+# being harmless when --reuse-soak made a log arrive from a tree this run did
+# not produce.
+#
+# Adopted logs are NOT resealed. They already carry the seal the run that
+# produced them wrote, naming that run's commit, and replacing it would destroy
+# the very binding that makes reuse checkable.
+if [ "$SOAK_SOURCE" = this-run ]; then
+	for name in "${SOAK_NAMES[@]}"; do
+		seal_evidence_result "${SOAK_LOG[$name]}"
+	done
+	ok "sealed $NCOMBOS soak transcripts by payload digest."
+else
+	ok "$NCOMBOS adopted soak transcripts keep the seals $SOAK_SOURCE wrote."
+fi
 
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 [ "$current_avr_elf_hashes" = "$validated_avr_elf_hashes" ] \
@@ -3242,8 +3273,11 @@ for evidence_base in $RELEASE_EVIDENCE_FILES; do
 	mapfile -t evidence_results < <(grep '^EVIDENCE_RESULT ' "$staged_evidence" || true)
 	[ "${#evidence_results[@]}" -eq 1 ] \
 		|| die "retained evidence carries ${#evidence_results[@]} EVIDENCE_RESULT records: $evidence_base"
+	evidence_sealing_commit=$GIT_SHA
+	[ "$evidence_role" != soak ] || evidence_sealing_commit=$SOAK_EVIDENCE_COMMIT
 	expected_result=$(expected_evidence_result \
-		"$staged_evidence" "$evidence_base" "$evidence_role") \
+		"$staged_evidence" "$evidence_base" "$evidence_role" \
+		"$evidence_sealing_commit") \
 		|| die "could not rederive the payload-bound result for $evidence_base"
 	[ "${evidence_results[0]}" = "$expected_result" ] \
 		|| die "retained evidence payload or result changed after operation closure: $evidence_base"
@@ -3272,9 +3306,8 @@ ok "verified $evidence_bound operation-sealed logs against their payload digests
 release_terminal_record() {
 	local role=$1 path=$2 pattern matches
 	case "$role" in
-		build|final-image-build|initial-image-build|target-test)
+		build|final-image-build|initial-image-build|target-test|soak)
 			pattern='^EVIDENCE_RESULT ' ;;
-		soak)                 pattern='^SOAK_RESULT ' ;;
 		test-long)            pattern='^TEST_LONG_RESULT ' ;;
 		resource)             pattern='^RESOURCE_TABLES_RESULT ' ;;
 		toolchain)            pattern='^TOOLCHAIN_RESULT ' ;;
