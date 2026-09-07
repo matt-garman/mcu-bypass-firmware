@@ -69,6 +69,26 @@ historical records and are not retroactively compacted by this policy.
   this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
   Part 3 is the design.
 
+- **The staged programming commands and image facts are rehearsed before the
+  soak.** The staging phase carried 65 refusal points and almost none of them
+  read a soak result: the programming-command table, the per-image facts and the
+  resource rows are functions of the image set, the Makefile and evidence
+  measured before the soak. Evaluating them a day later is how `v0.9.12` died in
+  staging, on an unstaged `toolchain.txt`, after a full soak had been paid for.
+  `flash_row`, `img_row`, `release_producer_source_command_valid` and
+  `check_flash_commands` now live before the soak phase and run twice: once
+  against the built images with the output discarded, and once for real at
+  staging, which requires the two command tables to be byte-identical. A defect
+  in this material now fails in the first minutes, with nothing spent.
+
+  Two indirections make the double run possible and are the only behavioural
+  change from the move: the command table is appended to `$FLASHCMDS` rather
+  than one hardcoded path, and `img_row` reads image digests from
+  `$IMAGE_SUMS_FILE` rather than from the staged checksum list, which does not
+  exist at rehearsal time. Position is the contract, so a gate asserts it: the
+  generators and the rehearsal must precede the soak section, and staging must
+  compare against the rehearsed table.
+
 - **`--reuse-soak` stands a release on a published soak instead of repeating
   it.** When a published release already carries this run's
   `soak_inputs_sha256`, the soak is adopted rather than executed. The
@@ -97,6 +117,12 @@ historical records and are not retroactively compacted by this policy.
   of identical length carrying an identical result line would not be caught.
   Closing that means giving the soak evidence role a payload digest, which is a
   change to the evidence contract rather than to this feature.
+
+- **`test-release-provenance` counts thirteen fail-closed tool probes, not
+  eleven.** The two host C++ compilers that build the PIC soak harnesses are
+  named in the soak input key, so a release that could not identify them could
+  not say what its soak result is valid for. The yasimavr build-stamp probe is
+  pinned by name alongside them.
 
 - **`evidence/toolchain.txt` records yasimavr.** It named gpsim and libsimavr
   but not yasimavr, even though three of the 21 published images are ATtiny202

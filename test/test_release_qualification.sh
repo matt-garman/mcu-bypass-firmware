@@ -236,8 +236,8 @@ for wiring in \
 	$'\trelease_render_scope' \
 	$'\trelease_render_validation "$hours"' \
 	$'\trelease_render_toolchain_table "$EVID/toolchain.txt" \\' \
-	$'\tcheck_flash_commands "$WORK/flashcmds.txt"' \
-	$'\trelease_render_flashing "$WORK/flashcmds.txt" "$VERSION" \\' \
+	$'\tcheck_flash_commands "$FLASHCMDS"' \
+	$'\trelease_render_flashing "$FLASHCMDS" "$VERSION" \\' \
 	$'\t\t"$AVR_PROGRAMMER" "$XT_PROGRAMMER" "$XT_UPDI_PORT"' \
 	$'\trelease_render_reproduction_commands "$VERSION" "$RELEASE_IMAGE_DIRS"' \
 	$'\t\t"$AVR_BUILD_DIR" "$XT_BUILD_DIR" "$PIC10F322_BUILD_DIR"' \

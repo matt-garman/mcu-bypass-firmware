@@ -1042,9 +1042,18 @@ if grep -Fq "printf -- '| XC8 |" "$RELEASE"; then
 fi
 checks=$((checks + 1))
 
+# Thirteen: the eleven that identify the image-producing and analysis tools,
+# plus the two host C++ compilers that build the PIC soak harnesses. The latter
+# two are in the soak input key, so a release that could not identify them could
+# not say what its soak result is valid for.
 version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "$RELEASE" || true)
-[ "$version_assignments" -eq 11 ] \
-	|| fail "release has $version_assignments fail-closed executable version probes, expected 11"
+[ "$version_assignments" -eq 13 ] \
+	|| fail "release has $version_assignments fail-closed executable version probes, expected 13"
+# yasimavr is identified by its venv build stamp rather than by --version,
+# because 0.1.6 reports 0.1.6 with or without the vendored patches the ATtiny202
+# soak depends on. It must still be fail-closed.
+grep -Fq 'TC_YASIMAVR=$(release_yasimavr_build_line ' "$RELEASE" \
+	|| fail "release does not identify the patched yasimavr build fail-closed"
 ! grep -Fq 'v1()' "$RELEASE" \
 	|| fail "release still contains the fail-open v1 tool-version helper"
 checks=$((checks + 1))

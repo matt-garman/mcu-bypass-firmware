@@ -5,8 +5,8 @@
 A measurement of what the release path cost between `v0.9.9` and `v0.9.13`,
 and what recovers the confidence-per-hour that `v0.9.9` had without giving up
 any assurance about the firmware. Part 1 is a finding rather than a change --
-the continuous validation it proposed already existed. Part 4 has landed, and Part 3's
-first increment with it; Part 2 is open. It is a companion to
+the continuous validation it proposed already existed. Part 4 and Part 3 have
+landed; Part 2 is partly done. It is a companion to
 [`docs/ci_parity.md`](ci_parity.md): that document closes the gap between what
 runs locally and what runs remotely; this one addresses how much runs at all,
 and when.
@@ -130,7 +130,7 @@ The five phase-0 calls stay. They cost seconds, fail before anything is built,
 and duplicating a check that `make test` already proves is cheap insurance
 rather than a cost worth removing.
 
-## Part 2 - rehearse staging before the soak
+## Part 2 - rehearse staging before the soak (partly done)
 
 `make-release.sh` runs preconditions, builds, gates, soaks, then stages. Its
 staging phase holds 65 refusal points, up from 11. Almost none of them read a
@@ -150,12 +150,28 @@ genuinely bound to soak output -- the image-hash stability comparisons, the soak
 table, the evidence index. The `v0.9.12` `toolchain.txt` death is removed by
 construction rather than by remembering to stage a file.
 
+**What has landed.** The programming-command table and the per-image facts --
+`flash_row`, `img_row`, `release_producer_source_command_valid` and
+`check_flash_commands`, the largest single cluster of post-soak refusals -- now
+run before the soak against the built images, with the output discarded, and
+again for real at staging, which requires the two command tables to be
+byte-identical. Two indirections made the double run possible: the command table
+writes to `$FLASHCMDS`, and `img_row` reads digests from `$IMAGE_SUMS_FILE`
+rather than from a staged checksum list that does not exist yet.
+
+Still after the soak, and each a function of the tree and the built images
+rather than of any soak result: helper-artifact staging, the retained-evidence
+copy loop, the resource-row rendering, and the staged-document validator.
+
 This overlaps `docs/ci_parity.md` Part 4 and should land with it: that part
 rehearses the artifact-commit *shape* before the soak, this one rehearses the
 staged *content*. Same phase, same argument.
 
 ## Part 3 - attest the soak, and reuse it when the inputs are identical
 
+<!-- name-contract: exempt-begin (SOAK_KEY is a staged release FILENAME,
+     like QUALIFICATION and SHA256SUMS, not a Make variable; the underscore is
+     what makes it look like one) -->
 **Both increments have landed.** `SOAK_KEY` is written and signed before the
 soak, `QUALIFICATION` carries `soak_inputs_sha256` and `soak_source` at
 `format=9`, and `--reuse-soak` adopts a published release's soak when the keys
@@ -170,6 +186,7 @@ the same `validate_soak_result` the live path uses, at the attested duration.
 One link is weaker than the rest and is now filed as its own item -- a soak log
 is bound by its evidence-index row, terminal record and byte size, rather than
 by a content digest, because the `soak` evidence role has never had one.
+<!-- name-contract: exempt-end -->
 
 The soak is the only part of the release whose cost is measured in days, and
 the record above shows it has been re-run on unchanged inputs three times in a

@@ -2058,6 +2058,404 @@ ok "resource evidence covers all images and this run's measurements (rechecked a
 parse_resource_records "$WORK/resource-tables-presoak.log" "pre-soak resource evidence"
 ok "resource records parse, close on their own arithmetic, and cover every release image."
 
+# ----------------------------------------------------------------------------
+# Published programming commands and per-image facts -- defined BEFORE the soak.
+# ----------------------------------------------------------------------------
+# These used to live in the staging phase, which is where they ran: a day after
+# the last input they read stopped changing. Everything below is a function of
+# the image set, the Makefile and the resource evidence measured before the
+# soak, and none of it reads a soak result -- so a defect here was discovered
+# 24 hours after it could have been. The rehearsal further down runs them
+# against the built images and throws the output away; staging then runs them
+# again for real and requires the two to agree.
+#
+# Two indirections make that possible, and they are the only behavioural change
+# from the move: the command table is appended to $FLASHCMDS rather than one
+# hardcoded path, and img_row reads image digests from $IMAGE_SUMS_FILE rather
+# than from the staged SHA256SUMS, which does not exist yet at rehearsal time.
+FLASHCMDS="$WORK/flashcmds.txt"
+IMAGE_SUMS_FILE="$OUTPUT_DIR/SHA256SUMS"
+
+
+# --- published programming commands ------------------------------------------
+# One row per (image, profile). The profiles split in two: the DOWNLOAD set is
+# what a reader of a downloaded release can actually run, and `make-source` is
+# the equivalent for someone standing in a checkout of this tag. The release
+# used to append the source-checkout form to the download command as
+# parenthesised prose INSIDE the fenced block -- six of the eighteen published
+# lines were therefore not valid shell, and both of the forms that were named a
+# Makefile no downloaded release contains. The remaining nine carried a bare
+# `-c <prog>`, which bash reads as a redirection rather than a placeholder.
+FLASH_DOWNLOAD_PROFILES="avrdude-isp avrdude-updi pk2cmd"
+declare -A IMAGE_FUSES=()
+flash_row() {
+	[ "$#" -eq 3 ] \
+		|| die "flash_row takes an image, a profile and a command"
+	printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$FLASHCMDS"
+}
+
+# --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
+# Echoes a markdown table row for one image path.
+img_row() {
+	local path="$1" base; base=$(basename "$path")
+	local sha; sha=$("$AWK" -v f="$base" '$2==f{print $1}' "$IMAGE_SUMS_FILE")
+	# Flash usage is NOT derived here. It comes from the RESOURCE_IMAGE record
+	# test_resource_tables.py wrote for this exact image, already checked against
+	# the reviewed ceiling and already carrying that ceiling and the free margin.
+	# Each arm below used to re-derive its own figure from a build log or from
+	# avr-size, and the PIC10F322 arm derived none, so the release published
+	# "n/a" for its three tightest images while the gate that measured them at
+	# 476-502 of 512 words threw the numbers away.
+	local mcu clk fuses flashcmd prog amcu used stem variant
+	stem=${base%.hex}; variant=${stem##*-}
+	used=${RESOURCE_IMAGE_CELL[$base]:-}
+	[ -n "$used" ] \
+		|| die "no measured resource record for the release image $base"
+	# Every arm below matches the MANDATORY MCU field of the canonical basename
+	# (<prefix>-<mcu>-<stage>), so the arms are mutually exclusive and order
+	# carries no meaning. That is a change worth noticing: this used to be an
+	# ORDER-DEPENDENT chain ending in a bare `*.hex` ATtiny13a fallback, because
+	# a bare `bypass_cd4053.hex` was the ATtiny13a image. Any unrecognized name
+	# fell through to that arm and produced a row confidently labelling foreign
+	# firmware as an ATtiny13a with AVR fuse bytes. With the MCU always present
+	# the fallback becomes a hard error instead.
+	case "$base" in
+		${FW_BASE}-${PIC10F320_TAG}-*.hex)
+			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
+			# -M programs the whole device, -Y verifies it afterwards, -R
+			# releases reset so the pedal runs on unplugging the programmer.
+			# Checked against PIC10F320_PROG_CMD below, exactly as the 322 arm
+			# is checked against its own. The source-checkout route selects the
+			# output stage with PIC10F320_VARIANT rather than VARIANT, because
+			# that is the selector its build goal reads; passing VARIANT here
+			# would build the default stage and flash a different one.
+			flash_row "$base" pk2cmd "pk2cmd -PPIC10F320 -F$base -M -Y -R"
+			flash_row "$base" make-source \
+				"make pic10f320-program PIC10F320_VARIANT=$variant" ;;
+		${FW_BASE}-${PIC10F322_TAG}-*.hex)
+			mcu="PIC10F322"; clk="${PIC10F322_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
+			# Checked against PIC10F322_PROG_CMD below; the source-checkout
+			# route moves out of the pasteable block, because a downloaded
+			# release ships no Makefile to run it with.
+			flash_row "$base" pk2cmd "pk2cmd -PPIC10F322 -F$base -M -Y -R"
+			flash_row "$base" make-source \
+				"make pic10f322-program VARIANT=$variant" ;;
+		${FW_BASE}-${PIC12F675_TAG}-*.hex)
+			mcu="PIC12F675"; clk="${PIC12F675_CLK_MHZ} MHz (INTOSC, factory OSCCAL)"; fuses="CONFIG word embedded in HEX"
+			# A writer may erase factory trim even when the image leaves it untouched.
+			# Publish no per-image shortcut: the generated procedure below performs the
+			# mandatory baseline, immediate comparison, write and retained readback.
+			: # no flash_row for PIC12F675
+			;;
+		${FW_BASE}-${XT_TAG}-*.hex)
+			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
+			# AVR8X replaces lfuse/hfuse with seven individually named memories;
+			# enumerate them rather than inventing a two-byte summary.
+			fuses=""
+			for f in $XT_FUSE_NAMES; do
+				fuses="${fuses}${fuses:+ }$f=${XT_FUSE[$f]}"
+			done
+			flashcmd="avrdude -c $XT_PROGRAMMER -P $XT_UPDI_PORT -p $XT_AVRDUDE_PART"
+			for f in $XT_FUSE_NAMES; do
+				flashcmd="$flashcmd -U $f:w:${XT_FUSE[$f]}:m"
+			done
+			flash_row "$base" avrdude-updi "$flashcmd -U flash:w:$base:i"
+			flash_row "$base" make-source \
+				"make attiny202-program VARIANT=$variant XT_UPDI_PORT=$XT_UPDI_PORT" ;;
+		${FW_BASE}-attiny85-*.hex|${FW_BASE}-attiny45-*.hex)
+			case "$base" in
+				${FW_BASE}-attiny85-*.hex) mcu="ATtiny85"; amcu="attiny85" ;;
+				*)                         mcu="ATtiny45"; amcu="attiny45" ;;
+			esac
+			# From the Makefile's part_<n>, like the other four arms. The
+			# literals this replaces were the only programmer names in the
+			# manifest not taken from Makefile truth -- and AVRDUDE_PART_X5 was
+			# built above and then read by nobody, so the whole `mkv` preamble
+			# was validating a value it discarded.
+			prog=${AVRDUDE_PART_X5[${amcu#attiny}]:-}
+			[ -n "$prog" ] \
+				|| die "no avrdude part name for $amcu: TINYX5 and this manifest arm disagree"
+			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
+			flash_row "$base" avrdude-isp \
+				"avrdude -c $AVR_PROGRAMMER -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;
+		${FW_BASE}-${ATTINY13A_MCU}-*.hex)
+			mcu="ATtiny13a"; clk="1.2 MHz"; fuses="lfuse=$LFUSE hfuse=$HFUSE"
+			flash_row "$base" avrdude-isp \
+				"avrdude -c $AVR_PROGRAMMER -p $AVRDUDE_PART -U lfuse:w:$LFUSE:m -U hfuse:w:$HFUSE:m -U flash:w:$base:i" ;;
+		*) die "release image '$base' names no MCU this manifest generator knows; refusing to describe it" ;;
+	esac
+	# Kept so the flashing commands can be checked against the very cell the
+	# reader compares them with, rather than against the variables both were
+	# rendered from. Same fuse byte, two renderings, one gate.
+	IMAGE_FUSES[$base]=$fuses
+	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "$used" "$fuses" "$sha"
+}
+
+# This validator is deliberately separate from img_row's command generator. It
+# derives the one allowed goal/selector pair from the image MCU, then parses
+# whole shell words; agreement with text generated from the same table would not
+# catch a generator that paired an image with another MCU's programming route.
+# No other Make assignment is inert: each can replace build or recipe semantics,
+# so only the ATtiny202 route's required shell-safe path beneath /dev is accepted.
+release_producer_source_command_valid() {
+	[ "$#" -eq 2 ] || return 2
+	local image=$1 command=$2 part variant expected_goal expected_selector word name
+	local goal="" selector_name="" selector_value=""
+	local goal_count=0 selector_count=0 extra_count=0 expected_extra_count=0
+	local LC_ALL=C
+	local -a words=()
+
+	part=${image#*-}
+	part=${part%%-*}
+	variant=${image%.hex}
+	variant=${variant##*-}
+	case "$part" in
+		attiny13a) expected_goal=attiny13a-program; expected_selector=VARIANT ;;
+		attiny45)  expected_goal=attiny45-program;  expected_selector=VARIANT ;;
+		attiny85)  expected_goal=attiny85-program;  expected_selector=VARIANT ;;
+		attiny202) expected_goal=attiny202-program; expected_selector=VARIANT
+			expected_extra_count=1 ;;
+		pic10f322) expected_goal=pic10f322-program; expected_selector=VARIANT ;;
+		pic10f320) expected_goal=pic10f320-program; expected_selector=PIC10F320_VARIANT ;;
+		*) return 1 ;;
+	esac
+
+	read -r -a words <<<"$command"
+	[ "${#words[@]}" -ge 3 ] && [ "${words[0]}" = make ] || return 1
+	for word in "${words[@]:1}"; do
+		case "$word" in
+			*=*)
+				name=${word%%=*}
+				[[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+				if [ "$name" = "$expected_selector" ]; then
+					selector_name=$name
+					selector_value=${word#*=}
+					selector_count=$((selector_count + 1))
+				elif [ "$name" = XT_UPDI_PORT ] && [ "$part" = attiny202 ] \
+						&& [[ "${word#*=}" =~ ^/dev/[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$ ]]; then
+					extra_count=$((extra_count + 1))
+				else
+					return 1
+				fi ;;
+			*)
+				goal=$word
+				goal_count=$((goal_count + 1)) ;;
+		esac
+	done
+	[ "$goal_count" -eq 1 ] && [ "$goal" = "$expected_goal" ] \
+		&& [ "$selector_count" -eq 1 ] \
+		&& [ "$selector_name" = "$expected_selector" ] \
+		&& [ "$selector_value" = "$variant" ] \
+		&& [ "$extra_count" -eq "$expected_extra_count" ]
+}
+
+# Every published programming command, checked before it is rendered. What is
+# checked is not spelling: it is that a reader who pastes a line writes the
+# exact image the line is filed under, with the fuse bytes their own Images row
+# publishes, using a tool the download actually contains. None of this was
+# checked before, and all four properties were violated in v0.9.11.
+check_flash_commands() {
+	local file=$1 image profile command stem variant fuse name value block
+	local pk2_command pk2_arg pk2_image pk2_image_count
+	local pinned tag_var cmd_var hex_var published
+	local -A download_seen=()
+	local -a download_cmds=() pk2_args=()
+
+	while IFS=$'\t' read -r image profile command; do
+		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
+			|| die "the flashing command table has an incomplete row for '${image:-?}'"
+		[ -n "${IMAGE_FUSES[$image]+set}" ] \
+			|| die "a flashing command names $image, which this release does not ship"
+		case "$image" in
+			*-"$PIC12F675_TAG"-*.hex)
+				die "a per-image flashing command was generated for $image; this part is written only through the guarded transaction" ;;
+		esac
+		# A pasted line has to reach the shell intact. An unresolved
+		# placeholder is worse than a syntax error for `-c <prog>`: bash reads
+		# it as a redirection and drops the option, so avrdude runs with the
+		# NEXT flag as its programmer name.
+		case "$command" in
+			*'<'*|*'>'*)
+				die "the flashing command for $image carries an unresolved placeholder: $command" ;;
+			*'(or:'*)
+				die "the flashing command for $image appends prose to an executable line: $command" ;;
+		esac
+		stem=${image%.hex}; variant=${stem##*-}
+		case " $FLASH_DOWNLOAD_PROFILES " in
+			*" $profile "*)
+				case "$command" in
+					*"$image"*) ;;
+					*) die "the $profile command filed under $image does not name that image: $command" ;;
+				esac
+				case "$command" in
+					*'make '*)
+						die "the $profile command for $image invokes make; a downloaded release ships no Makefile" ;;
+				esac
+				download_seen[$image]=1
+				download_cmds+=("$command")
+				;;
+			*)
+				[ "$profile" = make-source ] \
+					|| die "unknown flashing profile '$profile' for $image"
+				case "$command" in
+					'make '*) ;;
+					*) die "the source-checkout command for $image is not a make invocation: $command" ;;
+				esac
+				release_producer_source_command_valid "$image" "$command" \
+					|| die "the source-checkout command for $image does not use its exact programming goal, selector and variant: $command"
+				;;
+		esac
+		# Both writers verify what they wrote -- avrdude unless -V turns it
+		# off, pk2cmd only when asked with -Y -- and an unverified write would
+		# look exactly like a verified one in a published manifest.
+		case "$profile" in
+			avrdude-isp|avrdude-updi)
+				case " $command " in
+					*' -V '*) die "the avrdude command for $image disables verification" ;;
+				esac
+				case "$command" in
+					*" -U flash:w:$image:i"*) ;;
+					*) die "the avrdude command for $image does not write that image to flash: $command" ;;
+				esac
+				for fuse in ${IMAGE_FUSES[$image]}; do
+					name=${fuse%%=*}; value=${fuse#*=}
+					[ "$name" != "$fuse" ] || continue
+					case "$command" in
+						*" -U $name:w:$value:m"*) ;;
+						*) die "the avrdude command for $image omits $name=$value, which its own Images row publishes" ;;
+					esac
+				done
+				;;
+			pk2cmd)
+				pk2_command=${command%%#*}
+				[[ "$pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
+					|| die "the pk2cmd command for $image is not one plain writer invocation: $command"
+				read -r -a pk2_args <<<"$pk2_command"
+				pk2_image=""
+				pk2_image_count=0
+				for pk2_arg in "${pk2_args[@]}"; do
+					case "$pk2_arg" in
+						-F*)
+							pk2_image=${pk2_arg#-F}
+							pk2_image_count=$((pk2_image_count + 1)) ;;
+					esac
+				done
+				[ "$pk2_image_count" -eq 1 ] && [ "$pk2_image" = "$image" ] \
+					|| die "the pk2cmd command for $image does not select $image as its sole -F image operand: $command"
+				case " $pk2_command " in
+					*' -M '*) ;;
+					*) die "the pk2cmd command for $image does not program the whole device (-M): $command" ;;
+				esac
+				case " $pk2_command " in
+					*' -Y '*) ;;
+					*) die "the pk2cmd command for $image performs no verify pass (-Y): $command" ;;
+				esac
+				;;
+		esac
+	done < "$file"
+
+	# Coverage in both directions. The loop above rejected a command for an
+	# image this release does not ship; this rejects an image this release
+	# ships and does not say how to program.
+	for image in "${release_basenames[@]}"; do
+		case "$image" in
+			*-"$PIC12F675_TAG"-*.hex) continue ;;
+		esac
+		[ -n "${download_seen[$image]+set}" ] \
+			|| die "the release publishes no programming command for $image"
+	done
+
+	# The block as a whole, through the interpreter a reader will paste it
+	# into. Six of the eighteen lines v0.9.11 published do not survive this.
+	block="$WORK/flash-block.sh"
+	printf '%s\n' "${download_cmds[@]}" > "$block" \
+		|| die "could not stage the published flashing commands for checking"
+	bash -n "$block" \
+		|| die "the published flashing commands are not valid shell"
+
+	# One programmer invocation, two spellings: the Makefile's, which names a
+	# path inside a build tree, and the release's, which names a downloaded
+	# file. Substitute the one part that legitimately differs and require
+	# everything else -- part name, mode, verify, reset -- to be identical.
+	#
+	# Both PIC10F32x parts are pinned, each against its OWN variable family, and
+	# the table below is read rather than the block being copied per part. That
+	# is not tidiness. These two parts differ by one digit and share a pinout, a
+	# programmer and a dialect; a hand-copied second block is precisely how a
+	# release ends up comparing the 320's published command against the 322's
+	# authority and reporting agreement.
+	for pinned in "PIC10F322_TAG PIC10F322_PROG_CMD PIC10F322_PROG_HEX" \
+			"PIC10F320_TAG PIC10F320_PROG_CMD PIC10F320_PROG_HEX"; do
+		read -r tag_var cmd_var hex_var <<<"$pinned"
+		[ -n "${!tag_var:-}" ] && [ -n "${!cmd_var:-}" ] && [ -n "${!hex_var:-}" ] \
+			|| die "no Makefile programming authority was read for $tag_var"
+		published=""
+		while IFS=$'\t' read -r image profile command; do
+			case "$profile:$image" in
+				pk2cmd:*-"${!tag_var}"-*)
+					published=${command/ -F$image / -F${!hex_var} }
+					break ;;
+			esac
+		done < "$file"
+		[ -n "$published" ] \
+			|| die "no ${!tag_var} programming command was generated to check against the Makefile"
+		[ "$published" = "${!cmd_var}" ] \
+			|| die "the published ${!tag_var} command and the Makefile's $cmd_var disagree: '$published' vs '${!cmd_var}'"
+	done
+}
+
+# ----------------------------------------------------------------------------
+# Rehearse the staged output that does not depend on the soak.
+# ----------------------------------------------------------------------------
+# The staging phase held 65 refusal points and almost none of them read a soak
+# result: the programming-command table, the per-image facts and the resource
+# rows are functions of the image set, the Makefile and evidence already
+# measured. Evaluating them a day later is how v0.9.12 died in staging on an
+# unstaged toolchain.txt after a full soak had been paid for.
+#
+# So run them here, against the built images, and throw the output away. Staging
+# then renders for real, and requires the programming table to be byte-identical
+# to this one: anything that differs and is not soak-derived is itself a defect.
+# The cost is seconds; what it buys is that a defect in this material fails
+# before the soak rather than after it.
+log "rehearsing the staged programming commands and image facts..."
+REHEARSAL_DIR="$WORK/rehearsal"
+mkdir -p "$REHEARSAL_DIR" || die "could not create the staging rehearsal directory"
+REHEARSAL_FLASHCMDS="$REHEARSAL_DIR/flashcmds.txt"
+: > "$REHEARSAL_FLASHCMDS" || die "could not start the rehearsal command table"
+# img_row reads digests from a checksum list and must find an entry for every
+# image or it cannot render a row at all. The staged list does not exist yet,
+# and neither do some of the images: the validation phase rebuilds the classic
+# AVR ELFs, which invalidates their paired HEX, and those are regenerated from
+# the validated ELFs only after the soak. That is precisely why image digests
+# are NOT what this rehearsal checks -- they are not stable until then. The
+# command table is what it checks, and that carries no digests. So a placeholder
+# stands in for an image that is not on disk yet, and every digest here is
+# discarded with the rest of the rehearsal output.
+{
+	for img in "${IMAGES[@]}"; do
+		if [ -f "$REPO_ROOT/$img" ]; then
+			( cd "$REPO_ROOT" && sha256sum -- "$img" ) \
+				| "$AWK" '{ n = $2; sub(/.*\//, "", n); print $1 "  " n }' \
+				|| exit 1
+		else
+			printf '%064d  %s\n' 0 "$(basename "$img")"
+		fi
+	done
+} > "$REHEARSAL_DIR/SHA256SUMS" \
+	|| die "could not build the image digest list for the staging rehearsal"
+(
+	FLASHCMDS="$REHEARSAL_FLASHCMDS"
+	IMAGE_SUMS_FILE="$REHEARSAL_DIR/SHA256SUMS"
+	for img in "${IMAGES[@]}"; do
+		img_row "$img" >/dev/null \
+			|| die "could not render the release facts for $img"
+	done
+	check_flash_commands "$REHEARSAL_FLASHCMDS"
+) || die "the staged programming commands and image facts do not pass their own gates.
+This failed BEFORE the soak, which is the point: fix it and re-run, with nothing spent."
+ok "staged programming commands and image facts rehearse clean ($(grep -c . "$REHEARSAL_FLASHCMDS") published commands)."
+
 # ============================================================================
 # 3. PARALLEL SOAK -- every release combo, full duration
 # ============================================================================
@@ -2928,333 +3326,6 @@ cp -p -- "$WORK/SOAK_KEY" "$OUTPUT_DIR/SOAK_KEY" \
 	printf 'evidence_index_sha256=%s\n' "$evidence_index_sha256"
 } > "$OUTPUT_DIR/QUALIFICATION"
 
-# --- published programming commands ------------------------------------------
-# One row per (image, profile). The profiles split in two: the DOWNLOAD set is
-# what a reader of a downloaded release can actually run, and `make-source` is
-# the equivalent for someone standing in a checkout of this tag. The release
-# used to append the source-checkout form to the download command as
-# parenthesised prose INSIDE the fenced block -- six of the eighteen published
-# lines were therefore not valid shell, and both of the forms that were named a
-# Makefile no downloaded release contains. The remaining nine carried a bare
-# `-c <prog>`, which bash reads as a redirection rather than a placeholder.
-FLASH_DOWNLOAD_PROFILES="avrdude-isp avrdude-updi pk2cmd"
-declare -A IMAGE_FUSES=()
-flash_row() {
-	[ "$#" -eq 3 ] \
-		|| die "flash_row takes an image, a profile and a command"
-	printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$WORK/flashcmds.txt"
-}
-
-# --- per-image facts for the manifest (target, clock, fuses, flashing cmd) ----
-# Echoes a markdown table row for one image path.
-img_row() {
-	local path="$1" base; base=$(basename "$path")
-	local sha; sha=$("$AWK" -v f="$base" '$2==f{print $1}' "$OUTPUT_DIR/SHA256SUMS")
-	# Flash usage is NOT derived here. It comes from the RESOURCE_IMAGE record
-	# test_resource_tables.py wrote for this exact image, already checked against
-	# the reviewed ceiling and already carrying that ceiling and the free margin.
-	# Each arm below used to re-derive its own figure from a build log or from
-	# avr-size, and the PIC10F322 arm derived none, so the release published
-	# "n/a" for its three tightest images while the gate that measured them at
-	# 476-502 of 512 words threw the numbers away.
-	local mcu clk fuses flashcmd prog amcu used stem variant
-	stem=${base%.hex}; variant=${stem##*-}
-	used=${RESOURCE_IMAGE_CELL[$base]:-}
-	[ -n "$used" ] \
-		|| die "no measured resource record for the release image $base"
-	# Every arm below matches the MANDATORY MCU field of the canonical basename
-	# (<prefix>-<mcu>-<stage>), so the arms are mutually exclusive and order
-	# carries no meaning. That is a change worth noticing: this used to be an
-	# ORDER-DEPENDENT chain ending in a bare `*.hex` ATtiny13a fallback, because
-	# a bare `bypass_cd4053.hex` was the ATtiny13a image. Any unrecognized name
-	# fell through to that arm and produced a row confidently labelling foreign
-	# firmware as an ATtiny13a with AVR fuse bytes. With the MCU always present
-	# the fallback becomes a hard error instead.
-	case "$base" in
-		${FW_BASE}-${PIC10F320_TAG}-*.hex)
-			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
-			# -M programs the whole device, -Y verifies it afterwards, -R
-			# releases reset so the pedal runs on unplugging the programmer.
-			# Checked against PIC10F320_PROG_CMD below, exactly as the 322 arm
-			# is checked against its own. The source-checkout route selects the
-			# output stage with PIC10F320_VARIANT rather than VARIANT, because
-			# that is the selector its build goal reads; passing VARIANT here
-			# would build the default stage and flash a different one.
-			flash_row "$base" pk2cmd "pk2cmd -PPIC10F320 -F$base -M -Y -R"
-			flash_row "$base" make-source \
-				"make pic10f320-program PIC10F320_VARIANT=$variant" ;;
-		${FW_BASE}-${PIC10F322_TAG}-*.hex)
-			mcu="PIC10F322"; clk="${PIC10F322_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
-			# Checked against PIC10F322_PROG_CMD below; the source-checkout
-			# route moves out of the pasteable block, because a downloaded
-			# release ships no Makefile to run it with.
-			flash_row "$base" pk2cmd "pk2cmd -PPIC10F322 -F$base -M -Y -R"
-			flash_row "$base" make-source \
-				"make pic10f322-program VARIANT=$variant" ;;
-		${FW_BASE}-${PIC12F675_TAG}-*.hex)
-			mcu="PIC12F675"; clk="${PIC12F675_CLK_MHZ} MHz (INTOSC, factory OSCCAL)"; fuses="CONFIG word embedded in HEX"
-			# A writer may erase factory trim even when the image leaves it untouched.
-			# Publish no per-image shortcut: the generated procedure below performs the
-			# mandatory baseline, immediate comparison, write and retained readback.
-			: # no flash_row for PIC12F675
-			;;
-		${FW_BASE}-${XT_TAG}-*.hex)
-			mcu="ATtiny202"; clk="${XT_CLK_MHZ} MHz (internal, OSCCFG 16 MHz / 8)"
-			# AVR8X replaces lfuse/hfuse with seven individually named memories;
-			# enumerate them rather than inventing a two-byte summary.
-			fuses=""
-			for f in $XT_FUSE_NAMES; do
-				fuses="${fuses}${fuses:+ }$f=${XT_FUSE[$f]}"
-			done
-			flashcmd="avrdude -c $XT_PROGRAMMER -P $XT_UPDI_PORT -p $XT_AVRDUDE_PART"
-			for f in $XT_FUSE_NAMES; do
-				flashcmd="$flashcmd -U $f:w:${XT_FUSE[$f]}:m"
-			done
-			flash_row "$base" avrdude-updi "$flashcmd -U flash:w:$base:i"
-			flash_row "$base" make-source \
-				"make attiny202-program VARIANT=$variant XT_UPDI_PORT=$XT_UPDI_PORT" ;;
-		${FW_BASE}-attiny85-*.hex|${FW_BASE}-attiny45-*.hex)
-			case "$base" in
-				${FW_BASE}-attiny85-*.hex) mcu="ATtiny85"; amcu="attiny85" ;;
-				*)                         mcu="ATtiny45"; amcu="attiny45" ;;
-			esac
-			# From the Makefile's part_<n>, like the other four arms. The
-			# literals this replaces were the only programmer names in the
-			# manifest not taken from Makefile truth -- and AVRDUDE_PART_X5 was
-			# built above and then read by nobody, so the whole `mkv` preamble
-			# was validating a value it discarded.
-			prog=${AVRDUDE_PART_X5[${amcu#attiny}]:-}
-			[ -n "$prog" ] \
-				|| die "no avrdude part name for $amcu: TINYX5 and this manifest arm disagree"
-			clk="1.0 MHz"; fuses="lfuse=$LFUSE_X5 hfuse=$HFUSE_X5"
-			flash_row "$base" avrdude-isp \
-				"avrdude -c $AVR_PROGRAMMER -p $prog -U lfuse:w:$LFUSE_X5:m -U hfuse:w:$HFUSE_X5:m -U flash:w:$base:i" ;;
-		${FW_BASE}-${ATTINY13A_MCU}-*.hex)
-			mcu="ATtiny13a"; clk="1.2 MHz"; fuses="lfuse=$LFUSE hfuse=$HFUSE"
-			flash_row "$base" avrdude-isp \
-				"avrdude -c $AVR_PROGRAMMER -p $AVRDUDE_PART -U lfuse:w:$LFUSE:m -U hfuse:w:$HFUSE:m -U flash:w:$base:i" ;;
-		*) die "release image '$base' names no MCU this manifest generator knows; refusing to describe it" ;;
-	esac
-	# Kept so the flashing commands can be checked against the very cell the
-	# reader compares them with, rather than against the variables both were
-	# rendered from. Same fuse byte, two renderings, one gate.
-	IMAGE_FUSES[$base]=$fuses
-	printf '| `%s` | %s | %s | %s | %s | `%s` |\n' "$base" "$mcu" "$clk" "$used" "$fuses" "$sha"
-}
-
-# This validator is deliberately separate from img_row's command generator. It
-# derives the one allowed goal/selector pair from the image MCU, then parses
-# whole shell words; agreement with text generated from the same table would not
-# catch a generator that paired an image with another MCU's programming route.
-# No other Make assignment is inert: each can replace build or recipe semantics,
-# so only the ATtiny202 route's required shell-safe path beneath /dev is accepted.
-release_producer_source_command_valid() {
-	[ "$#" -eq 2 ] || return 2
-	local image=$1 command=$2 part variant expected_goal expected_selector word name
-	local goal="" selector_name="" selector_value=""
-	local goal_count=0 selector_count=0 extra_count=0 expected_extra_count=0
-	local LC_ALL=C
-	local -a words=()
-
-	part=${image#*-}
-	part=${part%%-*}
-	variant=${image%.hex}
-	variant=${variant##*-}
-	case "$part" in
-		attiny13a) expected_goal=attiny13a-program; expected_selector=VARIANT ;;
-		attiny45)  expected_goal=attiny45-program;  expected_selector=VARIANT ;;
-		attiny85)  expected_goal=attiny85-program;  expected_selector=VARIANT ;;
-		attiny202) expected_goal=attiny202-program; expected_selector=VARIANT
-			expected_extra_count=1 ;;
-		pic10f322) expected_goal=pic10f322-program; expected_selector=VARIANT ;;
-		pic10f320) expected_goal=pic10f320-program; expected_selector=PIC10F320_VARIANT ;;
-		*) return 1 ;;
-	esac
-
-	read -r -a words <<<"$command"
-	[ "${#words[@]}" -ge 3 ] && [ "${words[0]}" = make ] || return 1
-	for word in "${words[@]:1}"; do
-		case "$word" in
-			*=*)
-				name=${word%%=*}
-				[[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
-				if [ "$name" = "$expected_selector" ]; then
-					selector_name=$name
-					selector_value=${word#*=}
-					selector_count=$((selector_count + 1))
-				elif [ "$name" = XT_UPDI_PORT ] && [ "$part" = attiny202 ] \
-						&& [[ "${word#*=}" =~ ^/dev/[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$ ]]; then
-					extra_count=$((extra_count + 1))
-				else
-					return 1
-				fi ;;
-			*)
-				goal=$word
-				goal_count=$((goal_count + 1)) ;;
-		esac
-	done
-	[ "$goal_count" -eq 1 ] && [ "$goal" = "$expected_goal" ] \
-		&& [ "$selector_count" -eq 1 ] \
-		&& [ "$selector_name" = "$expected_selector" ] \
-		&& [ "$selector_value" = "$variant" ] \
-		&& [ "$extra_count" -eq "$expected_extra_count" ]
-}
-
-# Every published programming command, checked before it is rendered. What is
-# checked is not spelling: it is that a reader who pastes a line writes the
-# exact image the line is filed under, with the fuse bytes their own Images row
-# publishes, using a tool the download actually contains. None of this was
-# checked before, and all four properties were violated in v0.9.11.
-check_flash_commands() {
-	local file=$1 image profile command stem variant fuse name value block
-	local pk2_command pk2_arg pk2_image pk2_image_count
-	local pinned tag_var cmd_var hex_var published
-	local -A download_seen=()
-	local -a download_cmds=() pk2_args=()
-
-	while IFS=$'\t' read -r image profile command; do
-		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
-			|| die "the flashing command table has an incomplete row for '${image:-?}'"
-		[ -n "${IMAGE_FUSES[$image]+set}" ] \
-			|| die "a flashing command names $image, which this release does not ship"
-		case "$image" in
-			*-"$PIC12F675_TAG"-*.hex)
-				die "a per-image flashing command was generated for $image; this part is written only through the guarded transaction" ;;
-		esac
-		# A pasted line has to reach the shell intact. An unresolved
-		# placeholder is worse than a syntax error for `-c <prog>`: bash reads
-		# it as a redirection and drops the option, so avrdude runs with the
-		# NEXT flag as its programmer name.
-		case "$command" in
-			*'<'*|*'>'*)
-				die "the flashing command for $image carries an unresolved placeholder: $command" ;;
-			*'(or:'*)
-				die "the flashing command for $image appends prose to an executable line: $command" ;;
-		esac
-		stem=${image%.hex}; variant=${stem##*-}
-		case " $FLASH_DOWNLOAD_PROFILES " in
-			*" $profile "*)
-				case "$command" in
-					*"$image"*) ;;
-					*) die "the $profile command filed under $image does not name that image: $command" ;;
-				esac
-				case "$command" in
-					*'make '*)
-						die "the $profile command for $image invokes make; a downloaded release ships no Makefile" ;;
-				esac
-				download_seen[$image]=1
-				download_cmds+=("$command")
-				;;
-			*)
-				[ "$profile" = make-source ] \
-					|| die "unknown flashing profile '$profile' for $image"
-				case "$command" in
-					'make '*) ;;
-					*) die "the source-checkout command for $image is not a make invocation: $command" ;;
-				esac
-				release_producer_source_command_valid "$image" "$command" \
-					|| die "the source-checkout command for $image does not use its exact programming goal, selector and variant: $command"
-				;;
-		esac
-		# Both writers verify what they wrote -- avrdude unless -V turns it
-		# off, pk2cmd only when asked with -Y -- and an unverified write would
-		# look exactly like a verified one in a published manifest.
-		case "$profile" in
-			avrdude-isp|avrdude-updi)
-				case " $command " in
-					*' -V '*) die "the avrdude command for $image disables verification" ;;
-				esac
-				case "$command" in
-					*" -U flash:w:$image:i"*) ;;
-					*) die "the avrdude command for $image does not write that image to flash: $command" ;;
-				esac
-				for fuse in ${IMAGE_FUSES[$image]}; do
-					name=${fuse%%=*}; value=${fuse#*=}
-					[ "$name" != "$fuse" ] || continue
-					case "$command" in
-						*" -U $name:w:$value:m"*) ;;
-						*) die "the avrdude command for $image omits $name=$value, which its own Images row publishes" ;;
-					esac
-				done
-				;;
-			pk2cmd)
-				pk2_command=${command%%#*}
-				[[ "$pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
-					|| die "the pk2cmd command for $image is not one plain writer invocation: $command"
-				read -r -a pk2_args <<<"$pk2_command"
-				pk2_image=""
-				pk2_image_count=0
-				for pk2_arg in "${pk2_args[@]}"; do
-					case "$pk2_arg" in
-						-F*)
-							pk2_image=${pk2_arg#-F}
-							pk2_image_count=$((pk2_image_count + 1)) ;;
-					esac
-				done
-				[ "$pk2_image_count" -eq 1 ] && [ "$pk2_image" = "$image" ] \
-					|| die "the pk2cmd command for $image does not select $image as its sole -F image operand: $command"
-				case " $pk2_command " in
-					*' -M '*) ;;
-					*) die "the pk2cmd command for $image does not program the whole device (-M): $command" ;;
-				esac
-				case " $pk2_command " in
-					*' -Y '*) ;;
-					*) die "the pk2cmd command for $image performs no verify pass (-Y): $command" ;;
-				esac
-				;;
-		esac
-	done < "$file"
-
-	# Coverage in both directions. The loop above rejected a command for an
-	# image this release does not ship; this rejects an image this release
-	# ships and does not say how to program.
-	for image in "${release_basenames[@]}"; do
-		case "$image" in
-			*-"$PIC12F675_TAG"-*.hex) continue ;;
-		esac
-		[ -n "${download_seen[$image]+set}" ] \
-			|| die "the release publishes no programming command for $image"
-	done
-
-	# The block as a whole, through the interpreter a reader will paste it
-	# into. Six of the eighteen lines v0.9.11 published do not survive this.
-	block="$WORK/flash-block.sh"
-	printf '%s\n' "${download_cmds[@]}" > "$block" \
-		|| die "could not stage the published flashing commands for checking"
-	bash -n "$block" \
-		|| die "the published flashing commands are not valid shell"
-
-	# One programmer invocation, two spellings: the Makefile's, which names a
-	# path inside a build tree, and the release's, which names a downloaded
-	# file. Substitute the one part that legitimately differs and require
-	# everything else -- part name, mode, verify, reset -- to be identical.
-	#
-	# Both PIC10F32x parts are pinned, each against its OWN variable family, and
-	# the table below is read rather than the block being copied per part. That
-	# is not tidiness. These two parts differ by one digit and share a pinout, a
-	# programmer and a dialect; a hand-copied second block is precisely how a
-	# release ends up comparing the 320's published command against the 322's
-	# authority and reporting agreement.
-	for pinned in "PIC10F322_TAG PIC10F322_PROG_CMD PIC10F322_PROG_HEX" \
-			"PIC10F320_TAG PIC10F320_PROG_CMD PIC10F320_PROG_HEX"; do
-		read -r tag_var cmd_var hex_var <<<"$pinned"
-		[ -n "${!tag_var:-}" ] && [ -n "${!cmd_var:-}" ] && [ -n "${!hex_var:-}" ] \
-			|| die "no Makefile programming authority was read for $tag_var"
-		published=""
-		while IFS=$'\t' read -r image profile command; do
-			case "$profile:$image" in
-				pk2cmd:*-"${!tag_var}"-*)
-					published=${command/ -F$image / -F${!hex_var} }
-					break ;;
-			esac
-		done < "$file"
-		[ -n "$published" ] \
-			|| die "no ${!tag_var} programming command was generated to check against the Makefile"
-		[ "$published" = "${!cmd_var}" ] \
-			|| die "the published ${!tag_var} command and the Makefile's $cmd_var disagree: '$published' vs '${!cmd_var}'"
-	done
-}
-
 # Soak evidence summary table.
 soak_table() {
 	local name f
@@ -3279,7 +3350,7 @@ REL_BANNER=""
 # banner also carries, or the paragraph that follows joins the quote.
 [ "$EXPRESS" -eq 1 ] && REL_BANNER="$(printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran %s h per combination instead of 24 h.' "$hours")"$'\n'
 
-: > "$WORK/flashcmds.txt"
+: > "$FLASHCMDS"
 {
 	printf '# Firmware release %s\n\n' "$VERSION"
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
@@ -3427,8 +3498,13 @@ REL_BANNER=""
 	printf '%s\n' "${RESOURCE_RETURN_ROWS[@]}"
 	printf '\n'
 
-	check_flash_commands "$WORK/flashcmds.txt"
-	release_render_flashing "$WORK/flashcmds.txt" "$VERSION" \
+	check_flash_commands "$FLASHCMDS"
+	# The rehearsal before the soak generated this same table from the same
+	# inputs. If a day of soaking changed it, something read state it should not
+	# have, and the published commands are not the ones that were checked early.
+	cmp -s "$FLASHCMDS" "$REHEARSAL_FLASHCMDS" \
+		|| die "the staged programming commands differ from the ones rehearsed before the soak"
+	release_render_flashing "$FLASHCMDS" "$VERSION" \
 		"$AVR_PROGRAMMER" "$XT_PROGRAMMER" "$XT_UPDI_PORT"
 
 	printf '## Soak evidence\n\n'

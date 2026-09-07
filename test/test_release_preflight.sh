@@ -2650,6 +2650,49 @@ grep -Fq 'SOAK_SOURCE=this-run' "$RELEASE" \
 	|| fail "make-release.sh does not default soak provenance to this run"
 checks=$((checks + 1))
 
+# --- the staging rehearsal ---------------------------------------------------
+# The programming-command table and the per-image facts are functions of the
+# image set, the Makefile and pre-soak resource evidence; none reads a soak
+# result. They used to be evaluated in the staging phase, a day after their last
+# input stopped changing, which is how v0.9.12 died in staging after a full soak
+# had been paid for. They now run twice: once before the soak against the built
+# images, discarding the output, and once for real at staging, which requires
+# the two command tables to be byte-identical.
+#
+# Position is the contract, so position is what is asserted. A later edit that
+# moves this material back after the soak reopens exactly the window it was
+# moved out of, and does so silently.
+soak_section_line=$(grep -Fn 'section "3. soak' "$RELEASE" | head -1 | cut -d: -f1)
+stage_section_line=$(grep -Fn 'section "4. stage' "$RELEASE" | head -1 | cut -d: -f1)
+flash_check_line=$(grep -Fn 'check_flash_commands() {' "$RELEASE" | head -1 | cut -d: -f1)
+img_row_line=$(grep -Fn 'img_row() {' "$RELEASE" | head -1 | cut -d: -f1)
+rehearsal_line=$(grep -Fn 'rehearsing the staged programming commands' "$RELEASE" \
+	| head -1 | cut -d: -f1)
+for rehearsal_step in "$soak_section_line" "$stage_section_line" \
+		"$flash_check_line" "$img_row_line" "$rehearsal_line"; do
+	[[ "$rehearsal_step" =~ ^[0-9]+$ ]] \
+		|| fail "could not locate the staging rehearsal and the phases around it"
+done
+[ "$flash_check_line" -lt "$rehearsal_line" ] \
+	&& [ "$img_row_line" -lt "$rehearsal_line" ] \
+	&& [ "$rehearsal_line" -lt "$soak_section_line" ] \
+	&& [ "$soak_section_line" -lt "$stage_section_line" ] \
+	|| fail "the staged programming commands are not rehearsed before the soak"
+checks=$((checks + 1))
+
+# The rehearsal is only worth its seconds if staging is held to it.
+grep -Fq 'cmp -s "$FLASHCMDS" "$REHEARSAL_FLASHCMDS"' "$RELEASE" \
+	|| fail "staging does not require the published commands to match the rehearsed ones"
+checks=$((checks + 1))
+
+# Both call sites must be able to write somewhere other than the staged tree, or
+# the rehearsal could not run before the staging directory exists.
+grep -Fq 'FLASHCMDS="$WORK/flashcmds.txt"' "$RELEASE" \
+	|| fail "make-release.sh does not carry a redirectable command-table path"
+grep -Fq 'IMAGE_SUMS_FILE="$OUTPUT_DIR/SHA256SUMS"' "$RELEASE" \
+	|| fail "make-release.sh does not carry a redirectable image-digest source"
+checks=$((checks + 1))
+
 # ---------------------------------------------------------------------------
 # The PIC12F675 flashing contract.
 #
