@@ -97,6 +97,17 @@ Two hazards, both found by converting `pic` rather than by inspection:
   by its `name:` (`"PIC10F322 pre-hardware gate..."`) simply stop matching when
   the step is folded away. Locate steps by what they *run*.
 
+Those recipe edges then pay for themselves. Converting the mutation gate, the
+"exactly one normal-CI path runs mutants" check stopped being a match against
+the literal set `{test-mutation, test-long}` and became a *reachability*
+question: which workflow invocations can reach `test-mutation` at all. That is
+strictly stronger -- it catches a second wrapper, not just a second literal --
+and it is only askable because the edge set now sees through goals. Prove a
+replaced check still bites before trusting it: adding a stray `make test-long`
+step reports `2 Make invocations reach test-mutation, expected 1`, and deleting
+`MUTATION_ALLOW_SKIP=0` from the recipe reports that `ci-mutation` is no longer
+the canonical fail-closed run.
+
 Counting the checks before and after is the way to prove nothing was lost: this
 conversion moved `test-workflow-syntax` from 670 to 626, and every one of the 44
 is accounted for -- five fewer steps means five fewer generic per-step checks
@@ -235,7 +246,7 @@ shape.
 | # | Increment | Catches |
 |---|-----------|---------|
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
-| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress`, `pic` **done**; `mutation`, `attiny202`, `build-matrix` remain) | nothing yet -- pure restructure |
+| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress`, `pic`, the mutation gate **done**; `attiny202`, `build-matrix` remain) | nothing yet -- pure restructure |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |

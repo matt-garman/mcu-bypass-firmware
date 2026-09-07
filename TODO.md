@@ -59,13 +59,16 @@ The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
 ordering assertions to it, so a job's goal, that job's detection, and the policy
 assertions the step used to satisfy all move together -- the last against the
-goal's recipe, or they retire silently. `verify`, `stress` and `pic` are
-converted; the mutation gate, `attiny202` and `build-matrix` remain. Two
-hazards the `pic` conversion exposed, both recorded in the design doc: a goal's
-recipe sub-makes are invisible to Make's prerequisite database, so reachability
-checks asked through a wrapper pass vacuously unless the edge set is seeded
-with them; and an assertion that finds a workflow step by its `name:` goes
-quiet rather than red when that step is folded away.
+goal's recipe, or they retire silently. `verify`, `stress`, `pic` and the
+mutation gate are converted; `attiny202` and `build-matrix` remain. Two hazards
+the `pic` conversion exposed, both recorded in the design doc: a goal's recipe
+sub-makes are invisible to Make's prerequisite database, so reachability checks
+asked through a wrapper pass vacuously unless the edge set is seeded with them;
+and an assertion that finds a workflow step by its `name:` goes quiet rather
+than red when that step is folded away. Those seeded edges then let the
+mutation gate's "exactly one normal-CI path runs mutants" check become a
+reachability question rather than a literal-name match, which also catches a
+second wrapper.
 
 Acceptance: every `run:` step in both
 workflows invokes exactly one declared goal, with its required pins, and
@@ -829,7 +832,7 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
-| T2-ci-parity | Make local/remote CI parity structural | 2 | 3-4 h | High - a failed remote gate costs a 25-hour release |
+| T2-ci-parity | Make local/remote CI parity structural | 2 | 3 h | High - a failed remote gate costs a 25-hour release |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

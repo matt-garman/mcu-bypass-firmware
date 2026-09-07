@@ -1124,7 +1124,7 @@ CI_RESOURCE_ROUTES = {
     "ci-pic": {
         "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
     },
-    "test-mutation": {
+    "ci-mutation": {
         "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
         "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
     },
@@ -1142,8 +1142,19 @@ CI_RESOURCE_ROUTES = {
 RELEASE_RESOURCE_ROUTES = release_resource_routes(RELEASE_RESOURCE_REFS)
 # Inside a CI goal's recipe the same routing question is asked of $(VAR)
 # forwards rather than of shell references.
+# Keyed by CI goal, because each recipe is its own surface: asking ci-pic's
+# recipe to route the mutation limits, or the reverse, would fail on a goal
+# that correctly does not run that consumer.
 CI_GOAL_RESOURCE_ROUTES = {
-    "pic12f675-test": {"PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)"},
+    "ci-pic": {
+        "pic12f675-test": {"PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)"},
+    },
+    "ci-mutation": {
+        "test-mutation": {
+            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
+            "PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)",
+        },
+    },
 }
 
 for workflow_name, expected in (
@@ -1502,32 +1513,31 @@ if check(isinstance(attiny_job, dict), "ci.yml: required job 'attiny202' is miss
         "ci.yml: attiny202 job must retain one separately routed soak",
     )
 
+# Exactly one normal-CI path may run mutants, and it must be the fully
+# provisioned one. The question is asked by REACHABILITY, not by goal name: a
+# wrapper hides the inner goal, and `test-long` carries mutation too, so
+# matching literals would miss both a second wrapper and a folded-in aggregate.
 mutation_invocations = [
     invocation for invocation in ci_make_invocations
-    if "test-mutation" in invocation[4][0]
+    if any(target_reaches(goal, "test-mutation") for goal in invocation[4][0])
 ]
 check(
     len(mutation_invocations) == 1,
-    f"ci.yml: direct test-mutation invocation count is "
-    f"{len(mutation_invocations)}, expected 1",
+    f"ci.yml: {len(mutation_invocations)} Make invocations reach test-mutation, "
+    "expected 1",
 )
 if len(mutation_invocations) == 1:
     job_id, idx, step, command_count, parsed, tokens = mutation_invocations[0]
-    expected_assignments = {
-        "STRICT_TOOLS": "1",
-        "MUTATION_ALLOW_SKIP": "0",
-        "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
-        "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
-        "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
-        "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
-    }
+    expected_mutation_pins = dict(XC8_PIC_REFS)
+    expected_mutation_pins["XT_STATIC_RAM_LIMIT"] = \
+        CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"]
+    expected_mutation_pins["PIC12F675_DATA_LIMIT"] = \
+        CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"]
     check(
         job_id == "pic" and not parsed[2]
-        and parsed[:2] == (("test-mutation",), expected_assignments),
-        "ci.yml: the one mutation command is not the canonical fail-closed "
-        f"pic invocation: {' '.join(tokens)}",
+        and parsed[:2] == (("ci-mutation",), expected_mutation_pins),
+        "ci.yml: the one mutation command is not the canonical pinned "
+        f"ci-mutation invocation: {' '.join(tokens)}",
     )
     check(
         command_count == 1,
@@ -1543,15 +1553,32 @@ if len(mutation_invocations) == 1:
         "ci.yml: pic mutation gate may continue after failure",
     )
 
-mutation_bearing_invocations = [
-    invocation for invocation in ci_make_invocations
-    if any(goal in {"test-mutation", "test-long"} for goal in invocation[4][0])
-]
-check(
-    mutation_bearing_invocations == mutation_invocations,
-    "ci.yml: a normal-CI job invokes mutation-bearing test-long in addition "
-    "to the one direct mutation gate",
-)
+    # The fail-closed policy the step used to carry now lives in the recipe.
+    # Asserting nothing here would retire the one check that makes this a gate
+    # rather than a report: a skipped mutant must fail, on every substrate.
+    mutation_recipe = ci_goal_commands("ci-mutation")
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in mutation_recipe
+        ) == ((
+            ("test-mutation",),
+            dict(MAKE_PIC_REFS, STRICT_TOOLS="1", MUTATION_ALLOW_SKIP="0"),
+        ),)
+        and not any(duplicate for _, _, duplicate in mutation_recipe),
+        "Makefile: ci-mutation is not the canonical fail-closed mutation run: "
+        + " | ".join(" ".join(goals) for goals, _, _ in mutation_recipe),
+    )
+    check(
+        sorted(ci_goal_pins("ci-mutation")) == sorted(
+            list(XC8_PIC_REFS) + ["XT_STATIC_RAM_LIMIT", "PIC12F675_DATA_LIMIT"]
+        ),
+        "Makefile: ci-mutation does not refuse every pin its callers supply: "
+        f"{ci_goal_pins('ci-mutation')}",
+    )
+    check_resource_routes(
+        mutation_recipe, "Makefile ci-mutation", CI_GOAL_RESOURCE_ROUTES["ci-mutation"]
+    )
 
 stress_job = ci_jobs.get("stress") if isinstance(ci_jobs, dict) else None
 if check(isinstance(stress_job, dict), "ci.yml: required job 'stress' is missing"):
@@ -1709,7 +1736,9 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
         "Makefile: ci-pic does not refuse every pin its callers supply: "
         f"{ci_goal_pins('ci-pic')}",
     )
-    check_resource_routes(recipe_commands, "Makefile ci-pic", CI_GOAL_RESOURCE_ROUTES)
+    check_resource_routes(
+        recipe_commands, "Makefile ci-pic", CI_GOAL_RESOURCE_ROUTES["ci-pic"]
+    )
 
     expected_uploads = {
         "firmware-pic10f322": "build_pic10f322/*.hex",

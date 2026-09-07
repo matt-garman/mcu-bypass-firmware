@@ -342,18 +342,18 @@ jobs:
           path: third_party/yasimavr/venv
           key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
-      # MUTATION_ALLOW_SKIP=0 covers EVERY substrate's mutants: the driver's
-      # PIC10F320 and ATtiny202 subsets each sit behind their own tool probe, so
-      # without fail-closed mode a missing toolchain would report those mutants
-      # "skipped" and still exit green. This job asserted all of them above, so
-      # nothing may skip.
-      - name: Fail-closed mutation gate (make test-mutation)
+      # Fail-closed mutation policy is the goal's, not this step's: the
+      # Makefile records why a skipped mutant must fail here, next to the
+      # command that sets it. This job asserted every substrate's toolchain
+      # above, so nothing may skip. The step supplies only what this runner
+      # installed and the independent CI policy pins.
+      - name: Fail-closed mutation gate (make ci-mutation)
         if: >-
           github.event_name == 'push' ||
           github.event_name == 'schedule' ||
           github.event_name == 'workflow_dispatch'
         run: |
-          make test-mutation STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 \
+          make ci-mutation \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8" \
             PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \

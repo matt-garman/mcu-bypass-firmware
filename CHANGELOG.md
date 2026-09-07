@@ -109,6 +109,17 @@ historical records and are not retroactively compacted by this policy.
   step is folded away. Both are fixed structurally and recorded in the design
   doc.
 
+  The mutation gate followed, and those seeded edges paid for themselves. The
+  rule that exactly one normal-CI path may run mutants was a match against the
+  literal goal names `test-mutation` and `test-long`; it is now a reachability
+  question -- which invocations can reach `test-mutation` at all -- which also
+  catches a second wrapper rather than only a second literal. The fail-closed
+  policy itself (`MUTATION_ALLOW_SKIP=0`, so a mutant that skips for want of a
+  toolchain fails instead of passing green) moved into `ci-mutation` with the
+  reasoning beside it. Both replacements were checked against deliberately
+  broken trees rather than assumed: a stray second mutation path and a deleted
+  `MUTATION_ALLOW_SKIP=0` are each reported by name.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

@@ -3383,7 +3383,13 @@ ci-pic:
 		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)"
 
 # MUTATION_ALLOW_SKIP=0 is the whole point of running this separately: a
-# mutation lane that skips because a prerequisite is missing must fail.
+# mutation lane that skips because a prerequisite is missing must fail. It
+# covers EVERY substrate's mutants, because the driver's PIC10F320 and
+# ATtiny202 subsets each sit behind their own tool probe: without fail-closed
+# mode a missing toolchain reports those mutants "skipped" and the gate still
+# exits green, which is the one outcome a mutation gate must never produce.
+# The caller is expected to have asserted all of those toolchains present --
+# the six pins below are how it says which installation it asserted.
 ci-mutation:
 	$(call ci_pin,PIC_CC)
 	$(call ci_pin,PIC_DFP)
