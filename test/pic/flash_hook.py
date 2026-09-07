@@ -124,8 +124,13 @@ def install_unsealed_control(module, target, image_path):
     if target in ("ipecmd", "java runtime"):
         original = module.open_identity
 
-        def hooked(path, label, max_bytes, executable=False):
-            handle = original(path, label, max_bytes, executable=executable)
+        # Signature-transparent on purpose: open_identity also decides whether
+        # an object is origin-sensitive, and a wrapper that silently dropped
+        # that keyword would fail the control with a TypeError rather than
+        # exercising it.
+        def hooked(path, label, max_bytes, executable=False, **kwargs):
+            handle = original(path, label, max_bytes, executable=executable,
+                              **kwargs)
             if label == target:
                 os.close(handle["consume_fd"])
                 handle["consume_fd"] = handle["fd"]

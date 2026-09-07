@@ -721,7 +721,32 @@ assert_rejects "an older MPLAB X" "this helper supports 6.20"
 
 new_case
 program_run 'noversion:1'
-assert_rejects "an unrecognizable version banner" "no recognizable MPLAB X version banner"
+assert_rejects "ipecmd help that carries no version line" \
+	"carried no recognizable version line"
+
+# Real ipecmd names itself in its help header and states its version once, as a
+# bare "Version v6.20" trailer; it never prints the token "MPLAB" there at all.
+# A stub that invented an "MPLAB X IPE" banner kept this suite green while the
+# helper's pin rejected every real ipecmd, so the shapes are asserted directly.
+new_case
+program_run ''
+check "the version pin accepts a real ipecmd help trailer" \
+	"$([ "$RC" -eq 0 ] && echo 1 || echo 0)"
+check "the retained probe transcript is the help output, not an invented banner" \
+	"$(python3 -c 'import base64,json,sys
+r = json.load(open(sys.argv[1]))
+t = base64.b64decode(r["ipe_version_probe_base64"]).decode("ascii", "replace")
+print(1 if ("IPECMD COMMAND LINE HELP" in t and "Version v6.20" in t
+            and "MPLAB" not in t) else 0)' "$EVIDENCE/reservation.json")"
+
+# A tool that never started is a different fault from a tool of the wrong
+# version, and must not be reported as one: the JVM trace below names the ipecmd
+# class, which is precisely why naming that class cannot count as having run.
+new_case
+program_run 'noipecmd:1'
+assert_rejects "a programmer that never started" "the named tool did not run"
+check "that refusal quotes what the tool actually printed" \
+	"$([[ "$OUT" == *"NoClassDefFoundError"* ]] && echo 1 || echo 0)"
 
 new_case
 mkdir -p "$EVIDENCE"
@@ -749,9 +774,18 @@ JAVA="$ROOT/test/pic/fake_java.py"
 
 # A jar is data, never executed directly, so it is deliberately not +x: a helper
 # that required the executable bit here would reject every real ipecmd.jar.
+#
+# The layout mirrors an installed MPLAB X, because for a jar the LOCATION is
+# load-bearing: a real JVM resolves the manifest Class-Path relative to the
+# canonical jar path, and a real ipecmd.jar is a stub that reaches about two
+# hundred sibling jars that way. dep.marker stands in for that tree, and
+# fake_java refuses to run a jar it cannot reach the marker from.
 jar_case() {
 	new_case
-	JAR="$CASE_DIR/ipecmd.jar"
+	JAR="$CASE_DIR/mplab_platform/mplab_ipe/ipecmd.jar"
+	mkdir -p "$CASE_DIR/mplab_platform/mplab_ipe" \
+		"$CASE_DIR/mplab_platform/mplablibs"
+	: > "$CASE_DIR/mplab_platform/mplablibs/dep.marker"
 	cp -- "$FAKE" "$JAR"
 	chmod 0644 "$JAR"
 }
@@ -770,9 +804,23 @@ check "the reservation records the jar form" \
 	"$([ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["programmer_kind"])' "$EVIDENCE/reservation.json")" = jar ] && echo 1 || echo 0)"
 check "the reservation pins the Java runtime that ran the jar" \
 	"$(python3 -c 'import hashlib,json,sys; r=json.load(open(sys.argv[1])); print(1 if r["programmer_java_sha256"]==hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest() else 0)' "$EVIDENCE/reservation.json" "$JAVA")"
-check "the reservation records immutable jar and Java consumption" \
-	"$([ "$(reservation_field programmer_pinning)" = sealed ] \
+# Sealing a jar destroys the very Class-Path it loads through, so the jar is
+# addressed by descriptor and NOT sealed. The record has to say so rather than
+# imply a guarantee the jar form cannot make: its sibling jars are the code that
+# actually drives the programmer, and nothing here can pin them.
+check "the reservation records descriptor-addressed, unsealed jar consumption" \
+	"$([ "$(reservation_field programmer_pinning)" = source-descriptor ] \
 		&& [ "$(reservation_field programmer_java_pinning)" = sealed ] && echo 1 || echo 0)"
+check "the reservation states whether the operator could alter the jar" \
+	"$([ "$(reservation_field programmer_operator_writable)" = True ] && echo 1 || echo 0)"
+
+# The regression that a sealed jar would reproduce exactly: the jar is present
+# and correct, but nothing it needs is reachable from where it was handed over.
+jar_case
+rm -f "$CASE_DIR/mplab_platform/mplablibs/dep.marker"
+jar_run ''
+assert_rejects "a jar whose class path resolves to nothing" \
+	"the named tool did not run"
 
 jar_case
 run_helper '' program --image "$IMAGE" --ipecmd "$JAR" \
@@ -1059,10 +1107,27 @@ decoy_sha=$(sha256_of "$CASE_DIR/decoy.py")
 rewrite_after_final_check "[[\"$CASE_DIR/decoy.py\", \"$JAR\"]]"
 jar_run ''
 hook_reset
-check "a jar rewritten in place after its final hash is never loaded" \
-	"$(decoy_silent)"
-check "the sealed jar performed the write instead" \
-	"$([ "$(writes)" = 1 ] && [ "$(device_field programs)" = 1 ] && echo 1 || echo 0)"
+# The jar is the ONE object here that a rewrite of its own inode inside the
+# final window does reach, because it is addressed by its retained source
+# descriptor rather than by a sealed copy -- and it has to be, since sealing
+# strips the manifest Class-Path it loads through and it could not start at all.
+# So this case asserts the honest boundary rather than a guarantee the jar form
+# cannot make. Note what is NOT claimed below: the decoy here is inert, and a
+# hostile replacement would have driven the programmer with the write argv. What
+# survives is that the transaction refuses to call that a success and names the
+# cause. The exposure is also narrower than it looks -- a real ipecmd.jar loads
+# its ~200 sibling jars through that Class-Path, an attacker who can rewrite the
+# jar can rewrite those, and no sealing this helper ever did covered them.
+check "a jar rewritten in place inside the final window does reach the JVM" \
+	"$([ -s "$EVIDENCE/program.log" ] \
+		&& grep -q 'DECOY JAR RAN' "$EVIDENCE/program.log" && echo 1 || echo 0)"
+check "a rewritten jar can never publish a PASS" \
+	"$([ "$RC" -ne 0 ] && [[ "$OUT" == *"status=FAIL"* ]] \
+		&& [[ "$OUT" != *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the FAIL names the jar that changed under the transaction" \
+	"$([[ "$OUT" == *"changed on disk between its identity check"* ]] && echo 1 || echo 0)"
+check "the displaced guarded writer never programmed the device" \
+	"$([ "$(writes)" = 0 ] && [ "$(device_field programs)" = 0 ] && echo 1 || echo 0)"
 check "the jar race changed bytes without replacing the inode" \
 	"$([ "$(inode_of "$JAR")" = "$before_inode" ] \
 		&& [ "$(sha256_of "$JAR")" = "$decoy_sha" ] && echo 1 || echo 0)"

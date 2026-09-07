@@ -33,6 +33,26 @@ ERASED = 0x3FFF
 # a plausible old instruction rather than erased flash.
 STALE_WORD_VALUE = 0x1234
 
+# What real MPLAB X 6.20 `ipecmd -?` prints, reduced but not reshaped. It never
+# emits the token "MPLAB" here: it identifies itself in a header and a usage
+# line, states its version exactly once as a bare "Version v6.20" trailer, and
+# exits 50. An earlier version of this stub invented a
+# "Microchip MPLAB X IPE v6.20" banner and the helper's version pin was written
+# to match the invention, so every lane passed while the pin rejected every real
+# ipecmd in existence. Keep this faithful to the tool, not to the helper.
+HELP_RULE = "-" * 102
+HELP_TITLE = " " * 36 + "IPECMD COMMAND LINE HELP"
+HELP_USAGE = ("Usage: ipecmd <deviceName> <toolName> [Options]  - Note: Device "
+              "and Tool are mandatory commands")
+HELP_OPTION = "?                    Help Screen" + " " * 51 + "Not Shown"
+VERSION_TRAILER = "Version v%s"
+HELP_COPYRIGHT = "Copyright (C) Microchip Technology Inc. 2013"
+HELP_EXIT = 50
+
+# The operation output below is NOT modelled on a real capture -- no read or
+# program transcript from real ipecmd has been retained yet -- so this banner is
+# this stub's own invention and is marked as such. The helper parses only the
+# device id and revision out of it. See HARDWARE_VALIDATION_LOG.md.
 BANNER = "Microchip MPLAB X IPE v%s"
 
 
@@ -397,11 +417,22 @@ def main(argv):
     version = fault.get("version", "6.20")
 
     if "-?" in argv:
-        if fault.get("noversion") is not None:
-            sys.stdout.write("usage: ipecmd [options]\n")
-        else:
-            sys.stdout.write(BANNER % version + "\nusage: ipecmd [options]\n")
-        return 0
+        # `noipecmd` models the tool never starting at all -- for the jar form,
+        # a JVM whose class path did not resolve. The trace names the ipecmd
+        # class, so it is exactly the output that must NOT be read as ipecmd
+        # having run.
+        if fault.get("noipecmd") is not None:
+            sys.stdout.write(
+                "Error: Unable to initialize main class "
+                "com.microchip.mplab.ipecmd.IPECMD\n"
+                "Caused by: java.lang.NoClassDefFoundError: "
+                "org/apache/commons/cli/Options\n")
+            return 1
+        lines = [HELP_RULE, HELP_TITLE, HELP_RULE, HELP_USAGE, HELP_OPTION]
+        if fault.get("noversion") is None:
+            lines += ["", VERSION_TRAILER % version, "", HELP_COPYRIGHT]
+        sys.stdout.write("\n".join(lines) + "\n")
+        return HELP_EXIT
 
     export_path = None
     image_path = None

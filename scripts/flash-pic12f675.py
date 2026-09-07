@@ -111,9 +111,17 @@ IMAGE_BASENAME_RE = re.compile(
     r"^bypass-pic12f675-(cd4053_simple|cd4053_with_mute|tq2_l2_5v_relay)\.hex$")
 CHECKSUM_ENTRY_RE = re.compile(
     r"^([0-9a-f]{64}) [ *]([A-Za-z0-9][A-Za-z0-9._-]*)$")
-# Version tokens are harvested only from banner lines that name MPLAB, so an
+# Real MPLAB X 6.20 ipecmd does not print the token "MPLAB" in its help output
+# at all. It identifies itself in a header line and a usage line, and states its
+# version exactly once, as a bare "Version v6.20" trailer. Provenance and
+# version are therefore two separate checks. The identity anchor is deliberately
+# narrow: a JVM that fails to start ipecmd prints a stack trace naming the
+# com.microchip.mplab.ipecmd class, which must NOT be mistaken for the tool
+# having run. Version tokens are harvested only from the version line, so an
 # unrelated Java or JRE version in the same output cannot satisfy the pin.
-IPE_BANNER_RE = re.compile(r"(?im)^.*\bMPLAB\b.*$")
+IPE_IDENTITY_RE = re.compile(
+    r"(?im)^[ \t]*(?:usage:[ \t]*ipecmd\b.*|.*IPECMD COMMAND LINE HELP.*)$")
+IPE_BANNER_RE = re.compile(r"(?im)^[ \t]*version\b.*$")
 IPE_VERSION_RE = re.compile(r"\bv?(\d+\.\d+)(?:\.\d+)*\b")
 DEVICE_ID_RE = re.compile(r"(?im)^\s*device\s+id\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
 DEVICE_REVISION_RE = re.compile(
@@ -128,6 +136,10 @@ MAX_FINALIZE_ATTEMPTS = 64
 # few and counts the rest, so result.json stays a readable forensic record
 # rather than a thousand-line list.
 MAX_REPORTED_WORDS = 8
+# A refusal that only reports an exit code cannot be acted on. Version-probe
+# refusals quote a bounded tail of what the tool actually printed instead.
+PROBE_EXCERPT_LINES = 12
+PROBE_EXCERPT_CHARS = 800
 
 RESERVATION_NAME = "reservation.json"
 RESULT_NAME = "result.json"
@@ -770,7 +782,8 @@ def sealed_copy(data, name, label):
     return fd
 
 
-def open_identity(path, label, max_bytes, executable=False):
+def open_identity(path, label, max_bytes, executable=False,
+                  origin_sensitive=False):
     """Record a source identity and select immutable child-consumption bytes.
 
     Hashing a path and then handing that same path to a child leaves a window:
@@ -779,6 +792,11 @@ def open_identity(path, label, max_bytes, executable=False):
     copies. A native launcher keeps its source descriptor only if this operator
     cannot alter the inode, preserving origin-relative runtime behavior. The
     source stays open so replacement or editing is still diagnosed.
+
+    `origin_sensitive` marks an object whose own location is part of how it
+    resolves what it loads, even though it is neither executed nor an ELF. A
+    JAR is the case that matters here; see the branch below for why sealing one
+    makes it unrunnable.
     """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -792,13 +810,13 @@ def open_identity(path, label, max_bytes, executable=False):
         if executable and info.st_mode & 0o111 == 0:
             raise FlashError("%s is not executable: %s" % (label, path))
         magic = os.pread(fd, 4, 0) if executable else b""
+        operator_writable = info.st_uid == os.geteuid() \
+            or os.access(descriptor_path(fd), os.W_OK)
         if magic == b"\x7fELF":
             # Native launchers commonly use /proc/self/exe or ELF $ORIGIN for
             # adjacent libraries. A memfd changes that origin. Preserve the
             # source descriptor only when this operator cannot make the inode
             # writable or chmod it; pathname replacement remains harmless.
-            operator_writable = info.st_uid == os.geteuid() \
-                or os.access(descriptor_path(fd), os.W_OK)
             if operator_writable:
                 raise FlashError(
                     "%s is a native executable whose origin must be preserved, "
@@ -808,6 +826,27 @@ def open_identity(path, label, max_bytes, executable=False):
             digest = sha256_fd(fd, label, max_bytes)
             consume_fd = os.dup(fd)
             pinning = "operator-read-only-source"
+        elif origin_sensitive:
+            # A JAR is opened by the JVM, which CANONICALISES the pathname it is
+            # handed and resolves every relative manifest Class-Path entry
+            # against the directory that canonical path sits in. A sealed
+            # anonymous copy has no such directory -- /proc/self/fd/<n> of a
+            # memfd links to "/memfd:<name> (deleted)" -- so a sealed jar loads
+            # with an EMPTY class path. Real ipecmd.jar is a manifest stub whose
+            # Class-Path names about two hundred sibling jars, so sealing it did
+            # not merely weaken the jar form, it made it unable to start at all.
+            # The source descriptor still canonicalises to the real jar, so
+            # descriptor addressing survives; only the sealing is dropped.
+            #
+            # Unlike the native launcher above, an operator-writable inode is
+            # recorded rather than refused. Refusing would buy nothing: those
+            # sibling jars are the code that actually drives the programmer and
+            # this helper cannot pin them by any means, so the jar form has
+            # never been able to make the guarantee a refusal would imply. The
+            # reservation states what the run did and did not pin.
+            digest = sha256_fd(fd, label, max_bytes)
+            consume_fd = os.dup(fd)
+            pinning = "source-descriptor"
         else:
             consume_fd, digest = sealed_copy_from_fd(
                 fd, os.path.basename(path), label, max_bytes, executable)
@@ -824,6 +863,7 @@ def open_identity(path, label, max_bytes, executable=False):
         "max_bytes": max_bytes,
         "consume_fd": consume_fd,
         "pinning": pinning,
+        "operator_writable": operator_writable,
     }
 
 
@@ -837,11 +877,12 @@ def programmer_identity(path, java):
     """
     invoked = os.path.abspath(path)
     resolved = os.path.realpath(invoked)
+    is_jar = resolved.endswith(".jar")
     handle = open_identity(resolved, "ipecmd", MAX_TOOL_BYTES,
-                           executable=not resolved.endswith(".jar"))
+                           executable=not is_jar, origin_sensitive=is_jar)
     java_handle = None
     try:
-        if resolved.endswith(".jar"):
+        if is_jar:
             kind = "jar"
             java_path = which(java)
             if java_path is None:
@@ -882,6 +923,7 @@ def programmer_identity(path, java):
         "pass_fds": tuple(h["consume_fd"] for h in handles),
         "handles": handles,
         "pinning": handle["pinning"],
+        "operator_writable": handle["operator_writable"],
         "java_pinning": None if java_handle is None else java_handle["pinning"],
     }
 
@@ -947,26 +989,55 @@ def invoke(programmer, argv, timeout, label, pass_fds=()):
                     pass_fds=tuple(programmer["pass_fds"]) + tuple(pass_fds))
 
 
+def probe_excerpt(text):
+    """A bounded, single-line slice of tool output, for a refusal message.
+
+    The version line is the last thing real ipecmd help prints and the cause of
+    a JVM start-up failure is the last thing a stack trace prints, so the tail
+    is the informative end in both of the cases this quotes.
+    """
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "<the tool printed nothing>"
+    joined = " | ".join(lines[-PROBE_EXCERPT_LINES:])
+    if len(joined) > PROBE_EXCERPT_CHARS:
+        joined = joined[:PROBE_EXCERPT_CHARS] + "..."
+    return joined
+
+
 def probe_version(programmer):
     """Pin the writer to MPLAB X 6.20 before any device access.
 
     MPLAB X 6.25 dropped PICkit 3 support, and the argument spellings this tool
     constructs are validated against 6.20 only. The probe is help output: it
     names no part, no tool and no file, so it cannot reach the device.
+
+    It is also the first thing that runs the named tool at all, so it is where a
+    programmer that cannot start is diagnosed. That is a separate refusal from a
+    version mismatch, and it quotes what was actually printed: "no version
+    banner" alone sent an operator hunting for a version problem when the real
+    fault was that ipecmd never ran.
     """
     argv = programmer["prefix"] + ["-?"]
     exit_code, output = invoke(programmer, argv, VERSION_PROBE_TIMEOUT_S,
                                "ipecmd version probe")
     text = output.decode("ascii", "replace")
+    if not IPE_IDENTITY_RE.search(text):
+        raise FlashError(
+            "the ipecmd version probe produced no ipecmd help output, so the "
+            "named tool did not run (probe exit %d). For a .jar this is "
+            "normally its Java runtime failing to start it. No device command "
+            "was issued. The tool printed: %s"
+            % (exit_code, probe_excerpt(text)))
     found = set()
     for line in IPE_BANNER_RE.findall(text):
         for version in IPE_VERSION_RE.findall(line):
             found.add(version)
     if not found:
         raise FlashError(
-            "ipecmd printed no recognizable MPLAB X version banner; this "
-            "helper supports MPLAB X %s only (probe exit %d)"
-            % (IPE_VERSION, exit_code))
+            "ipecmd help carried no recognizable version line; this helper "
+            "supports MPLAB X %s only (probe exit %d). The tool printed: %s"
+            % (IPE_VERSION, exit_code, probe_excerpt(text)))
     if found != {IPE_VERSION}:
         raise FlashError(
             "ipecmd reports MPLAB X version(s) %s; this helper supports %s "
@@ -1716,6 +1787,10 @@ def command_program(args, helper_path):
         # These are consumption mechanisms, not new release identities. Data
         # and scripts are sealed copies; a native launcher may retain its origin
         # only when this operator neither owns nor can write its source inode.
+        # A jar is addressed by descriptor but never sealed, because sealing
+        # destroys the manifest Class-Path its own dependencies resolve through;
+        # programmer_operator_writable is retained so the record states plainly
+        # whether the operator could have altered the tool that ran.
         "image_pinning": "sealed",
         "image_sha256": bundle["image_sha256"],
         "image_base64": base64.b64encode(bundle["image_data"]).decode("ascii"),
@@ -1731,6 +1806,7 @@ def command_program(args, helper_path):
         "programmer_realpath": programmer["realpath"],
         "programmer_sha256": programmer["sha256"],
         "programmer_pinning": programmer["pinning"],
+        "programmer_operator_writable": programmer["operator_writable"],
         "programmer_java": programmer["java"],
         "programmer_java_sha256": programmer["java_sha256"],
         "programmer_java_pinning": programmer["java_pinning"],
