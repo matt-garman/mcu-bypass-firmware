@@ -1019,10 +1019,18 @@ def show_command(label, argv):
         if index < 0:
             continue
         token = arg[index:]
+        # Only the descriptor itself is a symlink. An export names a path UNDER
+        # a directory descriptor -- /proc/self/fd/9/baseline.hex -- so readlink
+        # on the whole token fails and would report a perfectly good descriptor
+        # as unresolvable. Resolve the descriptor and re-attach the remainder.
+        number, _, trailing = token[len(DESCRIPTOR_DIR) + 1:].partition("/")
         try:
-            sys.stderr.write("    %s -> %s\n" % (token, os.readlink(token)))
+            target = os.readlink("%s/%s" % (DESCRIPTOR_DIR, number))
         except OSError:
-            sys.stderr.write("    %s -> <unresolvable>\n" % token)
+            target = "<unresolvable>"
+        if trailing:
+            target = "%s/%s" % (target, trailing)
+        sys.stderr.write("    %s -> %s\n" % (token, target))
 
 
 def invoke(programmer, argv, timeout, label, pass_fds=()):

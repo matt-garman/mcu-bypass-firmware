@@ -59,8 +59,14 @@ The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
 ordering assertions to it, so a job's goal, that job's detection, and the policy
 assertions the step used to satisfy all move together -- the last against the
-goal's recipe, or they retire silently. `verify`, `stress`, `pic` and the
-mutation gate are converted; `attiny202` and `build-matrix` remain. Two hazards
+goal's recipe, or they retire silently. `verify`, `stress`, `pic`, the mutation
+gate and `attiny202` are converted; `build-matrix` remains. Note that one job
+does not always mean one goal: `attiny202` splits into a DFP half and a
+yasimavr half because the workflow provisions those inputs between them, and
+the gate asserts the build half runs first. Run every new goal before trusting
+it: wiring the ATtiny202 lane found a `set -o pipefail` bashism that had
+shipped dormant in the `CI_GOALS` commit, because Make recipes run under
+`/bin/sh` while a workflow `run:` block runs under bash. Two hazards
 the `pic` conversion exposed, both recorded in the design doc: a goal's recipe
 sub-makes are invisible to Make's prerequisite database, so reachability checks
 asked through a wrapper pass vacuously unless the edge set is seeded with them;
@@ -593,6 +599,16 @@ statements below are now the definition rather than a summary of one:
   in `read_argv`/`write_argv` remain modelled on the same invention that hid
   these two. Capture a real `-GF` export and a real program transcript before
   trusting the rest of the transaction; expect the next failure there.
+  The bench run that followed found the next two immediately, as predicted:
+  `-P` must spell the part `12F675`, because `ipecmd` supplies the `PIC` prefix
+  itself and rejects the prefixed form, and the helper offered no way to ask the
+  programmer for target Vdd, so a board without its own supply could not be read
+  at all (`could not detect target voltage VDD`). `PART_ARG`, `--power tool`
+  (`-W`) and a `--show-commands` echo now cover all three, and the argument
+  spellings are asserted against the real ones. Still unproven past the reads:
+  no successful `-GF` export or program transcript from real `ipecmd` has been
+  retained, so the export shape and the device-id/revision parsing remain
+  modelled rather than observed.
 - **9 - GP2's readback margin.** The port-follows-shadow guard re-reads `GPIO`
   against the SRAM shadow every tick, and GP2 is the one output whose input
   buffer is a Schmitt Trigger (VIH min 0.8*VDD) rather than TTL. On
@@ -832,7 +848,7 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
-| T2-ci-parity | Make local/remote CI parity structural | 2 | 3 h | High - a failed remote gate costs a 25-hour release |
+| T2-ci-parity | Make local/remote CI parity structural | 2 | 2-3 h | High - a failed remote gate costs a 25-hour release |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

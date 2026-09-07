@@ -812,8 +812,14 @@ check "--show-commands completes the transaction unchanged" \
 	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
 check "--show-commands echoes every invocation" \
 	"$([ "$(grep -c '^+ ' "$CASE_DIR/stderr.txt")" = 5 ] && echo 1 || echo 0)"
+# An export names a path UNDER a directory descriptor, so resolving the whole
+# token fails and reports a good descriptor as unresolvable. Every one printed
+# must resolve, or the echo misleads exactly when it is being relied on.
 check "--show-commands resolves the descriptor pathnames it printed" \
-	"$(grep -q ' -> ' "$CASE_DIR/stderr.txt" && echo 1 || echo 0)"
+	"$(grep -q ' -> /' "$CASE_DIR/stderr.txt" \
+		&& ! grep -q '<unresolvable>' "$CASE_DIR/stderr.txt" && echo 1 || echo 0)"
+check "--show-commands resolves a path under a directory descriptor" \
+	"$(grep -qE ' -> /.*/baseline\.hex$' "$CASE_DIR/stderr.txt" && echo 1 || echo 0)"
 check "the echo stays on stderr, out of the result lines" \
 	"$(grep -q '^+ ' "$CASE_DIR/stdout.txt" && echo 0 || echo 1)"
 

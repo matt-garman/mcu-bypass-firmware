@@ -243,7 +243,18 @@ that failed before that.
 
 If `ipecmd` reports `could not detect target voltage VDD`, the board is not
 powering itself and the programmer was not asked to: connect the board's supply,
-or pass `--power tool`. Note that `-P` names the part as `12F675`: `ipecmd`
+or pass `--power tool`.
+
+`--power tool` cannot choose a voltage. Every VDD/VPP option `ipecmd` 6.20
+exposes (`-A`, `-N`, `-V`, `-X`) is marked *Applicable only for PM3*, so with a
+PICkit 3 `-W` is a bare flag that asks for the device's nominal Vdd and nothing
+else. A PICkit 3 derives that rail from USB and cannot boost above it, so if
+`ipecmd` reports `trying to supply 5.000000 volts, but the target VDD is
+measured to be 4.750000 volts`, the supply side is the problem and no argument
+will change it — the USB rail is already below 5&nbsp;V, or the wiring drops the
+rest. Use a powered hub or a different port, shorten the ICSP leads, add a
+0.1&nbsp;µF cap across VDD/VSS at the part, or power the target externally and
+drop `--power tool`. That last option is the one this helper is built around. Note that `-P` names the part as `12F675`: `ipecmd`
 supplies the `PIC` prefix itself and rejects the prefixed spelling, exactly as it
 does for the PIC10F322 above. The full `PIC12F675` is still what the evidence
 records and what the tool transcript is matched against.
