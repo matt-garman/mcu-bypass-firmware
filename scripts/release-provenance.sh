@@ -33,6 +33,55 @@ release_tool_version_line() {
 	printf '%s\n' "$first_line"
 }
 
+# Identify the patched yasimavr build the ATtiny202 lane runs on.
+#
+# yasimavr has no --version flag that reports what this project actually
+# executes: the venv is built from a pinned upstream sdist plus the vendored
+# patches under third_party/yasimavr/patches, and two builds carrying the same
+# 0.1.6 version string can differ in the peripheral behaviour the soak depends
+# on. scripts/fetch_yasimavr.sh already records the identity that matters --
+# version, upstream sdist digest, patch-set digest -- in the venv stamp, and
+# rebuilds whenever any of the three changes. Read that rather than invent a
+# second notion of which yasimavr this is.
+#
+# Three of the 21 published images are ATtiny202 images, and yasimavr is the
+# only thing that ever executes them. A release that does not name it cannot
+# say what produced their dynamic evidence.
+release_yasimavr_build_line() {
+	if [ "$#" -ne 2 ]; then
+		printf 'FATAL: release_yasimavr_build_line requires a label and venv path\n' >&2
+		return 2
+	fi
+	local label=$1
+	local venv=$2
+	local stamp="$venv/.yasimavr.stamp"
+	local value
+
+	if [ ! -f "$stamp" ] || [ -L "$stamp" ] || [ ! -s "$stamp" ]; then
+		printf 'FATAL: cannot identify %s: %s is missing, empty, or not a regular file\n' \
+			"$label" "$stamp" >&2
+		return 1
+	fi
+	value=$(cat -- "$stamp") || {
+		printf 'FATAL: cannot identify %s: could not read %s\n' "$label" "$stamp" >&2
+		return 1
+	}
+	# One evidence row is one line with one tab separator, so a stamp carrying
+	# either would silently produce a second row or a third column.
+	case "$value" in
+		*$'\n'*|*$'\t'*)
+			printf 'FATAL: cannot identify %s: %s is not a single tab-free line\n' \
+				"$label" "$stamp" >&2
+			return 1 ;;
+	esac
+	if [ -z "${value//[[:space:]]/}" ]; then
+		printf 'FATAL: cannot identify %s: %s records no build signature\n' \
+			"$label" "$stamp" >&2
+		return 1
+	fi
+	printf '%s\n' "$value"
+}
+
 # Exact-equality test for an image-defining compiler's version pin.
 #
 # The predecessor of this check used shell substring patterns (*7.3.0*,

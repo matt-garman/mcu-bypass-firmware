@@ -263,10 +263,18 @@ than trusting whatever keys happen to be installed on the CI runner.
 
 From v0.9.12 on, `SHA256SUMS` covers the firmware images, the required
 programming helpers, **and** the release's own provenance: `QUALIFICATION`,
-`MANIFEST.md` and `README.md`. So one `gpg --verify` followed by one
+`MANIFEST.md`, `README.md` and `SOAK_KEY`. So one `gpg --verify` followed by one
 `sha256sum -c` authenticates both the firmware and the account of where it came
 from — the source commit, whether qualification was production or express, the
 soak duration, and the part-specific programming warnings.
+
+`SOAK_KEY` names what the soak result is valid for: the exact artifact each
+combination drove, the soak driver sources, and the tools that execute a soak.
+Its payload carries no version, date or commit, so two releases whose soak
+inputs are identical produce the same `soak_inputs_sha256` — which is what makes
+it possible to establish that a later release's soak would re-derive a result
+this one already holds. The commit that produced the record is on its result
+line, outside the hashed payload.
 
 Through **v0.9.11** the checksum list covered the images and the helper only.
 Those releases' provenance files sit outside their signatures and cannot be

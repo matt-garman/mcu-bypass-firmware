@@ -2637,6 +2637,13 @@ XT_SIM_VARIANT ?=
 XT_SIM_DRIVER   = test/avr/test_sim_attiny202.py
 XT_FAULT_DRIVER = test/avr/test_fault_attiny202.py
 XT_SOAK_DRIVER  = test/avr/test_soak_attiny202.py
+# What the ATtiny202 soak actually reads, declared the way every other soak lane
+# declares it. The driver is interpreted rather than compiled, so nothing builds
+# from this list -- it exists because the release has to be able to name the
+# harness that produced a soak result, and a Python driver's imports are
+# otherwise invisible to Make.
+XT_SOAK_DEPS    = $(XT_SOAK_DRIVER) test/avr/sim_attiny202.py \
+                test/avr/attiny202_fuses.py
 # Soak knobs (parity with the PIC soak's PIC10F322_SOAK_*). Default 1 h
 # simulated (~17 s
 # wall/variant in yasimavr fast mode); pass 86400000 for 24 h.
@@ -8040,7 +8047,7 @@ override RELEASE_HELPER_MAP := flash-pic12f675.py=scripts/flash-pic12f675.py
 # Adding a file here widens what the release signature covers. Removing one
 # narrows it, silently, for every future release: that is the edit to think
 # hardest about in this block.
-override RELEASE_PROVENANCE_FILES := QUALIFICATION MANIFEST.md README.md
+override RELEASE_PROVENANCE_FILES := QUALIFICATION MANIFEST.md README.md SOAK_KEY
 
 # --- nothing is staged: every part this repository builds is released ---------
 # There is no longer a "built but deliberately withheld" set. The PIC12F675 was

@@ -600,14 +600,14 @@ EOF
 	matrix_digest=${matrix_digest%% *}
 	resource_digest=$(sha256sum -- "$release/evidence/resource-tables.log")
 	resource_digest=${resource_digest%% *}
-	# Fifteen recorded tools, the count the verifier requires, written in the
+	# Sixteen recorded tools, the count the verifier requires, written in the
 	# same tab-separated form make-release.sh produces.
 	{
 		printf 'TOOLCHAIN format=1 source_commit=%s\n' "$sha"
-		for tool_index in $(seq 1 15); do
+		for tool_index in $(seq 1 16); do
 			printf 'fixture-tool-%s\t1.%s.0\n' "$tool_index" "$tool_index"
 		done
-		printf 'TOOLCHAIN_RESULT format=1 status=pass rows=15 source_commit=%s\n' \
+		printf 'TOOLCHAIN_RESULT format=1 status=pass rows=16 source_commit=%s\n' \
 			"$sha"
 	} > "$release/evidence/toolchain.txt"
 	toolchain_digest=$(sha256sum -- "$release/evidence/toolchain.txt")
@@ -634,8 +634,31 @@ EOF
 	write_evidence_index
 	index_digest=$(sha256sum -- "$release/evidence/INDEX")
 	index_digest=${index_digest%% *}
+	# The soak input key, in the exact shape make-release.sh seals: a payload that
+	# names each combination's driven image, the declared driver sources and the
+	# tools that execute a soak, then a terminal result carrying the payload's own
+	# digest. Nothing in the payload identifies the release, which is the property
+	# that lets two releases with identical inputs produce identical keys.
+	{
+		printf 'SOAK_KEY format=1\n'
+		printf 'duration_ms=%s\n' "$duration"
+		printf 'liveness_interval_ms=%s\n' "$liveness"
+		for soak_name in $(printf '%s\n' "${soak_names[@]}" | sort); do
+			printf 'combination\t%s\t%064d\n' "$soak_name" 0
+		done
+		printf 'driver\ttest/fixture_soak_driver.c\t%064d\n' 1
+		printf 'harness\tfixture-sim\t0.0.1\n'
+	} > "$release/SOAK_KEY.payload"
+	soak_key_digest=$(sha256sum -- "$release/SOAK_KEY.payload")
+	soak_key_digest=${soak_key_digest%% *}
+	{
+		cat -- "$release/SOAK_KEY.payload"
+		printf 'SOAK_KEY_RESULT format=1 status=pass combinations=%d drivers=1 harnesses=1 inputs_sha256=%s source_commit=%s\n' \
+			"${#soak_names[@]}" "$soak_key_digest" "$sha"
+	} > "$release/SOAK_KEY"
+	rm -f -- "$release/SOAK_KEY.payload"
 	cat > "$release/QUALIFICATION" <<EOF
-format=7
+format=8
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -643,6 +666,7 @@ source_dirty=$dirty
 soak_duration_ms=$duration
 soak_liveness_interval_ms=$liveness
 soak_combination_count=${#soak_names[@]}
+soak_inputs_sha256=$soak_key_digest
 pic12f675_matrix_sha256=$matrix_digest
 resource_tables_sha256=$resource_digest
 toolchain_sha256=$toolchain_digest
@@ -664,9 +688,11 @@ EOF
 			"$resource_digest"
 		printf -- '- **Evidence index:** `evidence/INDEX` (SHA-256 `%s`), %d retained files by role and terminal record\n' \
 			"$index_digest" "${#fixture_role[@]}"
+		printf -- '- **Soak input key:** `SOAK_KEY` (SHA-256 `%s`), %d combinations over 1 driver sources and 1 harnesses\n' \
+			"$soak_key_digest" "${#soak_names[@]}"
 		printf '\n## Toolchain\n\n'
 		printf -- '| tool | version |\n|---|---|\n'
-		for tool_index in $(seq 1 15); do
+		for tool_index in $(seq 1 16); do
 			printf -- '| fixture-tool-%s | 1.%s.0 |\n' "$tool_index" "$tool_index"
 		done
 		printf '\n## Images\n\n'
@@ -889,16 +915,35 @@ refresh_evidence_index() {
 # a provenance file to make the verifier reject it must NOT call this -- the
 # unsealed digest is part of what such an edit breaks in a real release.
 reseal_provenance() {
-	local provenance_names
+	local provenance_names provenance_name
 	provenance_names=$(make -s --no-print-directory -C "$ROOT" CC=: \
 		print-RELEASE_PROVENANCE_FILES)
 	(
 		cd "$release"
-		grep -v -E '  (QUALIFICATION|MANIFEST\.md|README\.md)$' SHA256SUMS > SHA256SUMS.tmp || true
-		mv SHA256SUMS.tmp SHA256SUMS
+		# The names to strip come from the same list they are re-added from. A
+		# hardcoded alternation here silently leaves a stale line behind -- and
+		# then a duplicate -- the first time the provenance set grows.
+		for provenance_name in $provenance_names; do
+			grep -v -F -- "  $provenance_name" SHA256SUMS > SHA256SUMS.tmp || true
+			mv SHA256SUMS.tmp SHA256SUMS
+		done
 		# shellcheck disable=SC2086
 		sha256sum -- $provenance_names >> SHA256SUMS
 	)
+}
+
+# Re-seal the soak key after a deliberate payload edit, so a case can exercise a
+# rule ABOUT the payload rather than tripping the digest that describes it. A
+# case attacking the digest itself must not call this.
+reseal_soak_key() {
+	local old_digest new_digest
+	old_digest=$(awk -F= '$1 == "soak_inputs_sha256" { print $2 }' \
+		"$release/QUALIFICATION")
+	new_digest=$(grep -v '^SOAK_KEY_RESULT ' "$release/SOAK_KEY" | sha256sum)
+	new_digest=${new_digest%% *}
+	sed -i "s/$old_digest/$new_digest/g" \
+		"$release/QUALIFICATION" "$release/MANIFEST.md" "$release/SOAK_KEY"
+	reseal_provenance
 }
 
 refresh_matrix_digest() {
@@ -1009,19 +1054,56 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=7\n' >> "$release/QUALIFICATION"
+printf 'format=8\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
-# Format 6 is the superseded length-attributed evidence contract. It is rejected
+# Format 7 is the superseded pre-soak-key contract. It is rejected
 # rather than accepted as a legacy mode because this verifier only runs on a
 # directory being staged or a tag being published.
 reset_fixture
-sed -i 's/^format=7$/format=6/' "$release/QUALIFICATION"
+sed -i 's/^format=8$/format=7/' "$release/QUALIFICATION"
 expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
-sed -i 's/^format=7$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=8$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
+
+# --- the soak input key ------------------------------------------------------
+# The key exists so a later release can establish that its own soak inputs are
+# identical and reuse the result. Everything below is a way that claim could be
+# made falsely.
+reset_fixture
+rm -f "$release/SOAK_KEY"
+expect_fail "missing soak input key" "SOAK_KEY is missing"
+
+# The digest QUALIFICATION carries is over the payload, so an edited payload
+# must not be able to keep the digest that described the old one.
+reset_fixture
+sed -i 's/^harness\tfixture-sim\t0.0.1$/harness\tfixture-sim\t9.9.9/' "$release/SOAK_KEY"
+expect_fail "edited soak key payload" \
+	"SOAK_KEY payload digest does not match QUALIFICATION"
+
+# A result line that is not last is a payload with content after the seal.
+reset_fixture
+printf 'harness\tsmuggled\t0.0.1\n' >> "$release/SOAK_KEY"
+expect_fail "content appended after the soak key result" \
+	"SOAK_KEY result is not its final line"
+
+# The property the whole scheme rests on: nothing in the payload may identify
+# the release. A key that names its own version can never equal another
+# release's, so reuse would be impossible and the field would be decoration.
+reset_fixture
+sed -i '1a version=v9.9.9' "$release/SOAK_KEY"
+reseal_soak_key
+expect_fail "release identity inside the soak key payload" \
+	"binds itself to a release identity"
+
+# The key must describe the soak that actually ran.
+reset_fixture
+sed -i '0,/^combination\t/{/^combination\t/d}' "$release/SOAK_KEY"
+reseal_soak_key
+expect_fail "soak key omitting a combination" \
+	"combinations, not the"
 
 reset_fixture
 printf 'changed resource evidence\n' >> "$release/evidence/resource-tables.log"
@@ -1510,7 +1592,7 @@ expect_fail "dry-run README without its warning" \
 	"dry-run README.md is missing its warning banner" --allow-dry-run
 
 # --- the toolchain table, which was authored prose until format=5 -------------
-# Fifteen rows of compiler and analyzer versions with no machine authority
+# Sixteen rows of compiler and analyzer versions with no machine authority
 # behind them. A wrong version there is a provenance error, and until this
 # binding existed it passed every gate.
 # A missing toolchain.txt is caught by the canonical evidence-set comparison,
@@ -1553,10 +1635,10 @@ reset_fixture
 sed -i 's/^| fixture-tool-1 | 1.1.0 |$/| fixture-tool-1 | 1.1.0 |\n| smuggled-tool | 0.0.1 |/' \
 	"$release/MANIFEST.md"
 expect_fail "unrecorded tool added to the rendered table" \
-	"MANIFEST.md toolchain table has 17 rows for 15 recorded tools"
+	"MANIFEST.md toolchain table has 18 rows for 16 recorded tools"
 
 reset_fixture
-sed -i 's/^TOOLCHAIN_RESULT format=1 status=pass rows=15/TOOLCHAIN_RESULT format=1 status=pass rows=14/' \
+sed -i 's/^TOOLCHAIN_RESULT format=1 status=pass rows=16/TOOLCHAIN_RESULT format=1 status=pass rows=15/' \
 	"$release/evidence/toolchain.txt"
 refresh_toolchain_digest
 expect_fail "toolchain result miscounts its own rows" \

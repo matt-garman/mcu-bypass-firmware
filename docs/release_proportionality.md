@@ -5,8 +5,8 @@
 A measurement of what the release path cost between `v0.9.9` and `v0.9.13`,
 and what recovers the confidence-per-hour that `v0.9.9` had without giving up
 any assurance about the firmware. Part 1 is a finding rather than a change --
-the continuous validation it proposed already existed. Part 4 has landed;
-Parts 2 and 3 are open. It is a companion to
+the continuous validation it proposed already existed. Part 4 has landed, and Part 3's
+first increment with it; Part 2 is open. It is a companion to
 [`docs/ci_parity.md`](ci_parity.md): that document closes the gap between what
 runs locally and what runs remotely; this one addresses how much runs at all,
 and when.
@@ -155,6 +155,15 @@ rehearses the artifact-commit *shape* before the soak, this one rehearses the
 staged *content*. Same phase, same argument.
 
 ## Part 3 - attest the soak, and reuse it when the inputs are identical
+
+**Increment 1 has landed.** `SOAK_KEY` is written and signed, `QUALIFICATION`
+carries `soak_inputs_sha256` at `format=8`, and `MANIFEST.md` publishes it.
+Nothing consumes the key yet; increment 2 is the reuse flag. The attestation is
+the published release itself rather than a separate signed store -- `SHA256SUMS`
+already covers `SOAK_KEY` and the release signature already signs it, so reuse
+needs no second trust root and no extra signing step. The limitation that buys:
+only a soak that reached a staged release is reusable, which is the failure
+`T2-release-stage-rehearsal` exists to prevent.
 
 The soak is the only part of the release whose cost is measured in days, and
 the record above shows it has been re-run on unchanged inputs three times in a

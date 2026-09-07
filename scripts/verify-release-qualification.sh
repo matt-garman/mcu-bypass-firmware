@@ -71,7 +71,7 @@ declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
 	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
 	pic12f675_matrix_sha256 resource_tables_sha256 toolchain_sha256 \
-	evidence_index_sha256)
+	evidence_index_sha256 soak_inputs_sha256)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -103,14 +103,17 @@ done
 # exact transcript payload by SHA-256 before appending its terminal result, which
 # the index commits through the existing qualification root. Releases through
 # v0.9.11 declare format=3 or format=1 or nothing at all and signed the firmware
-# only.
+# only. format=8 adds soak_inputs_sha256, which names what this release's soak
+# result is VALID FOR -- the driven images, the declared soak driver sources,
+# and the tools that execute a soak -- so a later release can establish that its
+# own inputs are identical instead of re-deriving a result it already has.
 #
 # Exactly one format is accepted here. This verifier runs on a freshly staged
 # directory and on the tag CI is publishing, never on a historical release, so
 # a compatibility branch would be unreachable code claiming a capability
 # nothing exercises. verify-release-images.sh, which IS run against published
 # directories, carries the era policy instead.
-[ "${q[format]}" = 7 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 8 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -123,6 +126,8 @@ done
 	|| die "QUALIFICATION evidence_index_sha256 is not a lowercase SHA-256"
 [[ "${q[toolchain_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION toolchain_sha256 is not a lowercase SHA-256"
+[[ "${q[soak_inputs_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
+	|| die "QUALIFICATION soak_inputs_sha256 is not a lowercase SHA-256"
 
 case "${q[release_mode]}" in
 	production)
@@ -445,7 +450,7 @@ toolchain_digest=$(sha256sum -- "$toolchain_log") \
 [ "${toolchain_digest%% *}" = "${q[toolchain_sha256]}" ] \
 	|| die "retained toolchain evidence digest does not match QUALIFICATION"
 
-toolchain_result="TOOLCHAIN_RESULT format=1 status=pass rows=15 source_commit=${q[source_commit]}"
+toolchain_result="TOOLCHAIN_RESULT format=1 status=pass rows=16 source_commit=${q[source_commit]}"
 mapfile -t toolchain_results < <(grep '^TOOLCHAIN_RESULT ' "$toolchain_log" || true)
 [ "${#toolchain_results[@]}" -eq 1 ] && [ "${toolchain_results[0]}" = "$toolchain_result" ] \
 	|| die "toolchain evidence has no exact source-bound complete result"
@@ -463,8 +468,65 @@ while IFS=$'\t' read -r tool_label tool_version; do
 		|| die "MANIFEST.md toolchain table omits the recorded row for $tool_label"
 	toolchain_rows=$((toolchain_rows + 1))
 done < "$toolchain_log"
-[ "$toolchain_rows" -eq 15 ] \
-	|| die "toolchain evidence records $toolchain_rows tools, expected 15"
+[ "$toolchain_rows" -eq 16 ] \
+	|| die "toolchain evidence records $toolchain_rows tools, expected 16"
+
+# --- the soak input key -----------------------------------------------------
+# What this release's soak result is valid for. The digest in QUALIFICATION is
+# taken over the payload alone; the RESULT line carrying it is excluded, because
+# a self-referential hash cannot be recomputed by a reader. Recompute it the
+# same way rather than trusting the line's own claim.
+soak_key="$release_dir/SOAK_KEY"
+[ -f "$soak_key" ] && [ ! -L "$soak_key" ] && [ -s "$soak_key" ] \
+	|| die "SOAK_KEY is missing, empty, or not a regular file"
+mapfile -t soak_key_results < <(grep '^SOAK_KEY_RESULT ' "$soak_key" || true)
+[ "${#soak_key_results[@]}" -eq 1 ] \
+	|| die "SOAK_KEY does not carry exactly one terminal result"
+[ "$(tail -n 1 -- "$soak_key")" = "${soak_key_results[0]}" ] \
+	|| die "the SOAK_KEY result is not its final line"
+soak_key_payload_digest=$(grep -v '^SOAK_KEY_RESULT ' "$soak_key" | sha256sum) \
+	|| die "could not hash the SOAK_KEY payload"
+[ "${soak_key_payload_digest%% *}" = "${q[soak_inputs_sha256]}" ] \
+	|| die "the SOAK_KEY payload digest does not match QUALIFICATION soak_inputs_sha256"
+
+# The payload must not carry anything that makes two identical soaks look
+# different. A version, a date or a commit in here would defeat the whole point:
+# a release that changes only prose has to produce the same key.
+! grep -Eq "^(version|source_commit|release_mode|date)=" \
+	<(grep -v '^SOAK_KEY_RESULT ' "$soak_key") \
+	|| die "the SOAK_KEY payload binds itself to a release identity and can never match another"
+
+grep -Fxq "SOAK_KEY format=1" "$soak_key" \
+	|| die "SOAK_KEY has no format header record"
+grep -Fxq "duration_ms=${q[soak_duration_ms]}" "$soak_key" \
+	|| die "SOAK_KEY does not record the soak duration QUALIFICATION declares"
+grep -Fxq "liveness_interval_ms=${q[soak_liveness_interval_ms]}" "$soak_key" \
+	|| die "SOAK_KEY does not record the liveness interval QUALIFICATION declares"
+soak_key_combinations=$(grep -c $'^combination\t' "$soak_key") \
+	|| die "could not count the keyed soak combinations"
+[ "$soak_key_combinations" -eq "${q[soak_combination_count]}" ] \
+	|| die "SOAK_KEY names $soak_key_combinations combinations, not the ${q[soak_combination_count]} QUALIFICATION declares"
+soak_key_drivers=$(grep -c $'^driver\t' "$soak_key") \
+	|| die "could not count the keyed soak driver sources"
+[ "$soak_key_drivers" -gt 0 ] \
+	|| die "SOAK_KEY names no soak driver sources"
+soak_key_harnesses=$(grep -c $'^harness\t' "$soak_key") \
+	|| die "could not count the keyed soak harnesses"
+[ "$soak_key_harnesses" -gt 0 ] \
+	|| die "SOAK_KEY names no soak harnesses"
+soak_key_result="SOAK_KEY_RESULT format=1 status=pass combinations=$soak_key_combinations drivers=$soak_key_drivers harnesses=$soak_key_harnesses inputs_sha256=${q[soak_inputs_sha256]} source_commit=${q[source_commit]}"
+[ "${soak_key_results[0]}" = "$soak_key_result" ] \
+	|| die "SOAK_KEY has no exact source-bound complete result"
+
+# Every keyed combination must be one the release actually ran, and every
+# combination must be keyed. A key that omits a lane would license reuse across
+# a change that lane would have caught.
+while IFS=$'\t' read -r _ soak_key_name soak_key_digest; do
+	printf '%s\n' "${canonical_soaks[@]}" | grep -Fxq -- "$soak_key_name" \
+		|| die "SOAK_KEY names a combination the release does not run: $soak_key_name"
+	[[ "$soak_key_digest" =~ ^[0-9a-f]{64}$ ]] \
+		|| die "SOAK_KEY records a non-SHA-256 image digest for $soak_key_name"
+done < <(grep $'^combination\t' "$soak_key")
 
 # The other direction. Counting the table's own rows is what catches a row the
 # record does not justify -- an extra tool, or a version edited in place after
@@ -583,6 +645,8 @@ done
 
 grep -Fxq -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_index_sha256]}\`), ${#indexed_names[@]} retained files by role and terminal record" "$manifest" \
 	|| die "MANIFEST.md evidence index digest does not match QUALIFICATION"
+grep -Fxq -- "- **Soak input key:** \`SOAK_KEY\` (SHA-256 \`${q[soak_inputs_sha256]}\`), $soak_key_combinations combinations over $soak_key_drivers driver sources and $soak_key_harnesses harnesses" "$manifest" \
+	|| die "MANIFEST.md does not publish the soak input key QUALIFICATION records"
 
 # --- the measured resource figures, and the manifest rows they produced -------
 # Until now the release published a flash column the producer derived for itself,

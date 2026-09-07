@@ -389,6 +389,8 @@ declare -F release_source_is_unchanged >/dev/null \
 	|| die "release provenance checker did not define its required function"
 declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
+declare -F release_yasimavr_build_line >/dev/null \
+	|| die "release provenance checker did not define its yasimavr build-identity function"
 declare -F release_pinned_version_matches >/dev/null \
 	|| die "release provenance checker did not define its version-pin function"
 declare -F release_require_main_branch >/dev/null \
@@ -1357,6 +1359,12 @@ TC_XC8_320=$(release_tool_version_line "PIC10F320 XC8 (PIC10F320_CC=$PIC10F320_C
 TC_GPSIM=$(release_tool_version_line "gpsim (GPSIM=$GPSIM)" "$GPSIM") \
 	|| die "could not record the gpsim provenance"
 TC_SIMAVR=$(pkgver libsimavr-dev)
+# Not release_tool_version_line: yasimavr reports 0.1.6 whether or not the
+# vendored patches are in it, and the patches are what make the ATtiny202 soak
+# trustworthy. The venv stamp names the build.
+TC_YASIMAVR=$(release_yasimavr_build_line "yasimavr (YASIMAVR_VENV=$YASIMAVR_VENV)" \
+	"$YASIMAVR_VENV") \
+	|| die "could not record the yasimavr provenance"
 TC_CPPCHECK=$(release_tool_version_line "cppcheck (CPPCHECK=$CPPCHECK)" "$CPPCHECK") \
 	|| die "could not record the cppcheck provenance"
 TC_CBMC=$(release_tool_version_line "CBMC (CBMC=$CBMC)" "$CBMC") \
@@ -2042,6 +2050,12 @@ section "3. soak (all release combos, parallel, ${SOAK_DURATION_MS} ms each)"
 # Build metadata for every soak combo: a binary, the cwd to run it from, a log.
 declare -a SOAK_NAMES=()
 declare -A SOAK_BIN SOAK_CWD SOAK_LOG SOAK_RC
+# The exact firmware artifact each combination drives. Recorded per combo as
+# the lane sets it up, because the lanes disagree: the classic AVR and
+# ATtiny202 soaks drive ELFs, the PIC10F32x soaks drive the shipped HEX, and
+# the PIC12F675 soak drives a DERIVED simcal image that is never shipped.
+# SOAK_KEY below is only as honest as this map.
+declare -A SOAK_IMAGE
 
 log "compiling soak binaries..."
 for v in $VARIANTS; do for p in $TINYX5_PARTS; do
@@ -2067,6 +2081,7 @@ for v in $VARIANTS; do for p in $TINYX5_PARTS; do
 		AVR_SOAK_COMBINATION_NAME="$name" \
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build AVR soak $name"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$REPO_ROOT/$bin"
+	SOAK_IMAGE[$name]="$elf"
 	SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done; done
@@ -2104,6 +2119,7 @@ for v in $XT_VARIANTS; do
 	printf 'generated ATtiny202 soak wrapper: %s -> %s\n' "$name" "$elf" \
 		>>"$EVID/soak-build.log"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_IMAGE[$name]="$elf"
 	SOAK_CWD[$name]="$REPO_ROOT"   # the wrapper cd's itself; nothing is written here
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
@@ -2115,6 +2131,7 @@ for v in $VARIANTS; do
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_IMAGE[$name]="$(fw_image "$PIC10F322_BUILD_DIR" "$PIC10F322_TAG" "$v").hex"
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
@@ -2131,6 +2148,7 @@ for v in $PIC10F320_VARIANTS; do
 		>>"$EVID/soak-build.log" 2>&1 || die "failed to build PIC10F320 soak $name"
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_IMAGE[$name]="$(fw_image "$PIC10F320_BUILD_DIR" "$PIC10F320_TAG" "$v").hex"
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
@@ -2159,6 +2177,7 @@ for v in $VARIANTS; do
 	PIC12F675_SIMCAL_IMAGES+=("$(fw_image "$PIC12F675_SIMCAL_DIR" "$PIC12F675_TAG" "$v")_simcal.hex")
 	rundir="$SOAKDIR/run-$name"; mkdir -p "$rundir"
 	SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+	SOAK_IMAGE[$name]="${PIC12F675_SIMCAL_IMAGES[-1]}"
 	SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 	SOAK_LOG[$name]="$EVID/soak-$name.log"
 done
@@ -2291,6 +2310,105 @@ current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 	&& [ "$current_xt_elf_hashes" = "$validated_xt_elf_hashes" ]; } \
 	|| die "an ATtiny202 image or ELF changed while its soak was running"
 
+# ----------------------------------------------------------------------------
+# What this soak actually proved, as a reusable key.
+# ----------------------------------------------------------------------------
+# A soak is the only part of a release measured in days, and between v0.9.10 and
+# v0.9.13 it re-ran three times against byte-identical images: the releases in
+# between changed documentation, tests and tooling, and no image at all. Nothing
+# recorded that, so every one paid the full duration to re-derive a result it
+# already had.
+#
+# SOAK_KEY is the record that makes the question answerable. It names every
+# input that can change what a soak observes, and deliberately omits everything
+# that cannot -- there is no version, no date and no source commit in the hashed
+# payload, because a release that changes only prose must produce the SAME key.
+# The commit appears on the RESULT line, outside the payload, where it says who
+# produced the record without becoming part of its identity.
+#
+# What is IN: each combination and the exact artifact it drove (ELF, shipped HEX
+# or -- for the PIC12F675 -- the derived simcal image), the soak driver sources
+# each lane declares in the Makefile, the identity of every tool that EXECUTES a
+# soak, and the durations.
+#
+# What is deliberately OUT: the image-producing compilers. XC8 and avr-gcc
+# determine the images, and the images are hashed here directly, so naming the
+# compilers again would add no information and would invalidate a soak whenever
+# an unrelated toolchain row moved. For the same reason this does not fold in
+# toolchain_sha256, which covers cppcheck, CBMC, clang and DFP paths -- none of
+# which ever runs a soak. A key that over-invalidates is a key nobody can reuse.
+log "recording the soak input key..."
+soak_key_drivers=$(
+	for dep_var in AVR_SOAK_DEPS XT_SOAK_DEPS PIC10F322_SOAK_DEPS \
+			PIC10F320_SOAK_DEPS PIC12F675_SOAK_DEPS; do
+		mkv "$dep_var" | tr ' ' '\n'
+	done | sed '/^$/d' | sort -u
+) || die "could not read the soak driver sources from the Makefile"
+[ -n "$soak_key_drivers" ] \
+	|| die "the Makefile declares no soak driver sources; refusing to key a soak on nothing"
+TC_SOAK_CXX=$(release_tool_version_line "PIC soak C++ (PIC_SOAK_CXX=$PIC_SOAK_CXX)" \
+	"$PIC_SOAK_CXX") \
+	|| die "could not record the PIC soak compiler provenance"
+TC_SOAK_CXX_320=$(release_tool_version_line \
+	"PIC10F320 soak C++ (PIC10F320_SOAK_CXX=$PIC10F320_SOAK_CXX)" \
+	"$PIC10F320_SOAK_CXX") \
+	|| die "could not record the PIC10F320 soak compiler provenance"
+soak_key_payload="$WORK/soak-key.payload"
+{
+	printf 'SOAK_KEY format=1\n'
+	printf 'duration_ms=%s\n' "$SOAK_DURATION_MS"
+	printf 'liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
+	for name in $(printf '%s\n' "${SOAK_NAMES[@]}" | sort); do
+		image=${SOAK_IMAGE[$name]:-}
+		[ -n "$image" ] \
+			|| die "soak combination $name records no image; the key would omit what it drove"
+		[ -f "$image" ] || die "soak image for $name is missing: $image"
+		digest=$(sha256sum -- "$image") \
+			|| die "could not hash the soak image for $name: $image"
+		printf 'combination\t%s\t%s\n' "$name" "${digest%% *}"
+	done
+	for driver in $soak_key_drivers; do
+		[ -f "$driver" ] \
+			|| die "declared soak driver source is missing: $driver"
+		digest=$(sha256sum -- "$driver") \
+			|| die "could not hash the soak driver source: $driver"
+		printf 'driver\t%s\t%s\n' "$driver" "${digest%% *}"
+	done
+	printf 'harness\t%s\t%s\n' \
+		'simavr' "$TC_SIMAVR" \
+		'gpsim' "$TC_GPSIM" \
+		'yasimavr' "$TC_YASIMAVR" \
+		'host-cc' "$TC_HOST_CC" \
+		'soak-cxx' "$TC_SOAK_CXX" \
+		'soak-cxx-320' "$TC_SOAK_CXX_320"
+} > "$soak_key_payload" \
+	|| die "could not record the soak input key"
+if grep -q '^[[:space:]]*$' "$soak_key_payload"; then
+	die "the soak input key contains a blank line"
+fi
+soak_key_combinations=$(grep -c $'^combination\t' "$soak_key_payload") \
+	|| die "could not count the keyed soak combinations"
+[ "$soak_key_combinations" -eq "$NCOMBOS" ] \
+	|| die "the soak input key names $soak_key_combinations combinations, not the $NCOMBOS that ran"
+soak_key_driver_count=$(grep -c $'^driver\t' "$soak_key_payload") \
+	|| die "could not count the keyed soak driver sources"
+soak_key_harnesses=$(grep -c $'^harness\t' "$soak_key_payload") \
+	|| die "could not count the keyed soak harnesses"
+# The digest covers the payload and NOT the result line that carries it, for the
+# same reason seal_evidence_result excludes its own: a self-referential hash
+# cannot be recomputed by a reader.
+soak_inputs_sha256=$(sha256sum -- "$soak_key_payload") \
+	|| die "could not hash the soak input key"
+soak_inputs_sha256=${soak_inputs_sha256%% *}
+{
+	cat -- "$soak_key_payload"
+	printf 'SOAK_KEY_RESULT format=1 status=pass combinations=%d drivers=%d harnesses=%d inputs_sha256=%s source_commit=%s\n' \
+		"$soak_key_combinations" "$soak_key_driver_count" "$soak_key_harnesses" \
+		"$soak_inputs_sha256" "$GIT_SHA"
+} > "$WORK/SOAK_KEY" \
+	|| die "could not seal the soak input key"
+ok "soak input key: $soak_inputs_sha256 ($soak_key_combinations combinations, $soak_key_driver_count driver sources, $soak_key_harnesses harnesses)."
+
 # Validation and soak rebuild classic ELFs, invalidating their paired HEX files.
 # Re-materialize HEX from those exact, just-tested ELFs without compiling again.
 log "regenerating classic AVR HEX from the validated ELFs..."
@@ -2370,19 +2488,20 @@ ok "final resource evidence covers all images and retained RAM/stack measurement
 		'PIC10F320 DFP (`PIC10F320_DFP`)' "$PIC10F320_DFP" \
 		'gpsim' "$TC_GPSIM" \
 		'libsimavr-dev (pkg)' "$TC_SIMAVR" \
+		'yasimavr (patched venv: version sdist patchset)' "$TC_YASIMAVR" \
 		'cppcheck' "$TC_CPPCHECK" \
 		'cbmc' "$TC_CBMC" \
 		'clang' "$TC_CLANG" \
 		'python3' "$TC_PY" \
 		'PIC12F675 Python' "$TC_PIC12F675_PY"
 	printf 'TOOLCHAIN_RESULT format=1 status=pass rows=%d source_commit=%s\n' \
-		15 "$GIT_SHA"
+		16 "$GIT_SHA"
 } > "$EVID/toolchain.txt" \
 	|| die "could not record the toolchain evidence"
 toolchain_rows=$(grep -c $'\t' "$EVID/toolchain.txt") \
 	|| die "could not count toolchain evidence rows"
-[ "$toolchain_rows" -eq 15 ] \
-	|| die "toolchain evidence records $toolchain_rows rows, expected 15"
+[ "$toolchain_rows" -eq 16 ] \
+	|| die "toolchain evidence records $toolchain_rows rows, expected 16"
 if grep -q '^[[:space:]]*$' "$EVID/toolchain.txt"; then
 	die "toolchain evidence contains a blank line"
 fi
@@ -2680,11 +2799,19 @@ evidence_index_sha256=$(sha256sum -- "$OUTPUT_DIR/evidence/INDEX") \
 evidence_index_sha256=${evidence_index_sha256%% *}
 ok "evidence index lists $indexed_rows retained files by role and terminal record."
 
+# The soak input key, staged as signed provenance rather than as evidence: it is
+# not a command transcript, it is a statement about what this soak's result is
+# valid for. SHA256SUMS covers it and the release signature signs it, so a later
+# release can compare its own key against this one and trust the answer without
+# a second trust root.
+cp -p -- "$WORK/SOAK_KEY" "$OUTPUT_DIR/SOAK_KEY" \
+	|| die "could not stage the soak input key"
+
 # Compact machine-readable attestation. The verifier parses this as data (never
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=7\n'
+	printf 'format=8\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -2692,6 +2819,7 @@ ok "evidence index lists $indexed_rows retained files by role and terminal recor
 	printf 'soak_duration_ms=%s\n' "$SOAK_DURATION_MS"
 	printf 'soak_liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
 	printf 'soak_combination_count=%s\n' "$NCOMBOS"
+	printf 'soak_inputs_sha256=%s\n' "$soak_inputs_sha256"
 	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
 	printf 'resource_tables_sha256=%s\n' "$resource_tables_sha256"
 	printf 'toolchain_sha256=%s\n' "$toolchain_sha256"
@@ -3104,6 +3232,9 @@ REL_BANNER=""
 		"$resource_tables_sha256"
 	printf -- '- **Evidence index:** `evidence/INDEX` (SHA-256 `%s`), %d retained files by role and terminal record\n' \
 		"$evidence_index_sha256" "$indexed_rows"
+	printf -- '- **Soak input key:** `SOAK_KEY` (SHA-256 `%s`), %d combinations over %d driver sources and %d harnesses\n' \
+		"$soak_inputs_sha256" "$soak_key_combinations" "$soak_key_driver_count" \
+		"$soak_key_harnesses"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"

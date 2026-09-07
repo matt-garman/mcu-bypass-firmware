@@ -45,6 +45,39 @@ historical records and are not retroactively compacted by this policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A release now records what its soak result is valid for.** Published images
+  were byte-identical across `v0.9.10`, `v0.9.11`, `v0.9.12` and `v0.9.13`, and
+  no soak driver changed over that span, so three consecutive releases re-ran
+  the same binaries under the same harness in the same simulators. Nothing
+  recorded that, so each paid the full duration to re-derive a result it already
+  had. `SOAK_KEY` is a new signed provenance file naming every input that can
+  change what a soak observes: the exact artifact each of the 18 combinations
+  drove -- ELF, shipped HEX, or for the PIC12F675 the derived simcal image it
+  actually runs -- the soak driver sources each lane declares in the Makefile,
+  and the identity of every tool that executes a soak. `QUALIFICATION` gains
+  `soak_inputs_sha256` (`format=8`) and `MANIFEST.md` publishes it.
+
+  Its payload deliberately carries no version, date or commit, because a
+  release that changes only prose must produce the *same* key; the producing
+  commit sits on the result line, outside the hashed payload, and the verifier
+  refuses a payload that binds itself to a release identity. Equally
+  deliberately, the image-producing compilers are not in the key -- the images
+  are hashed directly, so naming XC8 and avr-gcc again would only invalidate
+  soaks when an unrelated toolchain row moved. Nothing consumes the key yet;
+  this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
+  Part 3 is the design.
+
+- **`evidence/toolchain.txt` records yasimavr.** It named gpsim and libsimavr
+  but not yasimavr, even though three of the 21 published images are ATtiny202
+  images and yasimavr is the only thing that ever executes them. A version
+  string alone would not have been enough: 0.1.6 reports 0.1.6 with or without
+  the vendored patches that make the ATtiny202 soak trustworthy, so the release
+  records the venv build stamp `scripts/fetch_yasimavr.sh` already maintains --
+  version, upstream sdist digest, patch-set digest. A venv with no stamp, an
+  empty stamp, or one carrying a tab refuses the release.
+
 ### Changed
 
 - **Design prose can no longer stop a release.** Six of the rules inside the

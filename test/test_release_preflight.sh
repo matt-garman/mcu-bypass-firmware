@@ -285,6 +285,16 @@ printf 'unexpected yasimavr interpreter arguments: %s\n' "$*" >&2
 exit 9
 EOF
 
+# The venv's build stamp, which is how the release identifies WHICH yasimavr it
+# ran: a version string alone does not distinguish a patched build from an
+# unpatched one, and the vendored patches are what the ATtiny202 soak depends
+# on. scripts/fetch_yasimavr.sh writes this; the fake toolchain carries one so
+# the provenance read has something to find.
+printf '0.1.6 %s %s' \
+	'1111111111111111111111111111111111111111111111111111111111111111' \
+	'2222222222222222222222222222222222222222222222222222222222222222' \
+	> "$toolchain/yasimavr/.yasimavr.stamp"
+
 cat > "$fakebin/python3" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = "${FAKE_REPO_ROOT:?}/test/python_version.py" ]; then
@@ -3170,6 +3180,44 @@ grep -Fq 'executable patched yasimavr interpreter' "$output" \
 chmod 750 "$toolchain/yasimavr/bin/python"
 assert_no_release_scratch
 checks=$((checks + 1))
+
+# An importable interpreter still does not say WHICH yasimavr this is. Version
+# 0.1.6 reports 0.1.6 with or without the vendored patches, and the patches are
+# what make the ATtiny202 soak mean anything -- three published images have no
+# other dynamic evidence. A release that cannot name the build refuses rather
+# than recording a version that does not identify it.
+stamp="$toolchain/yasimavr/.yasimavr.stamp"
+stamp_value=$(cat "$stamp")
+mv "$stamp" "$stamp.hidden"
+if run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a yasimavr venv with no build stamp"
+fi
+grep -Fq 'could not record the yasimavr provenance' "$output" \
+	|| fail "a stampless yasimavr venv failed without the provenance diagnostic: $(<"$output")"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# Empty is not a signature either, and neither is one that would smuggle a
+# second row or a third column into the tab-separated evidence.
+: > "$stamp"
+if run_preflight >"$output" 2>&1; then
+	fail "preflight accepted an empty yasimavr build stamp"
+fi
+grep -Fq 'could not record the yasimavr provenance' "$output" \
+	|| fail "an empty yasimavr stamp failed without the provenance diagnostic"
+checks=$((checks + 1))
+
+printf '0.1.6\tsmuggled\n' > "$stamp"
+if run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a yasimavr build stamp carrying a tab"
+fi
+grep -Fq 'could not record the yasimavr provenance' "$output" \
+	|| fail "a tab-bearing yasimavr stamp failed without the provenance diagnostic"
+checks=$((checks + 1))
+
+printf '%s' "$stamp_value" > "$stamp"
+rm -f "$stamp.hidden"
+assert_no_release_scratch
 
 # The ATtiny device spec alone is not a usable DFP; every mandatory build also
 # consumes a REGULAR part avr/io header. A same-name directory must not pass.

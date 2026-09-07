@@ -107,15 +107,23 @@ the design, including why the key must cover the images and harness rather than
 the source tree: `src/` changed across all three of those releases without
 changing a single image.
 
-Acceptance: a signed `SOAK_ATTESTATION` record is written after a successful
-soak, keyed on a canonical digest of the combination names, each driven
-binary, the soak driver sources, simulator and harness identity, and the soak
-durations; a reuse flag recomputes that key after the build phase, verifies the
-signature, requires the attested duration to meet the requested mode, folds the
-attested logs into evidence and records `soak_provenance` and the key in
-`QUALIFICATION`; a miss runs the soak and writes a new attestation; `MANIFEST.md`
-states reuse in prose; and any change to an image, driver, simulator or duration
-changes the key, so reuse fails closed with no invalidation step to remember.
+Increment 1 is **done**: `SOAK_KEY` is written after a successful soak as a
+signed provenance file, keyed on the combination names, each driven artifact,
+the soak driver sources every lane declares in the Makefile, and the identity of
+each tool that executes a soak; `QUALIFICATION` records `soak_inputs_sha256`
+(`format=8`) and `MANIFEST.md` publishes it. The attestation is the published
+release itself rather than a separate store: `SHA256SUMS` covers `SOAK_KEY` and
+the release signature signs it, so reuse needs no second trust root and no extra
+signing step.
+
+Acceptance for increment 2: a reuse flag recomputes the key after the build
+phase, locates a published release whose `QUALIFICATION` carries the same
+`soak_inputs_sha256`, verifies that release's signature, requires its attested
+duration to meet the requested mode, folds its retained soak logs into evidence
+and records `soak_provenance` in `QUALIFICATION`; a miss runs the soak; and
+`MANIFEST.md` states reuse in prose. Any change to an image, driver, simulator
+or duration changes the key, so reuse fails closed with no invalidation step to
+remember.
 
 Dependencies: none. It is the highest-value remaining item: every release it
 would have helped was a documentation or tooling release that changed no image.
@@ -857,7 +865,7 @@ The stable ID in each row matches exactly one open section above.
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T2-ci-parity | Make local/remote CI parity structural | 2 | 4-6 h | High - a failed remote gate costs a 25-hour release |
 | T2-release-stage-rehearsal | Rehearse the staged output before the soak | 2 | 4-6 h | High - removes the post-soak failure class |
-| T2-soak-attestation | Attest soak results and reuse them on identical inputs | 2 | 6-8 h | High - a doc-only release stops re-soaking unchanged images |
+| T2-soak-attestation | Reuse soak results on identical inputs (increment 1 done) | 2 | 4-5 h | High - a doc-only release stops re-soaking unchanged images |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
