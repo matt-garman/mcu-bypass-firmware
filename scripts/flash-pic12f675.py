@@ -54,6 +54,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -80,11 +81,30 @@ REQUIRED_SEALS = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
 
 SCHEMA = "mcu-bypass-pic12f675-flash-v1"
 PART = "PIC12F675"
+# What `-P` must actually spell. ipecmd supplies the family prefix itself and
+# rejects the prefixed form, so the argument and the identity this helper
+# records are deliberately different strings: PART names the part in evidence
+# and in transcript matching, PART_ARG is the only thing that reaches a command.
+# FLASHING.md records the same quirk for the PIC10F322.
+PART_ARG = "12F675"
 TOOL = "PK3"
 # `-TP` selects the tool family; `PK3` is the PICkit 3. MPLAB X 6.25 removed it.
 TOOL_FLAG = "-TP"
 IPE_VERSION = "6.20"
+# How the target gets its Vdd. With `external` no power option is passed and
+# ipecmd expects the board to supply its own; a board that does not aborts the
+# read with "could not detect target voltage VDD". `tool` adds -W, which makes
+# the PICkit 3 power the target.
+#
+# NEITHER mode is hardware-validated; see HARDWARE_VALIDATION_LOG.md. `tool` is
+# additionally limited by the programmer itself, which sources only tens of
+# milliamps: a populated effects board -- above all the relay build, whose coil
+# alone exceeds that -- should be powered externally, with `tool` reserved for a
+# bare part or a board drawing almost nothing.
 POWER_MODE = "external"
+POWER_TOOL = "tool"
+POWER_MODES = (POWER_MODE, POWER_TOOL)
+POWER_FLAG = "-W"
 
 # Device geometry (DS41190G). Intel HEX byte address = program word address * 2,
 # little-endian within the word.
@@ -867,7 +887,7 @@ def open_identity(path, label, max_bytes, executable=False,
     }
 
 
-def programmer_identity(path, java):
+def programmer_identity(path, java, power=POWER_MODE, show_commands=False):
     """Resolve the one supported ipecmd form and pin the exact bytes used.
 
     Both supported forms use operator-immutable bytes: sealed data/scripts, or
@@ -924,6 +944,11 @@ def programmer_identity(path, java):
         "handles": handles,
         "pinning": handle["pinning"],
         "operator_writable": handle["operator_writable"],
+        # Fixed for the whole transaction: every argv built from this record
+        # names the same electrical arrangement, and it is what the reservation
+        # reports. show_commands is a diagnostic only and reaches no argv.
+        "power": power,
+        "show_commands": show_commands,
         "java_pinning": None if java_handle is None else java_handle["pinning"],
     }
 
@@ -977,6 +1002,29 @@ def run_tool(argv, timeout, label, executable=None, pass_fds=()):
     return completed.returncode, completed.stdout
 
 
+def show_command(label, argv):
+    """Echo one command exactly as it is about to be issued.
+
+    Descriptor pathnames are the whole point of how this helper hands objects
+    to a child, and "/proc/self/fd/7" tells an operator nothing on its own, so
+    each one is printed with what it currently resolves to. This is stderr, so
+    it never mixes into the machine-readable result lines on stdout.
+    """
+    sys.stderr.write("+ %s: %s\n"
+                     % (label, " ".join(shlex.quote(arg) for arg in argv)))
+    for arg in argv:
+        # A descriptor path arrives either bare or behind an option letter,
+        # as in -GF/proc/self/fd/7, so look for it anywhere in the argument.
+        index = arg.find(DESCRIPTOR_DIR + "/")
+        if index < 0:
+            continue
+        token = arg[index:]
+        try:
+            sys.stderr.write("    %s -> %s\n" % (token, os.readlink(token)))
+        except OSError:
+            sys.stderr.write("    %s -> <unresolvable>\n" % token)
+
+
 def invoke(programmer, argv, timeout, label, pass_fds=()):
     """The only way a tool is started: source re-proved, immutable bytes run.
 
@@ -985,6 +1033,8 @@ def invoke(programmer, argv, timeout, label, pass_fds=()):
     a device export.
     """
     programmer_unchanged(programmer)
+    if programmer["show_commands"]:
+        show_command(label, argv)
     return run_tool(argv, timeout, label, executable=programmer["exec_path"],
                     pass_fds=tuple(programmer["pass_fds"]) + tuple(pass_fds))
 
@@ -1051,28 +1101,38 @@ def probe_version(programmer):
     }
 
 
+def power_args(programmer):
+    """-W when the programmer must supply Vdd, nothing when the board does."""
+    return [POWER_FLAG] if programmer["power"] == POWER_TOOL else []
+
+
 def read_argv(programmer, export_path):
     """The one full-device read/export command. Contains no erase or program
     option, so this argv can never mutate the device."""
     return programmer["prefix"] + [
-        TOOL_FLAG + TOOL, "-P" + PART, "-GF" + export_path,
-    ]
+        TOOL_FLAG + TOOL, "-P" + PART_ARG, "-GF" + export_path,
+    ] + power_args(programmer)
 
 
 def write_argv(programmer, image_path):
     """The one validated write command.
 
-    -M programs the whole device, -Y verifies, -OL releases from reset. -W5 is
-    deliberately absent: the supported arrangement is an externally powered
-    board, and no programmer-powered voltage/interface setup has been retained
-    as hardware evidence. Nothing here is caller-supplied: `image_path` is
-    descriptor_path() of the sealed image copy, which is the one argument of
-    this command that changed source bytes could otherwise turn into a different
-    write.
+    -M programs the whole device, -Y verifies, -OL releases from reset. -W is
+    present only under --power tool, and both power arrangements are still
+    awaiting controlled hardware evidence. Nothing here is caller-supplied
+    except that one recorded choice: `image_path` is descriptor_path() of the
+    sealed image copy, which is the one argument of this command that changed
+    source bytes could otherwise turn into a different write.
+
+    The read and the write must agree about power. A device read under tool
+    power and then written under board power is two different electrical
+    arrangements inside one transaction, which is why the mode is fixed for the
+    whole transaction and recorded in the reservation rather than passed per
+    command.
     """
     return programmer["prefix"] + [
-        TOOL_FLAG + TOOL, "-P" + PART, "-F" + image_path, "-M", "-Y", "-OL",
-    ]
+        TOOL_FLAG + TOOL, "-P" + PART_ARG, "-F" + image_path, "-M", "-Y", "-OL",
+    ] + power_args(programmer)
 
 
 # ---------------------------------------------------------------------------
@@ -1720,20 +1780,20 @@ def command_program(args, helper_path):
         raise FlashError(
             "this helper drives a PICkit 3 (%s) only; --tool %s is refused"
             % (TOOL, args.tool))
-    if args.power != POWER_MODE:
-        # "supported", not "validated".  The externally powered arrangement is
-        # the only one this tool constructs commands for, and it is the only one
-        # the software tests cover -- but HARDWARE_VALIDATION_LOG.md lists that
-        # same arrangement, and release-from-reset behaviour with it, among the
-        # controlled bench checks that are still outstanding.  Telling an
-        # operator their setup is "validated" at the moment they are about to
-        # write a device is precisely where that overstatement costs something.
+    if args.power not in POWER_MODES:
+        # "supported", not "validated".  These are the arrangements this tool
+        # constructs commands for and the software tests cover -- but
+        # HARDWARE_VALIDATION_LOG.md lists both, and release-from-reset
+        # behaviour with them, among the controlled bench checks that are still
+        # outstanding.  Telling an operator their setup is "validated" at the
+        # moment they are about to write a device is precisely where that
+        # overstatement costs something.
         raise FlashError(
-            "the externally powered arrangement (--power %s) is the only "
-            "supported one; programmer-supplied Vdd is refused, and no "
-            "programmer-powered voltage/interface setup has been retained as "
-            "hardware evidence, so --power %s is refused"
-            % (POWER_MODE, args.power))
+            "--power must be one of %s; %s is refused. Neither arrangement has "
+            "retained controlled hardware evidence, and '%s' additionally draws "
+            "the target's Vdd from a programmer that sources only tens of "
+            "milliamps"
+            % ("/".join(POWER_MODES), args.power, POWER_TOOL))
 
     require_descriptor_paths()
 
@@ -1742,7 +1802,8 @@ def command_program(args, helper_path):
                                          "selected release image")
     image_fd = sealed_copy(bundle["image_data"], IMAGE_SNAPSHOT_NAME,
                            "release image")
-    programmer = programmer_identity(args.ipecmd, args.java)
+    programmer = programmer_identity(args.ipecmd, args.java, args.power,
+                                     args.show_commands)
     version = probe_version(programmer)
 
     evidence = Evidence.create(args.evidence_dir)
@@ -1779,7 +1840,7 @@ def command_program(args, helper_path):
         "ipe_version": version["version"],
         "ipe_version_probe_sha256": version["probe_sha256"],
         "ipe_version_probe_base64": version["probe_base64"],
-        "power_mode": POWER_MODE,
+        "power_mode": args.power,
         "evidence_dir_fd_bound": True,
         "image_name": bundle["image_name"],
         "image_path": bundle["image_path"],
@@ -1918,7 +1979,7 @@ def command_finalize(args, helper_path):
         raise FlashError("reservation is not a PENDING record of this schema")
     if reservation["part"] != PART or reservation["tool"] != TOOL \
             or reservation["ipe_version"] != IPE_VERSION \
-            or reservation["power_mode"] != POWER_MODE:
+            or reservation["power_mode"] not in POWER_MODES:
         raise FlashError("reservation records a different part, tool, version, "
                          "or power arrangement than this helper supports")
 
@@ -1927,7 +1988,11 @@ def command_finalize(args, helper_path):
             or retained != base64.b64decode(reservation["image_base64"], validate=True):
         raise FlashError("the retained release image differs from the reservation")
 
-    programmer = programmer_identity(args.ipecmd, args.java)
+    # The post-write read must repeat the reserved electrical arrangement, so
+    # the mode comes from the record rather than from this invocation.
+    programmer = programmer_identity(args.ipecmd, args.java,
+                                     reservation["power_mode"],
+                                     args.show_commands)
     if programmer["realpath"] != reservation["programmer_realpath"] \
             or programmer["sha256"] != reservation["programmer_sha256"] \
             or programmer["kind"] != reservation["programmer_kind"]:
@@ -1990,10 +2055,16 @@ def build_parser():
                          help="Java runtime used for an ipecmd.jar (default: java)")
     program.add_argument("--part", default=PART, help=argparse.SUPPRESS)
     program.add_argument("--tool", default=TOOL, help=argparse.SUPPRESS)
-    program.add_argument("--power", default=POWER_MODE,
-                         help="target power arrangement; only '%s' is "
-                              "supported, and it still awaits controlled "
-                              "hardware validation" % POWER_MODE)
+    program.add_argument("--power", default=POWER_MODE, choices=POWER_MODES,
+                         help="target power arrangement: '%s' expects the board "
+                              "to supply its own Vdd, '%s' adds -W so the PICkit "
+                              "3 powers it. Both still await controlled hardware "
+                              "validation, and '%s' is limited by a programmer "
+                              "that sources only tens of milliamps"
+                              % (POWER_MODE, POWER_TOOL, POWER_TOOL))
+    program.add_argument("--show-commands", action="store_true",
+                         help="echo each ipecmd invocation to stderr as it is "
+                              "issued, with descriptor pathnames resolved")
 
     finalize = subparsers.add_parser(
         "finalize", help="publish the result of an interrupted PENDING "
@@ -2004,6 +2075,11 @@ def build_parser():
                           help="the same MPLAB X 6.20 ipecmd the reservation records")
     finalize.add_argument("--java", default="java",
                           help="Java runtime used for an ipecmd.jar (default: java)")
+    # No --power here on purpose: finalize repeats the arrangement the
+    # reservation already records, so it cannot be re-elected after the write.
+    finalize.add_argument("--show-commands", action="store_true",
+                          help="echo each ipecmd invocation to stderr as it is "
+                               "issued, with descriptor pathnames resolved")
     return parser
 
 

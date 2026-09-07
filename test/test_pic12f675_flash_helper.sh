@@ -384,8 +384,8 @@ check "the write consumes a pinned descriptor, not a replaceable pathname" \
 	"$([[ "${vectors[3]}" == *$'\t-F/proc/self/fd/'* ]] && echo 1 || echo 0)"
 check "the writer received exactly the retained snapshot bytes" \
 	"$([ "$(device_field image_sha256)" = "$(sha256_of "$EVIDENCE/image.hex")" ] && echo 1 || echo 0)"
-check "the write requests no programmer-supplied power" \
-	"$([[ "${vectors[3]}" != *$'\t-W5'* ]] && echo 1 || echo 0)"
+check "the default write requests no programmer-supplied power" \
+	"$([[ "${vectors[3]}" != *$'\t-W'* ]] && echo 1 || echo 0)"
 check "invocation 5 is the final full-device read" \
 	"$([[ "${vectors[4]}" == *'-GF/proc/self/fd/'*'/postread.hex' ]] && echo 1 || echo 0)"
 check "exactly one write reached the device" "$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
@@ -689,7 +689,9 @@ assert_rejects "a different tool kind" "drives a PICkit 3"
 
 new_case
 program_run '' --power programmer
-assert_rejects "programmer-supplied power" "the externally powered arrangement (--power external) is the only supported one"
+check "an unsupported power arrangement is refused before any command" \
+	"$([ "$RC" -ne 0 ] && [ ! -s "$ARGVLOG" ] \
+		&& [[ "$OUT" == *"--power"* ]] && echo 1 || echo 0)"
 
 new_case
 run_helper '' program --image "$IMAGE" --ipecmd "$CASE_DIR/absent-ipecmd" \
@@ -762,6 +764,58 @@ new_case
 run_helper '' program --image "$IMAGE" --ipecmd "$FAKE" \
 	--evidence-dir "$CASE_DIR/absent/evidence"
 assert_rejects "an evidence parent that does not exist" "parent is unavailable"
+
+# ---------------------------------------------------------------------------
+# 4a2. the part spelling and the target's power arrangement
+# ---------------------------------------------------------------------------
+note '== part spelling and target power =='
+
+# ipecmd supplies the family prefix itself and REJECTS the prefixed spelling, so
+# -P has to say 12F675 even though the part, the evidence and the transcript
+# matching all name it in full. The two strings are separate on purpose.
+new_case
+program_run ''
+check "-P spells the part without the family prefix" \
+	"$(grep -q -- $'\t-P12F675\t' "$ARGVLOG" \
+		&& ! grep -q -- '-PPIC12F675' "$ARGVLOG" && echo 1 || echo 0)"
+check "the reservation still records the part in full" \
+	"$([ "$(reservation_field part)" = PIC12F675 ] && echo 1 || echo 0)"
+check "external power passes no -W to any command" \
+	"$(grep -q -- $'\t-W' "$ARGVLOG" && echo 0 || echo 1)"
+check "the reservation records the external arrangement" \
+	"$([ "$(reservation_field power_mode)" = external ] && echo 1 || echo 0)"
+
+# -W must reach every DEVICE command. A baseline read under one electrical
+# arrangement and a write under another is not one transaction, which is why the
+# mode is fixed for the whole run rather than chosen per command.
+new_case
+program_run '' --power tool
+check "tool power completes the transaction" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "tool power adds -W to all four device commands" \
+	"$([ "$(grep -c -- $'\t-W' "$ARGVLOG")" = 4 ] && echo 1 || echo 0)"
+check "the version probe is never given -W" \
+	"$([[ "$(head -1 "$ARGVLOG")" != *$'\t-W'* ]] && echo 1 || echo 0)"
+check "the reservation records the tool-powered arrangement" \
+	"$([ "$(reservation_field power_mode)" = tool ] && echo 1 || echo 0)"
+
+new_case
+program_run '' --power vdd-from-somewhere
+check "an unknown power arrangement is refused before any command" \
+	"$([ "$RC" -ne 0 ] && [ ! -s "$ARGVLOG" ] && echo 1 || echo 0)"
+
+# The diagnostic that made the real bring-up failures readable. It must not
+# alter what runs, and must not contaminate the machine-readable result lines.
+new_case
+program_run '' --show-commands
+check "--show-commands completes the transaction unchanged" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "--show-commands echoes every invocation" \
+	"$([ "$(grep -c '^+ ' "$CASE_DIR/stderr.txt")" = 5 ] && echo 1 || echo 0)"
+check "--show-commands resolves the descriptor pathnames it printed" \
+	"$(grep -q ' -> ' "$CASE_DIR/stderr.txt" && echo 1 || echo 0)"
+check "the echo stays on stderr, out of the result lines" \
+	"$(grep -q '^+ ' "$CASE_DIR/stdout.txt" && echo 0 || echo 1)"
 
 # ---------------------------------------------------------------------------
 # 4b. the supported java -jar form -- the same matrix through a second binary

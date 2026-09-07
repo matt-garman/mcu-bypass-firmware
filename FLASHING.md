@@ -211,11 +211,16 @@ required descriptor paths, immutable source, `memfd_create`, or
 write/grow/shrink/final seals are unavailable, the helper fails closed. Python
 builds that omit `os.memfd_create` use the same kernel facility through libc
 rather than weakening the invariant.
-**Power the board externally** — external power is the only arrangement this
-helper supports, programmer-supplied Vdd is refused, and the documented external
-arrangement itself still awaits controlled hardware validation. Choose a NEW
-evidence directory per device; the helper creates it and refuses a path that
-already exists.
+**Power the board externally** where you can: that is the default, and
+`--power tool` (which adds `-W`, making the PICkit 3 supply Vdd) is the
+alternative for a bare part or a board that draws almost nothing. A PICkit 3
+sources only tens of milliamps, so a populated effects board — above all the
+relay build, whose coil alone exceeds that — must use external power. Neither
+arrangement has retained controlled hardware validation yet. The mode is fixed
+for the whole transaction and recorded in the reservation, because a device read
+under one electrical arrangement and a write under another is not one
+transaction. Choose a NEW evidence directory per device; the helper creates it
+and refuses a path that already exists.
 <!-- pic12f675-helper-status:end -->
 
 ```sh
@@ -226,6 +231,22 @@ python3 flash-pic12f675.py program \
   --ipecmd "$IPECMD" \
   --evidence-dir ./pic12f675-device-001
 ```
+
+Add `--show-commands` to echo each `ipecmd` invocation to stderr as it is
+issued, with the `/proc/self/fd/<n>` pathnames resolved to what they currently
+name. It changes nothing about what runs and stays off stdout, so the result
+lines remain machine-readable; it is the first thing to reach for when a
+programmer misbehaves. The `read_argv` and `write_argv` a run actually
+constructed are also recorded in `reservation.json`, but only once both
+pre-write reads have succeeded — `--show-commands` is what shows you a command
+that failed before that.
+
+If `ipecmd` reports `could not detect target voltage VDD`, the board is not
+powering itself and the programmer was not asked to: connect the board's supply,
+or pass `--power tool`. Note that `-P` names the part as `12F675`: `ipecmd`
+supplies the `PIC` prefix itself and rejects the prefixed spelling, exactly as it
+does for the PIC10F322 above. The full `PIC12F675` is still what the evidence
+records and what the tool transcript is matched against.
 
 It reads the device, reads it again to prove nothing moved, writes a durable
 `reservation.json`, performs exactly one write, then reads the whole device back
