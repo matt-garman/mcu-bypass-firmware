@@ -96,42 +96,30 @@ depends on staging having already happened is the failure to watch for.
 
 ---
 
-### T2-soak-attestation - Attest soak results and reuse them on identical inputs
+### T2-soak-attestation - Bind the reused soak logs by content, not by size
 
-Published images were byte-identical across `v0.9.10` to `v0.9.13`, and no soak
-driver changed over that span, so three consecutive releases re-soaked binaries
-that had already been soaked. A soak result should be a durable signed statement
-about a set of inputs rather than a fact about one release run.
-[`docs/release_proportionality.md`](docs/release_proportionality.md) Part 3 is
-the design, including why the key must cover the images and harness rather than
-the source tree: `src/` changed across all three of those releases without
-changing a single image.
+`--reuse-soak` adopts a published release's soak when this run's
+`soak_inputs_sha256` matches its own, verifying that release's signature, its
+signed checksum manifest, its `SOAK_KEY` payload digest and its evidence index,
+then re-validating every adopted log. One link in that chain is weaker than the
+rest: a soak log is bound by its `evidence/INDEX` row -- terminal record and
+byte size -- and not by a content digest, because the `soak` evidence role has
+never had one. A tampered body of identical length carrying an identical
+`SOAK_RESULT` line would satisfy every check above.
 
-Increment 1 is **done**: `SOAK_KEY` is written after a successful soak as a
-signed provenance file, keyed on the combination names, each driven artifact,
-the soak driver sources every lane declares in the Makefile, and the identity of
-each tool that executes a soak; `QUALIFICATION` records `soak_inputs_sha256`
-(`format=8`) and `MANIFEST.md` publishes it. The attestation is the published
-release itself rather than a separate store: `SHA256SUMS` covers `SOAK_KEY` and
-the release signature signs it, so reuse needs no second trust root and no extra
-signing step.
+That gap predates reuse and was harmless while every log was produced by the run
+that consumed it. Reuse is what makes it reachable: the logs now come from a
+tree the current run did not produce.
 
-Acceptance for increment 2: a reuse flag recomputes the key after the build
-phase, locates a published release whose `QUALIFICATION` carries the same
-`soak_inputs_sha256`, verifies that release's signature, requires its attested
-duration to meet the requested mode, folds its retained soak logs into evidence
-and records `soak_provenance` in `QUALIFICATION`; a miss runs the soak; and
-`MANIFEST.md` states reuse in prose. Any change to an image, driver, simulator
-or duration changes the key, so reuse fails closed with no invalidation step to
-remember.
+Acceptance: the `soak` evidence role carries a payload digest the way build
+transcripts already do; `release_terminal_record` and the qualification verifier
+hold it to that digest; `release_reuse_soak_attestation` verifies each adopted
+log against it; and a same-length, same-result body substituted into a source
+release is refused by name.
 
-Dependencies: none. It is the highest-value remaining item: every release it
-would have helped was a documentation or tooling release that changed no image.
-Effort: about 6-8 hours. Risk: Medium; the key's input set is the whole design,
-and an input omitted from it is an attestation that outlives its own validity.
-A soak is also stochastic, so reuse trades an additional random sample for the
-day it costs -- the compensating policy is that any image change forces a fresh
-full-duration soak, which the key enforces automatically.
+Dependencies: touches the evidence contract, so it lands as its own schema
+revision rather than inside a feature. Effort: about 2-3 hours. Risk: Low; the
+mechanism already exists for four other roles.
 
 ---
 
@@ -865,7 +853,7 @@ The stable ID in each row matches exactly one open section above.
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T2-ci-parity | Make local/remote CI parity structural | 2 | 4-6 h | High - a failed remote gate costs a 25-hour release |
 | T2-release-stage-rehearsal | Rehearse the staged output before the soak | 2 | 4-6 h | High - removes the post-soak failure class |
-| T2-soak-attestation | Reuse soak results on identical inputs (increment 1 done) | 2 | 4-5 h | High - a doc-only release stops re-soaking unchanged images |
+| T2-soak-attestation | Bind reused soak logs by content, not by size | 2 | 2-3 h | Medium - closes the one weak link in soak reuse |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

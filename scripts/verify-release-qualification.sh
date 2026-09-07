@@ -71,7 +71,7 @@ declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
 	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
 	pic12f675_matrix_sha256 resource_tables_sha256 toolchain_sha256 \
-	evidence_index_sha256 soak_inputs_sha256)
+	evidence_index_sha256 soak_inputs_sha256 soak_source)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -107,13 +107,16 @@ done
 # result is VALID FOR -- the driven images, the declared soak driver sources,
 # and the tools that execute a soak -- so a later release can establish that its
 # own inputs are identical instead of re-deriving a result it already has.
+# format=9 adds soak_source: `this-run`, or the published release whose signed
+# attestation this release stands on. A reader must never have to infer whether
+# a soak was executed here.
 #
 # Exactly one format is accepted here. This verifier runs on a freshly staged
 # directory and on the tag CI is publishing, never on a historical release, so
 # a compatibility branch would be unreachable code claiming a capability
 # nothing exercises. verify-release-images.sh, which IS run against published
 # directories, carries the era policy instead.
-[ "${q[format]}" = 8 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 9 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -128,6 +131,15 @@ done
 	|| die "QUALIFICATION toolchain_sha256 is not a lowercase SHA-256"
 [[ "${q[soak_inputs_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION soak_inputs_sha256 is not a lowercase SHA-256"
+# Either this run soaked, or a named published release did. There is no third
+# state, and "unknown" is not one of them.
+case "${q[soak_source]}" in
+	this-run) ;;
+	v[0-9]*.[0-9]*.[0-9]*)
+		[ -f "$repo_root/release/${q[soak_source]}/QUALIFICATION" ] \
+			|| die "QUALIFICATION soak_source names ${q[soak_source]}, which this tree does not retain" ;;
+	*) die "QUALIFICATION soak_source is neither this-run nor a released version: ${q[soak_source]}" ;;
+esac
 
 case "${q[release_mode]}" in
 	production)
@@ -496,10 +508,13 @@ soak_key_payload_digest=$(grep -v '^SOAK_KEY_RESULT ' "$soak_key" | sha256sum) \
 	<(grep -v '^SOAK_KEY_RESULT ' "$soak_key") \
 	|| die "the SOAK_KEY payload binds itself to a release identity and can never match another"
 
-grep -Fxq "SOAK_KEY format=1" "$soak_key" \
+grep -Fxq "SOAK_KEY format=2" "$soak_key" \
 	|| die "SOAK_KEY has no format header record"
-grep -Fxq "duration_ms=${q[soak_duration_ms]}" "$soak_key" \
-	|| die "SOAK_KEY does not record the soak duration QUALIFICATION declares"
+# Duration is on the RESULT line, not in the payload: it is a magnitude rather
+# than an input, so reuse compares it with >= and an equal-duration requirement
+# would stop an express release standing on a production soak.
+! grep -q "^duration_ms=" <(grep -v '^SOAK_KEY_RESULT ' "$soak_key") \
+	|| die "the SOAK_KEY payload carries a duration and can only ever match an equally long soak"
 grep -Fxq "liveness_interval_ms=${q[soak_liveness_interval_ms]}" "$soak_key" \
 	|| die "SOAK_KEY does not record the liveness interval QUALIFICATION declares"
 soak_key_combinations=$(grep -c $'^combination\t' "$soak_key") \
@@ -514,7 +529,7 @@ soak_key_harnesses=$(grep -c $'^harness\t' "$soak_key") \
 	|| die "could not count the keyed soak harnesses"
 [ "$soak_key_harnesses" -gt 0 ] \
 	|| die "SOAK_KEY names no soak harnesses"
-soak_key_result="SOAK_KEY_RESULT format=1 status=pass combinations=$soak_key_combinations drivers=$soak_key_drivers harnesses=$soak_key_harnesses inputs_sha256=${q[soak_inputs_sha256]} source_commit=${q[source_commit]}"
+soak_key_result="SOAK_KEY_RESULT format=2 status=pass combinations=$soak_key_combinations drivers=$soak_key_drivers harnesses=$soak_key_harnesses duration_ms=${q[soak_duration_ms]} inputs_sha256=${q[soak_inputs_sha256]} source_commit=${q[source_commit]}"
 [ "${soak_key_results[0]}" = "$soak_key_result" ] \
 	|| die "SOAK_KEY has no exact source-bound complete result"
 
@@ -647,6 +662,16 @@ grep -Fxq -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_i
 	|| die "MANIFEST.md evidence index digest does not match QUALIFICATION"
 grep -Fxq -- "- **Soak input key:** \`SOAK_KEY\` (SHA-256 \`${q[soak_inputs_sha256]}\`), $soak_key_combinations combinations over $soak_key_drivers driver sources and $soak_key_harnesses harnesses" "$manifest" \
 	|| die "MANIFEST.md does not publish the soak input key QUALIFICATION records"
+# A reader must be able to see, in the human-readable document, that a release
+# did not execute its own soak. Recording it only in QUALIFICATION would make
+# the fact machine-discoverable and humanly invisible.
+if [ "${q[soak_source]}" = this-run ]; then
+	grep -Fxq -- "- **Soak provenance:** run for this release" "$manifest" \
+		|| die "MANIFEST.md does not state that this release ran its own soak"
+else
+	grep -Fxq -- "- **Soak provenance:** reused from \`${q[soak_source]}\`, whose signed record covers the identical soak inputs above" "$manifest" \
+		|| die "MANIFEST.md does not disclose that this release reused the soak recorded by ${q[soak_source]}"
+fi
 
 # --- the measured resource figures, and the manifest rows they produced -------
 # Until now the release published a flash column the producer derived for itself,

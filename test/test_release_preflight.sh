@@ -2596,6 +2596,60 @@ grep -Fq 'release_validate_claim_boundaries "$REPO_ROOT"' "$RELEASE" \
 	|| fail "make-release.sh no longer validates the bounded claims before a release"
 checks=$((checks + 1))
 
+# --- soak reuse --------------------------------------------------------------
+# release_reuse_soak_attestation turns "another release declares my key" into
+# evidence, or refuses. Its accepting path cannot be exercised here: it requires
+# a release directory carrying a SOAK_KEY under a valid detached signature, and
+# this suite has no signing key. The first real exercise is the first release
+# cut after one that recorded a key. What IS testable is that it refuses
+# everything short of that, against the real signed releases this tree retains.
+declare -F release_reuse_soak_attestation >/dev/null \
+	|| fail "the soak-reuse function is missing"
+checks=$((checks + 1))
+
+reuse_scratch="$work/soak-reuse"
+mkdir -p "$reuse_scratch"
+reuse_rc=0
+release_reuse_soak_attestation >"$output" 2>&1 || reuse_rc=$?
+[ "$reuse_rc" -eq 2 ] \
+	|| fail "soak reuse accepted a call with no arguments"
+checks=$((checks + 1))
+
+if release_reuse_soak_attestation "$work/no-such-release" deadbeef 1 \
+		"$reuse_scratch" attiny85_cd4053_simple >"$output" 2>&1; then
+	fail "soak reuse accepted a release directory that does not exist"
+fi
+grep -Fq 'is missing, empty, or not a regular file' "$output" \
+	|| fail "an absent release was refused without its diagnostic: $(<"$output")"
+checks=$((checks + 1))
+
+# Every release published before the key existed is a release with nothing to
+# reuse, and must be refused as such rather than treated as an empty match.
+reuse_legacy=$(ls -d "$ROOT"/release/v*/ | tail -1)
+reuse_legacy=${reuse_legacy%/}
+if [ ! -f "$reuse_legacy/SOAK_KEY" ]; then
+	if release_reuse_soak_attestation "$reuse_legacy" \
+			0000000000000000000000000000000000000000000000000000000000000000 \
+			1 "$reuse_scratch" attiny85_cd4053_simple >"$output" 2>&1; then
+		fail "soak reuse accepted a release that carries no soak key"
+	fi
+	grep -Fq 'SOAK_KEY is missing, empty, or not a regular file' "$output" \
+		|| fail "a release with no soak key was refused without its diagnostic: $(<"$output")"
+	checks=$((checks + 1))
+fi
+
+# Nothing may be adopted by a refused reuse.
+[ -z "$(ls -A "$reuse_scratch")" ] \
+	|| fail "a refused soak reuse left adopted logs behind: $(ls -A "$reuse_scratch")"
+checks=$((checks + 1))
+
+# The release path must offer the flag, and must never reuse silently.
+grep -Fq -- '--reuse-soak)' "$RELEASE" \
+	|| fail "make-release.sh does not accept --reuse-soak"
+grep -Fq 'SOAK_SOURCE=this-run' "$RELEASE" \
+	|| fail "make-release.sh does not default soak provenance to this run"
+checks=$((checks + 1))
+
 # ---------------------------------------------------------------------------
 # The PIC12F675 flashing contract.
 #

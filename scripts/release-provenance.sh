@@ -33,6 +33,90 @@ release_tool_version_line() {
 	printf '%s\n' "$first_line"
 }
 
+# Verify a published release's soak attestation and adopt its retained logs.
+#
+# Called only when the caller has already established that the release's
+# QUALIFICATION carries the same soak_inputs_sha256 this run computed. That
+# match is a claim; everything below is what turns it into evidence.
+release_reuse_soak_attestation() {
+	if [ "$#" -ne 5 ]; then
+		printf 'FATAL: release_reuse_soak_attestation requires a release dir, key, duration, evidence dir and soak names\n' >&2
+		return 2
+	fi
+	local source_dir=$1 expected_key=$2 expected_duration=$3 evid=$4 soak_names=$5
+	local scripts_dir declared_key declared_duration payload_digest index_digest
+	local declared_index name log row row_size row_record actual_size actual_record
+	local label
+	label=$(basename -- "$source_dir")
+
+	scripts_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P) || return 1
+
+	for required in QUALIFICATION SOAK_KEY SHA256SUMS SHA256SUMS.asc evidence/INDEX; do
+		[ -f "$source_dir/$required" ] && [ ! -L "$source_dir/$required" ] \
+			&& [ -s "$source_dir/$required" ] \
+			|| { printf 'FATAL: %s is missing, empty, or not a regular file in %s\n' \
+				"$required" "$label" >&2; return 1; }
+	done
+
+	# The signature is the whole basis for trusting anything in there.
+	"$scripts_dir/verify-release-signature.sh" detached \
+		"$source_dir/SHA256SUMS.asc" "$source_dir/SHA256SUMS" >/dev/null \
+		|| { printf 'FATAL: %s does not carry a valid detached signature over its SHA256SUMS\n' \
+			"$label" >&2; return 1; }
+	( cd "$source_dir" && sha256sum --quiet -c SHA256SUMS ) >/dev/null \
+		|| { printf 'FATAL: %s does not match its own signed SHA256SUMS\n' "$label" >&2; return 1; }
+
+	# SHA256SUMS covers QUALIFICATION and SOAK_KEY, so from here the file
+	# contents are signed; what remains is that they agree with each other and
+	# with the key this run computed.
+	declared_key=$(awk -F= '$1 == "soak_inputs_sha256" { print $2 }' \
+		"$source_dir/QUALIFICATION") || return 1
+	[ "$declared_key" = "$expected_key" ] \
+		|| { printf 'FATAL: %s declares soak_inputs_sha256=%s, not %s\n' \
+			"$label" "$declared_key" "$expected_key" >&2; return 1; }
+	declared_duration=$(awk -F= '$1 == "soak_duration_ms" { print $2 }' \
+		"$source_dir/QUALIFICATION") || return 1
+	[ "$declared_duration" = "$expected_duration" ] \
+		|| { printf 'FATAL: %s declares soak_duration_ms=%s, not %s\n' \
+			"$label" "$declared_duration" "$expected_duration" >&2; return 1; }
+	payload_digest=$(grep -v '^SOAK_KEY_RESULT ' "$source_dir/SOAK_KEY" | sha256sum) \
+		|| return 1
+	[ "${payload_digest%% *}" = "$expected_key" ] \
+		|| { printf "FATAL: %s's SOAK_KEY payload does not hash to the key it declares\n" \
+			"$label" >&2; return 1; }
+
+	# The evidence index is what binds the retained logs to the signed record.
+	declared_index=$(awk -F= '$1 == "evidence_index_sha256" { print $2 }' \
+		"$source_dir/QUALIFICATION") || return 1
+	index_digest=$(sha256sum -- "$source_dir/evidence/INDEX") || return 1
+	[ "${index_digest%% *}" = "$declared_index" ] \
+		|| { printf "FATAL: %s's evidence index does not match the digest QUALIFICATION signs\n" \
+			"$label" >&2; return 1; }
+
+	for name in $soak_names; do
+		log="$source_dir/evidence/soak-$name.log"
+		[ -f "$log" ] && [ ! -L "$log" ] && [ -s "$log" ] \
+			|| { printf 'FATAL: %s retains no soak log for %s\n' "$label" "$name" >&2; return 1; }
+		row=$(grep -F $'soak-'"$name"$'.log\t' "$source_dir/evidence/INDEX") \
+			|| { printf "FATAL: %s's evidence index has no row for soak-%s.log\n" \
+				"$label" "$name" >&2; return 1; }
+		row_size=$(printf '%s' "$row" | cut -f3)
+		row_record=$(printf '%s' "$row" | cut -f4-)
+		actual_size=$(stat -c%s "$log") || return 1
+		[ "$actual_size" = "$row_size" ] \
+			|| { printf 'FATAL: %s soak log for %s is %s bytes, not the %s its signed index records\n' \
+				"$label" "$name" "$actual_size" "$row_size" >&2; return 1; }
+		actual_record=$(grep '^SOAK_RESULT ' "$log") \
+			|| { printf 'FATAL: %s soak log for %s carries no terminal record\n' \
+				"$label" "$name" >&2; return 1; }
+		[ "$actual_record" = "$row_record" ] \
+			|| { printf 'FATAL: %s soak log for %s does not carry the result its signed index records\n' \
+				"$label" "$name" >&2; return 1; }
+		cp -p -- "$log" "$evid/soak-$name.log" \
+			|| { printf 'FATAL: could not adopt the attested soak log for %s\n' "$name" >&2; return 1; }
+	done
+}
+
 # Identify the patched yasimavr build the ATtiny202 lane runs on.
 #
 # yasimavr has no --version flag that reports what this project actually

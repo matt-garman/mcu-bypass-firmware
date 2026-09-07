@@ -103,6 +103,16 @@
 #                              release, and the shortened soak is recorded --
 #                              release_mode=express in QUALIFICATION, a banner
 #                              in MANIFEST.md, and the true duration in both.
+#     --reuse-soak             if a published release already carries this run's
+#                              soak_inputs_sha256 -- the same images, drivers,
+#                              harnesses and liveness interval -- adopt its
+#                              signed soak instead of running one. Its attested
+#                              duration must be at least this mode's, its
+#                              signature and evidence index are verified, every
+#                              adopted log is re-validated, and the release
+#                              records soak_source=<that version> in both
+#                              QUALIFICATION and MANIFEST.md. Without a match it
+#                              soaks normally.
 #     --soak-duration-ms N     per-combo soak duration (default/minimum for a
 #                              production release: 24 h; --express lowers that
 #                              floor to 1 h; dry runs may use less)
@@ -154,6 +164,7 @@ VERSION_WAS_SUPPLIED=0
 PREFLIGHT=0
 DRY_RUN=0
 EXPRESS=0
+REUSE_SOAK=0
 RELEASE_MODE=production
 # Independent local-release policy pins. These intentionally do not come from
 # Make, so an unintended production-policy mismatch fails qualification.
@@ -198,6 +209,7 @@ while [ $# -gt 0 ]; do
 		--preflight)          PREFLIGHT=1; shift ;;
 		--dry-run)            DRY_RUN=1; shift ;;
 		--express)            EXPRESS=1; shift ;;
+		--reuse-soak)         REUSE_SOAK=1; shift ;;
 		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"
 			SOAK_DURATION_WAS_SUPPLIED=1; shift 2 ;;
 		--jobs)               JOBS="${2:?--jobs needs a value}"; shift 2 ;;
@@ -222,6 +234,8 @@ done
 	|| die "--preflight and --dry-run are mutually exclusive"
 [ "$EXPRESS" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
 	|| die "--preflight and --express are mutually exclusive"
+[ "$REUSE_SOAK" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
+	|| die "--reuse-soak is meaningless with --preflight: preflight exits before the soak"
 if [ "$VERSION_WAS_SUPPLIED" -eq 0 ] && [ -n "$MAKE_VERSION" ]; then
 	# GNU Make exports command-line variables to recipes. Reading VERSION from
 	# that environment keeps arbitrary bytes out of the recipe's shell syntax;
@@ -391,6 +405,8 @@ declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
 declare -F release_yasimavr_build_line >/dev/null \
 	|| die "release provenance checker did not define its yasimavr build-identity function"
+declare -F release_reuse_soak_attestation >/dev/null \
+	|| die "release provenance checker did not define its soak-reuse function"
 declare -F release_pinned_version_matches >/dev/null \
 	|| die "release provenance checker did not define its version-pin function"
 declare -F release_require_main_branch >/dev/null \
@@ -2211,16 +2227,192 @@ if [ "$actual_soaks" != "$canonical_soaks" ]; then
 	diff -u <(printf '%s\n' "$canonical_soaks") <(printf '%s\n' "$actual_soaks") >&2 || true
 	die "release soak combinations do not match canonical RELEASE_SOAK_NAMES"
 fi
+
+# ----------------------------------------------------------------------------
+# What this soak WILL prove, as a reusable key.
+# ----------------------------------------------------------------------------
+# A soak is the only part of a release measured in days, and between v0.9.10 and
+# v0.9.13 it re-ran three times against byte-identical images: the releases in
+# between changed documentation, tests and tooling, and no image at all. Nothing
+# recorded that, so every one paid the full duration to re-derive a result it
+# already had.
+#
+# SOAK_KEY is the record that makes the question answerable. It names every
+# input that can change what a soak observes, and deliberately omits everything
+# that cannot -- there is no version, no date and no source commit in the hashed
+# payload, because a release that changes only prose must produce the SAME key.
+# The commit appears on the RESULT line, outside the payload, where it says who
+# produced the record without becoming part of its identity.
+#
+# Duration is on the result line for a different reason: it is a magnitude, not
+# an input. A 24-hour soak of these inputs subsumes a 1-hour one, so reuse
+# compares it with >= rather than for equality -- putting it in the payload
+# would mean an express release could never stand on a production soak, which
+# is backwards. The liveness interval STAYS in the payload: it changes what the
+# soak checks rather than how long it checks for, and an exact match is the
+# conservative reading.
+#
+# This runs BEFORE the soak, not after it, because the key is what decides
+# whether the soak has to run at all.
+#
+# What is IN: each combination and the exact artifact it drove (ELF, shipped HEX
+# or -- for the PIC12F675 -- the derived simcal image), the soak driver sources
+# each lane declares in the Makefile, the identity of every tool that EXECUTES a
+# soak, and the durations.
+#
+# What is deliberately OUT: the image-producing compilers. XC8 and avr-gcc
+# determine the images, and the images are hashed here directly, so naming the
+# compilers again would add no information and would invalidate a soak whenever
+# an unrelated toolchain row moved. For the same reason this does not fold in
+# toolchain_sha256, which covers cppcheck, CBMC, clang and DFP paths -- none of
+# which ever runs a soak. A key that over-invalidates is a key nobody can reuse.
+log "recording the soak input key..."
+soak_key_drivers=$(
+	for dep_var in AVR_SOAK_DEPS XT_SOAK_DEPS PIC10F322_SOAK_DEPS \
+			PIC10F320_SOAK_DEPS PIC12F675_SOAK_DEPS; do
+		mkv "$dep_var" | tr ' ' '\n'
+	done | sed '/^$/d' | sort -u
+) || die "could not read the soak driver sources from the Makefile"
+[ -n "$soak_key_drivers" ] \
+	|| die "the Makefile declares no soak driver sources; refusing to key a soak on nothing"
+TC_SOAK_CXX=$(release_tool_version_line "PIC soak C++ (PIC_SOAK_CXX=$PIC_SOAK_CXX)" \
+	"$PIC_SOAK_CXX") \
+	|| die "could not record the PIC soak compiler provenance"
+TC_SOAK_CXX_320=$(release_tool_version_line \
+	"PIC10F320 soak C++ (PIC10F320_SOAK_CXX=$PIC10F320_SOAK_CXX)" \
+	"$PIC10F320_SOAK_CXX") \
+	|| die "could not record the PIC10F320 soak compiler provenance"
+soak_key_payload="$WORK/soak-key.payload"
+{
+	printf 'SOAK_KEY format=2\n'
+	printf 'liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
+	for name in $(printf '%s\n' "${SOAK_NAMES[@]}" | sort); do
+		image=${SOAK_IMAGE[$name]:-}
+		[ -n "$image" ] \
+			|| die "soak combination $name records no image; the key would omit what it drove"
+		[ -f "$image" ] || die "soak image for $name is missing: $image"
+		digest=$(sha256sum -- "$image") \
+			|| die "could not hash the soak image for $name: $image"
+		printf 'combination\t%s\t%s\n' "$name" "${digest%% *}"
+	done
+	for driver in $soak_key_drivers; do
+		[ -f "$driver" ] \
+			|| die "declared soak driver source is missing: $driver"
+		digest=$(sha256sum -- "$driver") \
+			|| die "could not hash the soak driver source: $driver"
+		printf 'driver\t%s\t%s\n' "$driver" "${digest%% *}"
+	done
+	printf 'harness\t%s\t%s\n' \
+		'simavr' "$TC_SIMAVR" \
+		'gpsim' "$TC_GPSIM" \
+		'yasimavr' "$TC_YASIMAVR" \
+		'host-cc' "$TC_HOST_CC" \
+		'soak-cxx' "$TC_SOAK_CXX" \
+		'soak-cxx-320' "$TC_SOAK_CXX_320"
+} > "$soak_key_payload" \
+	|| die "could not record the soak input key"
+if grep -q '^[[:space:]]*$' "$soak_key_payload"; then
+	die "the soak input key contains a blank line"
+fi
+soak_key_combinations=$(grep -c $'^combination\t' "$soak_key_payload") \
+	|| die "could not count the keyed soak combinations"
+[ "$soak_key_combinations" -eq "$NCOMBOS" ] \
+	|| die "the soak input key names $soak_key_combinations combinations, not the $NCOMBOS that ran"
+soak_key_driver_count=$(grep -c $'^driver\t' "$soak_key_payload") \
+	|| die "could not count the keyed soak driver sources"
+soak_key_harnesses=$(grep -c $'^harness\t' "$soak_key_payload") \
+	|| die "could not count the keyed soak harnesses"
+# The digest covers the payload and NOT the result line that carries it, for the
+# same reason seal_evidence_result excludes its own: a self-referential hash
+# cannot be recomputed by a reader.
+soak_inputs_sha256=$(sha256sum -- "$soak_key_payload") \
+	|| die "could not hash the soak input key"
+soak_inputs_sha256=${soak_inputs_sha256%% *}
+{
+	cat -- "$soak_key_payload"
+	printf 'SOAK_KEY_RESULT format=2 status=pass combinations=%d drivers=%d harnesses=%d duration_ms=%s inputs_sha256=%s source_commit=%s\n' \
+		"$soak_key_combinations" "$soak_key_driver_count" "$soak_key_harnesses" \
+		"$SOAK_DURATION_MS" "$soak_inputs_sha256" "$GIT_SHA"
+} > "$WORK/SOAK_KEY" \
+	|| die "could not seal the soak input key"
+ok "soak input key: $soak_inputs_sha256 ($soak_key_combinations combinations, $soak_key_driver_count driver sources, $soak_key_harnesses harnesses)."
+
 JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
 	|| die "could not resolve the release soak concurrency limit"
+# ----------------------------------------------------------------------------
+# Reuse: has this exact set of inputs already been soaked, and signed for?
+# ----------------------------------------------------------------------------
+# The attestation is a PUBLISHED RELEASE, not a separate store. SHA256SUMS
+# already covers SOAK_KEY and QUALIFICATION, and the detached signature already
+# signs SHA256SUMS, so a release that carries the same soak_inputs_sha256 is a
+# signed statement that these inputs were soaked -- with no second trust root
+# and no extra signing step to remember.
+#
+# What this chain establishes, and what it does not: the source release's
+# signature, its checksum manifest, its SOAK_KEY payload digest and its evidence
+# index are all verified here, and every reused log is re-validated by the same
+# validate_soak_result the live path uses. Soak logs are bound by their INDEX
+# row -- terminal record and byte size -- rather than by a content digest, so a
+# tampered body of identical length carrying an identical result line would not
+# be caught. Closing that means giving the soak role a payload digest, which is
+# a change to the evidence contract rather than to this feature.
+SOAK_SOURCE=this-run
+if [ "$REUSE_SOAK" -eq 1 ]; then
+	log "looking for a published release soaked on these exact inputs..."
+	reuse_candidate=""
+	reuse_duration=0
+	for candidate_qualification in "$REPO_ROOT"/release/v*/QUALIFICATION; do
+		[ -f "$candidate_qualification" ] && [ ! -L "$candidate_qualification" ] \
+			&& [ -s "$candidate_qualification" ] || continue
+		candidate_dir=${candidate_qualification%/QUALIFICATION}
+		candidate_version=${candidate_dir##*/}
+		[ "$candidate_version" != "$VERSION" ] || continue
+		candidate_key=$(awk -F= '$1 == "soak_inputs_sha256" { print $2 }' \
+			"$candidate_qualification") || continue
+		[ "$candidate_key" = "$soak_inputs_sha256" ] || continue
+		candidate_duration=$(awk -F= '$1 == "soak_duration_ms" { print $2 }' \
+			"$candidate_qualification") || continue
+		[[ "$candidate_duration" =~ ^[1-9][0-9]*$ ]] || continue
+		candidate_mode=$(awk -F= '$1 == "release_mode" { print $2 }' \
+			"$candidate_qualification") || continue
+		# A rehearsal is not evidence. Its own MANIFEST says so.
+		[ "$candidate_mode" != dry-run ] || continue
+		# Longest wins: more soak is strictly better evidence for the same
+		# inputs, and the duration comparison below is >= for the same reason.
+		[ "$candidate_duration" -gt "$reuse_duration" ] || continue
+		reuse_duration=$candidate_duration
+		reuse_candidate=$candidate_dir
+	done
+	if [ -z "$reuse_candidate" ]; then
+		log "no published release carries soak_inputs_sha256=$soak_inputs_sha256; soaking."
+	elif [ "$reuse_duration" -lt "$SOAK_DURATION_MS" ]; then
+		log "$(basename "$reuse_candidate") soaked these inputs for ${reuse_duration}ms, short of the ${SOAK_DURATION_MS}ms this mode requires; soaking."
+	else
+		release_reuse_soak_attestation "$reuse_candidate" "$soak_inputs_sha256" \
+			"$reuse_duration" "$EVID" "$RELEASE_SOAK_NAMES" \
+			|| die "refusing to reuse the soak recorded by $(basename "$reuse_candidate") (see the diagnostic above)."
+		SOAK_SOURCE=$(basename "$reuse_candidate")
+		# Record what was actually soaked, not what was asked for. The release
+		# says 24 h because these inputs WERE soaked for 24 h -- in the run that
+		# produced $SOAK_SOURCE, which its signature attests to.
+		SOAK_DURATION_MS=$reuse_duration
+		ok "reusing the soak $SOAK_SOURCE recorded for these inputs (${reuse_duration}ms per combination); its signature and evidence index verify."
+	fi
+fi
+
 hours=$("$AWK" -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
 ncpu=$(nproc 2>/dev/null || echo "?")
-log "launching $NCOMBOS soak combos, up to $JOBS at once (~${hours} h each; this box has $ncpu logical CPUs)."
-[ "$JOBS" -lt "$NCOMBOS" ] && warn "more combos ($NCOMBOS) than the --jobs cap ($JOBS): total time scales up."
+if [ "$SOAK_SOURCE" = this-run ]; then
+	log "launching $NCOMBOS soak combos, up to $JOBS at once (~${hours} h each; this box has $ncpu logical CPUs)."
+	[ "$JOBS" -lt "$NCOMBOS" ] && warn "more combos ($NCOMBOS) than the --jobs cap ($JOBS): total time scales up."
+else
+	log "validating $NCOMBOS adopted soak logs from $SOAK_SOURCE (~${hours} h each, already run)."
+fi
 
 START_EPOCH=$(date +%s)
 declare -A SOAK_PID
 for name in "${SOAK_NAMES[@]}"; do
+	[ "$SOAK_SOURCE" = this-run ] || break
 	# Throttle to JOBS concurrent runs.
 	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 5; done
 	# Defer a signal only across this launch-and-track critical section. The
@@ -2267,9 +2459,17 @@ validate_soak_result() {
 # must agree; either one alone is insufficient evidence.
 SOAK_FAILS=0
 for name in "${SOAK_NAMES[@]}"; do
-	if wait "${SOAK_PID[$name]}"; then SOAK_RC[$name]=0; else SOAK_RC[$name]=$?; fi
-	forget_soak_pid "${SOAK_PID[$name]}"
-	unset "SOAK_PID[$name]"
+	if [ "$SOAK_SOURCE" = this-run ]; then
+		if wait "${SOAK_PID[$name]}"; then SOAK_RC[$name]=0; else SOAK_RC[$name]=$?; fi
+		forget_soak_pid "${SOAK_PID[$name]}"
+		unset "SOAK_PID[$name]"
+	else
+		# An adopted log is validated by exactly the same rule a live one is --
+		# reuse skips the EXECUTION, never the check. If an attested log does not
+		# satisfy validate_soak_result at the attested duration, the reuse is
+		# incoherent and the release stops here.
+		SOAK_RC[$name]=0
+	fi
 	if [ "${SOAK_RC[$name]}" -eq 0 ] \
 			&& validate_soak_result "$name" "${SOAK_LOG[$name]}"; then
 		ok "soak $name: PASS"
@@ -2309,105 +2509,6 @@ current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 { [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
 	&& [ "$current_xt_elf_hashes" = "$validated_xt_elf_hashes" ]; } \
 	|| die "an ATtiny202 image or ELF changed while its soak was running"
-
-# ----------------------------------------------------------------------------
-# What this soak actually proved, as a reusable key.
-# ----------------------------------------------------------------------------
-# A soak is the only part of a release measured in days, and between v0.9.10 and
-# v0.9.13 it re-ran three times against byte-identical images: the releases in
-# between changed documentation, tests and tooling, and no image at all. Nothing
-# recorded that, so every one paid the full duration to re-derive a result it
-# already had.
-#
-# SOAK_KEY is the record that makes the question answerable. It names every
-# input that can change what a soak observes, and deliberately omits everything
-# that cannot -- there is no version, no date and no source commit in the hashed
-# payload, because a release that changes only prose must produce the SAME key.
-# The commit appears on the RESULT line, outside the payload, where it says who
-# produced the record without becoming part of its identity.
-#
-# What is IN: each combination and the exact artifact it drove (ELF, shipped HEX
-# or -- for the PIC12F675 -- the derived simcal image), the soak driver sources
-# each lane declares in the Makefile, the identity of every tool that EXECUTES a
-# soak, and the durations.
-#
-# What is deliberately OUT: the image-producing compilers. XC8 and avr-gcc
-# determine the images, and the images are hashed here directly, so naming the
-# compilers again would add no information and would invalidate a soak whenever
-# an unrelated toolchain row moved. For the same reason this does not fold in
-# toolchain_sha256, which covers cppcheck, CBMC, clang and DFP paths -- none of
-# which ever runs a soak. A key that over-invalidates is a key nobody can reuse.
-log "recording the soak input key..."
-soak_key_drivers=$(
-	for dep_var in AVR_SOAK_DEPS XT_SOAK_DEPS PIC10F322_SOAK_DEPS \
-			PIC10F320_SOAK_DEPS PIC12F675_SOAK_DEPS; do
-		mkv "$dep_var" | tr ' ' '\n'
-	done | sed '/^$/d' | sort -u
-) || die "could not read the soak driver sources from the Makefile"
-[ -n "$soak_key_drivers" ] \
-	|| die "the Makefile declares no soak driver sources; refusing to key a soak on nothing"
-TC_SOAK_CXX=$(release_tool_version_line "PIC soak C++ (PIC_SOAK_CXX=$PIC_SOAK_CXX)" \
-	"$PIC_SOAK_CXX") \
-	|| die "could not record the PIC soak compiler provenance"
-TC_SOAK_CXX_320=$(release_tool_version_line \
-	"PIC10F320 soak C++ (PIC10F320_SOAK_CXX=$PIC10F320_SOAK_CXX)" \
-	"$PIC10F320_SOAK_CXX") \
-	|| die "could not record the PIC10F320 soak compiler provenance"
-soak_key_payload="$WORK/soak-key.payload"
-{
-	printf 'SOAK_KEY format=1\n'
-	printf 'duration_ms=%s\n' "$SOAK_DURATION_MS"
-	printf 'liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
-	for name in $(printf '%s\n' "${SOAK_NAMES[@]}" | sort); do
-		image=${SOAK_IMAGE[$name]:-}
-		[ -n "$image" ] \
-			|| die "soak combination $name records no image; the key would omit what it drove"
-		[ -f "$image" ] || die "soak image for $name is missing: $image"
-		digest=$(sha256sum -- "$image") \
-			|| die "could not hash the soak image for $name: $image"
-		printf 'combination\t%s\t%s\n' "$name" "${digest%% *}"
-	done
-	for driver in $soak_key_drivers; do
-		[ -f "$driver" ] \
-			|| die "declared soak driver source is missing: $driver"
-		digest=$(sha256sum -- "$driver") \
-			|| die "could not hash the soak driver source: $driver"
-		printf 'driver\t%s\t%s\n' "$driver" "${digest%% *}"
-	done
-	printf 'harness\t%s\t%s\n' \
-		'simavr' "$TC_SIMAVR" \
-		'gpsim' "$TC_GPSIM" \
-		'yasimavr' "$TC_YASIMAVR" \
-		'host-cc' "$TC_HOST_CC" \
-		'soak-cxx' "$TC_SOAK_CXX" \
-		'soak-cxx-320' "$TC_SOAK_CXX_320"
-} > "$soak_key_payload" \
-	|| die "could not record the soak input key"
-if grep -q '^[[:space:]]*$' "$soak_key_payload"; then
-	die "the soak input key contains a blank line"
-fi
-soak_key_combinations=$(grep -c $'^combination\t' "$soak_key_payload") \
-	|| die "could not count the keyed soak combinations"
-[ "$soak_key_combinations" -eq "$NCOMBOS" ] \
-	|| die "the soak input key names $soak_key_combinations combinations, not the $NCOMBOS that ran"
-soak_key_driver_count=$(grep -c $'^driver\t' "$soak_key_payload") \
-	|| die "could not count the keyed soak driver sources"
-soak_key_harnesses=$(grep -c $'^harness\t' "$soak_key_payload") \
-	|| die "could not count the keyed soak harnesses"
-# The digest covers the payload and NOT the result line that carries it, for the
-# same reason seal_evidence_result excludes its own: a self-referential hash
-# cannot be recomputed by a reader.
-soak_inputs_sha256=$(sha256sum -- "$soak_key_payload") \
-	|| die "could not hash the soak input key"
-soak_inputs_sha256=${soak_inputs_sha256%% *}
-{
-	cat -- "$soak_key_payload"
-	printf 'SOAK_KEY_RESULT format=1 status=pass combinations=%d drivers=%d harnesses=%d inputs_sha256=%s source_commit=%s\n' \
-		"$soak_key_combinations" "$soak_key_driver_count" "$soak_key_harnesses" \
-		"$soak_inputs_sha256" "$GIT_SHA"
-} > "$WORK/SOAK_KEY" \
-	|| die "could not seal the soak input key"
-ok "soak input key: $soak_inputs_sha256 ($soak_key_combinations combinations, $soak_key_driver_count driver sources, $soak_key_harnesses harnesses)."
 
 # Validation and soak rebuild classic ELFs, invalidating their paired HEX files.
 # Re-materialize HEX from those exact, just-tested ELFs without compiling again.
@@ -2811,7 +2912,7 @@ cp -p -- "$WORK/SOAK_KEY" "$OUTPUT_DIR/SOAK_KEY" \
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=8\n'
+	printf 'format=9\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -2820,6 +2921,7 @@ cp -p -- "$WORK/SOAK_KEY" "$OUTPUT_DIR/SOAK_KEY" \
 	printf 'soak_liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
 	printf 'soak_combination_count=%s\n' "$NCOMBOS"
 	printf 'soak_inputs_sha256=%s\n' "$soak_inputs_sha256"
+	printf 'soak_source=%s\n' "$SOAK_SOURCE"
 	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
 	printf 'resource_tables_sha256=%s\n' "$resource_tables_sha256"
 	printf 'toolchain_sha256=%s\n' "$toolchain_sha256"
@@ -3235,6 +3337,12 @@ REL_BANNER=""
 	printf -- '- **Soak input key:** `SOAK_KEY` (SHA-256 `%s`), %d combinations over %d driver sources and %d harnesses\n' \
 		"$soak_inputs_sha256" "$soak_key_combinations" "$soak_key_driver_count" \
 		"$soak_key_harnesses"
+	if [ "$SOAK_SOURCE" = this-run ]; then
+		printf -- '- **Soak provenance:** run for this release\n'
+	else
+		printf -- '- **Soak provenance:** reused from `%s`, whose signed record covers the identical soak inputs above\n' \
+			"$SOAK_SOURCE"
+	fi
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"

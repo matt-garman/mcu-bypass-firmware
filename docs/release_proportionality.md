@@ -156,14 +156,20 @@ staged *content*. Same phase, same argument.
 
 ## Part 3 - attest the soak, and reuse it when the inputs are identical
 
-**Increment 1 has landed.** `SOAK_KEY` is written and signed, `QUALIFICATION`
-carries `soak_inputs_sha256` at `format=8`, and `MANIFEST.md` publishes it.
-Nothing consumes the key yet; increment 2 is the reuse flag. The attestation is
-the published release itself rather than a separate signed store -- `SHA256SUMS`
-already covers `SOAK_KEY` and the release signature already signs it, so reuse
-needs no second trust root and no extra signing step. The limitation that buys:
-only a soak that reached a staged release is reusable, which is the failure
-`T2-release-stage-rehearsal` exists to prevent.
+**Both increments have landed.** `SOAK_KEY` is written and signed before the
+soak, `QUALIFICATION` carries `soak_inputs_sha256` and `soak_source` at
+`format=9`, and `--reuse-soak` adopts a published release's soak when the keys
+match. The attestation is the published release itself rather than a separate
+signed store -- `SHA256SUMS` already covers `SOAK_KEY` and the release signature
+already signs it, so reuse needs no second trust root and no extra signing step.
+The limitation that buys: only a soak that reached a staged release is reusable,
+which is the failure `T2-release-stage-rehearsal` exists to prevent.
+
+Reuse skips the execution, never the check: every adopted log is re-validated by
+the same `validate_soak_result` the live path uses, at the attested duration.
+One link is weaker than the rest and is now filed as its own item -- a soak log
+is bound by its evidence-index row, terminal record and byte size, rather than
+by a content digest, because the `soak` evidence role has never had one.
 
 The soak is the only part of the release whose cost is measured in days, and
 the record above shows it has been re-run on unchanged inputs three times in a

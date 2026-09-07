@@ -69,6 +69,35 @@ historical records and are not retroactively compacted by this policy.
   this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
   Part 3 is the design.
 
+- **`--reuse-soak` stands a release on a published soak instead of repeating
+  it.** When a published release already carries this run's
+  `soak_inputs_sha256`, the soak is adopted rather than executed. The
+  attestation is that release itself: `SHA256SUMS` covers its `SOAK_KEY` and
+  `QUALIFICATION`, and the detached signature signs `SHA256SUMS`, so reuse needs
+  no separate store, no second trust root and no extra signing step. Before
+  adopting, the signature, the checksum manifest, the `SOAK_KEY` payload digest
+  and the evidence index are all verified, the attested duration must be at
+  least what the requested mode demands, and every adopted log is re-validated
+  by the same `validate_soak_result` the live path uses -- reuse skips the
+  execution, never the check. `QUALIFICATION` records `soak_source`
+  (`format=9`), `MANIFEST.md` discloses reuse in prose, and the verifier refuses
+  a release that reuses a soak without saying so.
+
+  Duration moved out of the `SOAK_KEY` payload onto its result line
+  (`SOAK_KEY format=2`), because it is a magnitude rather than an input: a
+  24-hour soak of given inputs subsumes a 1-hour one, so reuse compares it with
+  `>=`. Leaving it in the payload would have meant an express release could
+  never stand on a production soak. The liveness interval stays in the payload,
+  since it changes what the soak checks rather than how long for. The key is
+  also now computed before the soak rather than after it, which is what makes it
+  able to decide whether the soak runs at all.
+
+  One limit, stated plainly: soak logs are bound by their evidence-index row --
+  terminal record and byte size -- not by a content digest, so a tampered body
+  of identical length carrying an identical result line would not be caught.
+  Closing that means giving the soak evidence role a payload digest, which is a
+  change to the evidence contract rather than to this feature.
+
 - **`evidence/toolchain.txt` records yasimavr.** It named gpsim and libsimavr
   but not yasimavr, even though three of the 21 published images are ATtiny202
   images and yasimavr is the only thing that ever executes them. A version

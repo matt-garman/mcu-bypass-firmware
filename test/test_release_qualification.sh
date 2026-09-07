@@ -640,8 +640,7 @@ EOF
 	# digest. Nothing in the payload identifies the release, which is the property
 	# that lets two releases with identical inputs produce identical keys.
 	{
-		printf 'SOAK_KEY format=1\n'
-		printf 'duration_ms=%s\n' "$duration"
+		printf 'SOAK_KEY format=2\n'
 		printf 'liveness_interval_ms=%s\n' "$liveness"
 		for soak_name in $(printf '%s\n' "${soak_names[@]}" | sort); do
 			printf 'combination\t%s\t%064d\n' "$soak_name" 0
@@ -653,12 +652,12 @@ EOF
 	soak_key_digest=${soak_key_digest%% *}
 	{
 		cat -- "$release/SOAK_KEY.payload"
-		printf 'SOAK_KEY_RESULT format=1 status=pass combinations=%d drivers=1 harnesses=1 inputs_sha256=%s source_commit=%s\n' \
-			"${#soak_names[@]}" "$soak_key_digest" "$sha"
+		printf 'SOAK_KEY_RESULT format=2 status=pass combinations=%d drivers=1 harnesses=1 duration_ms=%s inputs_sha256=%s source_commit=%s\n' \
+			"${#soak_names[@]}" "$duration" "$soak_key_digest" "$sha"
 	} > "$release/SOAK_KEY"
 	rm -f -- "$release/SOAK_KEY.payload"
 	cat > "$release/QUALIFICATION" <<EOF
-format=8
+format=9
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -667,6 +666,7 @@ soak_duration_ms=$duration
 soak_liveness_interval_ms=$liveness
 soak_combination_count=${#soak_names[@]}
 soak_inputs_sha256=$soak_key_digest
+soak_source=this-run
 pic12f675_matrix_sha256=$matrix_digest
 resource_tables_sha256=$resource_digest
 toolchain_sha256=$toolchain_digest
@@ -690,6 +690,7 @@ EOF
 			"$index_digest" "${#fixture_role[@]}"
 		printf -- '- **Soak input key:** `SOAK_KEY` (SHA-256 `%s`), %d combinations over 1 driver sources and 1 harnesses\n' \
 			"$soak_key_digest" "${#soak_names[@]}"
+		printf -- '- **Soak provenance:** run for this release\n'
 		printf '\n## Toolchain\n\n'
 		printf -- '| tool | version |\n|---|---|\n'
 		for tool_index in $(seq 1 16); do
@@ -1054,18 +1055,18 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=8\n' >> "$release/QUALIFICATION"
+printf 'format=9\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
-# Format 7 is the superseded pre-soak-key contract. It is rejected
+# Format 8 is the superseded pre-soak-provenance contract. It is rejected
 # rather than accepted as a legacy mode because this verifier only runs on a
 # directory being staged or a tag being published.
 reset_fixture
-sed -i 's/^format=8$/format=7/' "$release/QUALIFICATION"
+sed -i 's/^format=9$/format=8/' "$release/QUALIFICATION"
 expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
-sed -i 's/^format=8$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=9$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 # --- the soak input key ------------------------------------------------------
@@ -1104,6 +1105,48 @@ sed -i '0,/^combination\t/{/^combination\t/d}' "$release/SOAK_KEY"
 reseal_soak_key
 expect_fail "soak key omitting a combination" \
 	"combinations, not the"
+
+# A payload carrying a duration can only ever match an equally long soak, so an
+# express release could never stand on a production one. Duration belongs on the
+# result line, compared with >=.
+reset_fixture
+sed -i '1a duration_ms=86400000' "$release/SOAK_KEY"
+reseal_soak_key
+expect_fail "duration inside the soak key payload" \
+	"can only ever match an equally long soak"
+
+# --- soak provenance ---------------------------------------------------------
+# A release either ran its soak or stands on a named published one. Both states
+# are disclosed in the human-readable manifest, not only in the machine record.
+reuse_source=$(basename "$(ls -d "$ROOT"/release/v*/ | tail -1)")
+reuse_source=${reuse_source%/}
+
+reset_fixture
+sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
+sed -i "s|^- \*\*Soak provenance:\*\* run for this release$|- **Soak provenance:** reused from \`$reuse_source\`, whose signed record covers the identical soak inputs above|" \
+	"$release/MANIFEST.md"
+reseal_provenance
+expect_pass "qualification standing on a published soak attestation"
+
+# The disclosure is not optional. A release that reuses a soak and says it ran
+# one is the single most misleading thing this record could contain.
+reset_fixture
+sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
+reseal_provenance
+expect_fail "undisclosed soak reuse" \
+	"does not disclose that this release reused the soak"
+
+reset_fixture
+sed -i 's/^soak_source=this-run$/soak_source=v9.9.9/' "$release/QUALIFICATION"
+reseal_provenance
+expect_fail "soak reused from a release this tree does not retain" \
+	"which this tree does not retain"
+
+reset_fixture
+sed -i 's/^soak_source=this-run$/soak_source=elsewhere/' "$release/QUALIFICATION"
+reseal_provenance
+expect_fail "soak provenance that names neither this run nor a release" \
+	"neither this-run nor a released version"
 
 reset_fixture
 printf 'changed resource evidence\n' >> "$release/evidence/resource-tables.log"
