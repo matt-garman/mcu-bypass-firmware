@@ -78,15 +78,50 @@ three edits that must land together:
    of the literal command -- it locates each job's step by command and anchors
    its ordering assertions to whatever it finds;
 3. every policy assertion the workflow step used to satisfy moves to reading the
-   goal's recipe, through `ci_goal_recipe()`. Dropping them instead would retire
-   real checks silently, which is the failure mode this whole document is about.
+   goal's recipe -- `ci_goal_recipe()` for a line-level check, `ci_goal_commands()`
+   to parse its sub-makes with the same parser that reads workflow steps, and
+   `ci_goal_pins()` for the pins the goal refuses to run without. Dropping them
+   instead would retire real checks silently, which is the failure mode this
+   whole document is about.
+
+Two hazards, both found by converting `pic` rather than by inspection:
+
+* **Reachability stops at the wrapper.** A goal *invokes* its gates; it does not
+  *depend* on them, which is the whole point (each aggregate gets its own Make
+  process). Recipe commands are invisible to `make -pRrq`'s prerequisite
+  database, so `target_reaches("ci-pic", "test-pic-guard-mutations")` answers
+  "no" and every routing check asked through a wrapper passes vacuously. The
+  fix is structural: seed the edge set with each CI goal's recipe sub-makes
+  before asking anything of it.
+* **A step found by name goes quiet, not red.** Assertions that located a step
+  by its `name:` (`"PIC10F322 pre-hardware gate..."`) simply stop matching when
+  the step is folded away. Locate steps by what they *run*.
+
+Counting the checks before and after is the way to prove nothing was lost: this
+conversion moved `test-workflow-syntax` from 670 to 626, and every one of the 44
+is accounted for -- five fewer steps means five fewer generic per-step checks
+(valid Bash, one-of `run`/`uses`, SHA-pinned action), and the five per-command
+PIC checks collapse into one recipe-equality check plus a stronger one (no job
+anywhere in `ci.yml` may name a PIC aggregate directly, not merely no *other*
+step in the `pic` job).
 
 `scripts/ci-local.sh` needs a fourth edit only where it mirrors a converted job
 directly. Its non-PR path deliberately folds `verify`, `stress` and the mutation
 gate into one `make test-long`, which is a local optimisation rather than drift;
-its PR path mirrors `verify` one-for-one and now invokes `ci-verify`. That moves
-what `test_ci_local_routing.sh` observes from the inner goal to the wrapper, so
-the inner command is asserted against the recipe instead.
+its PR path mirrors `verify` one-for-one and now invokes `ci-verify`, and its
+PIC job invokes `ci-pic`. That moves what `test_ci_local_routing.sh` observes
+from the inner goals to the wrapper, so the inner commands are asserted against
+the recipe instead.
+
+One limit of `ci_pin` is worth stating plainly, because the `pic` conversion is
+where it first bites. The pin exists so a caller's value and this Makefile's
+default cannot silently agree; that only means something where the caller has an
+independent source of truth. A hosted runner has one -- the installer wrote the
+XC8 and DFP paths. Locally there is none, so `ci-local.sh` resolves each path
+from the environment (else the Makefile default) in its preflight and hands that
+same value back on the command line. It satisfies the requirement without
+pretending to cross-check it, and it keeps the assertion and the gate pointed at
+one installation rather than two.
 
 ## Part 2 - the parity gate: `test-ci-parity`
 
@@ -200,7 +235,7 @@ shape.
 | # | Increment | Catches |
 |---|-----------|---------|
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
-| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress` **done**; `pic`, `mutation`, `attiny202`, `build-matrix` remain) | nothing yet -- pure restructure |
+| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress`, `pic` **done**; `mutation`, `attiny202`, `build-matrix` remain) | nothing yet -- pure restructure |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |

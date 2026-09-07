@@ -1118,7 +1118,10 @@ def release_resource_routes(refs):
 
 
 CI_RESOURCE_ROUTES = {
-    "pic12f675-test": {
+    # The workflow hands the data limit to the goal; ci-pic's own recipe is
+    # separately checked (CI_GOAL_RESOURCE_ROUTES) to route it to the one
+    # PIC12F675 command and nowhere else.
+    "ci-pic": {
         "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
     },
     "test-mutation": {
@@ -1137,6 +1140,11 @@ CI_RESOURCE_ROUTES = {
     },
 }
 RELEASE_RESOURCE_ROUTES = release_resource_routes(RELEASE_RESOURCE_REFS)
+# Inside a CI goal's recipe the same routing question is asked of $(VAR)
+# forwards rather than of shell references.
+CI_GOAL_RESOURCE_ROUTES = {
+    "pic12f675-test": {"PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)"},
+}
 
 for workflow_name, expected in (
         ("ci.yml", CI_RESOURCE_ENV),
@@ -1152,48 +1160,43 @@ for workflow_name, expected in (
         f"{workflow_name}: resource-policy pins are {actual!r}, expected {expected!r}",
     )
 
-PIC_COMMANDS = (
-    (
-        ("pic10f322-test",),
-        {
-            "STRICT_TOOLS": "1",
-            "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
-            "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
-        },
-    ),
-    (
-        ("pic10f322-test-target-variants",),
-        {
-            "STRICT_TOOLS": "1",
-            "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
-            "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
-        },
-    ),
-    (
-        ("pic10f320-test",),
-        {
-            "STRICT_TOOLS": "1",
-            "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
-            "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
-        },
-    ),
-    (
-        ("pic10f320-test-target-variants",),
-        {
-            "STRICT_TOOLS": "1",
-            "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
-            "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
-        },
-    ),
-    (
-        ("pic12f675-test", "pic12f675-test-target-variants"),
-        {
-            "STRICT_TOOLS": "1",
-            "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
-            "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
-        },
-    ),
-)
+# The five-process PIC boundary, stated once. Only the VALUES differ by
+# surface: a hosted workflow pins the installer's real paths, ci-pic's recipe
+# forwards whatever its caller pinned, and release.yml pins the same paths CI
+# does. Parameterising keeps one description of the boundary rather than three
+# that could drift apart while each still passed its own check.
+def pic_commands(refs):
+    cc, dfp = refs["PIC_CC"], refs["PIC_DFP"]
+    cc320, dfp320 = refs["PIC10F320_CC"], refs["PIC10F320_DFP"]
+    return (
+        (("pic10f322-test",),
+         {"STRICT_TOOLS": "1", "PIC_CC": cc, "PIC_DFP": dfp}),
+        (("pic10f322-test-target-variants",),
+         {"STRICT_TOOLS": "1", "PIC_CC": cc, "PIC_DFP": dfp}),
+        (("pic10f320-test",),
+         {"STRICT_TOOLS": "1", "PIC10F320_CC": cc320, "PIC10F320_DFP": dfp320}),
+        (("pic10f320-test-target-variants",),
+         {"STRICT_TOOLS": "1", "PIC10F320_CC": cc320, "PIC10F320_DFP": dfp320}),
+        (("pic12f675-test", "pic12f675-test-target-variants"),
+         {"STRICT_TOOLS": "1", "PIC_CC": cc, "PIC_DFP": dfp}),
+    )
+
+
+XC8_PIC_REFS = {
+    "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
+    "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
+    "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
+    "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
+}
+# Inside the recipe the pins are forwarded, not spelled: $(call ci_pin,...)
+# has already refused anything the caller did not supply.
+MAKE_PIC_REFS = {name: f"$({name})" for name in XC8_PIC_REFS}
+# scripts/ci-local.sh resolves each path once in its preflight -- from the
+# environment, else the Makefile default -- and hands that same value to the
+# goal it asserted the toolchain for.
+CI_LOCAL_PIC_REFS = {name: f"$PIN_{name}" for name in XC8_PIC_REFS}
+
+PIC_COMMANDS = pic_commands(XC8_PIC_REFS)
 PIC_GOALS = tuple(goal for goals, _ in PIC_COMMANDS for goal in goals)
 
 
@@ -1212,6 +1215,54 @@ def make_command(tokens):
         else:
             goals.append(token)
     return tuple(goals), assignments, duplicate_assignment
+
+
+def ci_goal_commands(goal):
+    """Parse the $(MAKE) invocations inside a CI goal's recipe.
+
+    Each recipe line's sub-make prefix is rewritten to a literal command word,
+    so the same parser that reads workflow steps reads the recipe. That
+    equivalence is the point: once a job invokes a goal, the recipe is what
+    runs, and it must be held to the same canonical shape the workflow step
+    used to be held to.
+    """
+    text = "\n".join(ci_goal_recipe(goal)).replace("$(MAKE)", "make")
+    parsed_commands = []
+    for tokens in shell_tokens(text):
+        parsed = make_command(tokens)
+        if parsed is not None:
+            parsed_commands.append(parsed)
+    return parsed_commands
+
+
+def ci_goal_pins(goal):
+    """Return the variables a CI goal refuses to run without.
+
+    $(call ci_pin,NAME) is how a goal states that NAME must arrive from the
+    caller's command line rather than from this Makefile's own default. It is
+    the goal-side half of every pin a workflow step supplies, so a step that
+    passes a pin the goal does not require would be unenforced.
+    """
+    return [
+        name
+        for line in ci_goal_recipe(goal)
+        for name in re.findall(r"\$\(call ci_pin,([A-Za-z_][A-Za-z0-9_]*)\)", line)
+    ]
+
+
+def makefile_ci_goals():
+    with open(os.path.join(root, "Makefile"), encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("CI_GOALS ="):
+                return tuple(line.split("=", 1)[1].split())
+    return ()
+
+
+CI_GOALS = makefile_ci_goals()
+check(
+    CI_GOALS == ("ci-verify", "ci-stress", "ci-pic", "ci-mutation", "ci-attiny202"),
+    f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed five",
+)
 
 
 def check_resource_routes(commands, surface, routes):
@@ -1309,6 +1360,15 @@ if check(
             continue
         prereqs = fields[1:fields.index("|")] if "|" in fields else fields[1:]
         make_edges.setdefault(target, set()).update(prereqs)
+
+# A CI goal INVOKES its gates rather than depending on them -- deliberately, so
+# each aggregate gets its own Make process -- and recipe commands are invisible
+# to the prerequisite database above. Without these edges every reachability
+# question asked through a wrapper would answer "no" and the routing checks
+# below would pass vacuously on a job that still runs the gate.
+for ci_goal in CI_GOALS:
+    for goals, _, _ in ci_goal_commands(ci_goal):
+        make_edges.setdefault(ci_goal, set()).update(goals)
 
 
 def target_reaches(target, wanted):
@@ -1583,52 +1643,73 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
         pic_job.get("continue-on-error", False) is False,
         "ci.yml: job 'pic' may continue after failure",
     )
-    pic_invocations = []
-    for idx, step in enumerate(pic_job.get("steps") or [], 1):
-        run = step.get("run") if isinstance(step, dict) else None
-        commands = shell_tokens(run) if isinstance(run, str) else []
-        for tokens in commands:
-            parsed = make_command(tokens)
-            if parsed is not None and any(goal in PIC_GOALS for goal in parsed[0]):
-                pic_invocations.append((idx, step, len(commands), parsed, tokens))
-
-    for idx, step, command_count, parsed, tokens in pic_invocations:
-        goals, assignments, duplicate_assignment = parsed
+    # The job invokes ONE goal. What that goal runs is asserted against the
+    # recipe below, so the boundary is described once and both the hosted job
+    # and scripts/ci-local.sh are held to the same description.
+    ci_pic_invocations = [
+        invocation for invocation in ci_make_invocations
+        if "ci-pic" in invocation[4][0]
+    ]
+    check(
+        len(ci_pic_invocations) == 1,
+        f"ci.yml: ci-pic is invoked {len(ci_pic_invocations)} time(s), expected 1",
+    )
+    if len(ci_pic_invocations) == 1:
+        job_id, idx, step, command_count, parsed, tokens = ci_pic_invocations[0]
+        expected_pic_pins = dict(XC8_PIC_REFS)
+        expected_pic_pins["PIC12F675_DATA_LIMIT"] = \
+            CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"]
         check(
-            not duplicate_assignment
-            and (goals, non_resource_assignments(assignments)) in PIC_COMMANDS,
-            f"ci.yml: pic step {idx} has a noncanonical aggregate command: "
-            f"{' '.join(tokens)}",
+            job_id == "pic" and not parsed[2]
+            and parsed[:2] == (("ci-pic",), expected_pic_pins),
+            "ci.yml: the PIC gate invocation is not the canonical pinned "
+            f"ci-pic command: {' '.join(tokens)}",
         )
         check(
             command_count == 1,
-            f"ci.yml: pic aggregate step {idx} must contain only its direct Make command",
+            f"ci.yml: pic gate step {idx} must contain only its Make command",
         )
-        check("if" not in step, f"ci.yml: pic aggregate step {idx} is conditional")
+        check("if" not in step, f"ci.yml: pic gate step {idx} is conditional")
         check(
             step.get("continue-on-error", False) is False,
-            f"ci.yml: pic aggregate step {idx} may continue after failure",
+            f"ci.yml: pic gate step {idx} may continue after failure",
         )
 
-    for goals, assignments in PIC_COMMANDS:
-        matches = sum(
-            not parsed[2] and parsed[0] == goals
-            and non_resource_assignments(parsed[1]) == assignments
-            for _, _, _, parsed, _ in pic_invocations
-        )
-        check(
-            matches == 1,
-            f"ci.yml: PIC command {' '.join(goals)} appears canonically "
-            f"{matches} time(s), expected 1",
-        )
-    for goal in PIC_GOALS:
-        occurrences = sum(
-            parsed[0].count(goal) for _, _, _, parsed, _ in pic_invocations
-        )
-        check(
-            occurrences == 1,
-            f"ci.yml: PIC aggregate '{goal}' occurs {occurrences} time(s), expected 1",
-        )
+    # Every PIC aggregate must be reached THROUGH the goal. A step that named
+    # one directly would run the same gate under a second, unpinned policy.
+    direct_pic_invocations = [
+        invocation for invocation in ci_make_invocations
+        if any(goal in PIC_GOALS for goal in invocation[4][0])
+    ]
+    check(
+        not direct_pic_invocations,
+        "ci.yml: a job bypasses ci-pic with direct PIC aggregate calls: "
+        + ", ".join(
+            f"{invocation[0]} step {invocation[1]}"
+            for invocation in direct_pic_invocations
+        ),
+    )
+
+    # ...and the goal itself must still be the reviewed five-process boundary,
+    # forwarding the caller's pins and refusing to run without them.
+    recipe_commands = ci_goal_commands("ci-pic")
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in recipe_commands
+        ) == pic_commands(MAKE_PIC_REFS)
+        and not any(duplicate for _, _, duplicate in recipe_commands),
+        "Makefile: ci-pic no longer runs the reviewed five PIC commands: "
+        + " | ".join(" ".join(goals) for goals, _, _ in recipe_commands),
+    )
+    check(
+        sorted(ci_goal_pins("ci-pic")) == sorted(
+            list(XC8_PIC_REFS) + ["PIC12F675_DATA_LIMIT"]
+        ),
+        "Makefile: ci-pic does not refuse every pin its callers supply: "
+        f"{ci_goal_pins('ci-pic')}",
+    )
+    check_resource_routes(recipe_commands, "Makefile ci-pic", CI_GOAL_RESOURCE_ROUTES)
 
     expected_uploads = {
         "firmware-pic10f322": "build_pic10f322/*.hex",
@@ -1668,39 +1749,33 @@ if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
             f"ci.yml: job '{job_id}' must declare needs: pic",
         )
 
-    # Local CI has the same hard-coded five process boundary, but obtains tool
-    # paths from Make/environment defaults and exports strictness once globally.
-    # The production data limit remains pinned on the PIC12F675 invocation.
-    local_commands = tuple(
-        (goals, {})
-        for goals, _ in PIC_COMMANDS
-    )
-    local_invocations = []
+    # Local CI now invokes the SAME goal the hosted job does, so the
+    # five-process boundary is asserted once, above, against ci-pic's recipe.
+    # What remains local is which installation to point it at: the paths this
+    # script resolved in its own preflight, plus the production data limit.
     local_shell = shell_tokens("\n".join(lines))
+    local_invocations = []
     for tokens in local_shell:
         if len(tokens) >= 4 and tokens[0] == "run_step" \
                 and tokens[1].startswith("pic job:") and tokens[2] == "make":
             parsed = make_command(tokens[2:])
             if parsed is not None:
                 local_invocations.append(parsed)
-    for goals, assignments, duplicate_assignment in local_invocations:
+    check(
+        len(local_invocations) == 1,
+        f"scripts/ci-local.sh: the PIC job runs {len(local_invocations)} Make "
+        "commands, expected 1",
+    )
+    if len(local_invocations) == 1:
+        goals, assignments, duplicate_assignment = local_invocations[0]
+        expected_local_pins = dict(CI_LOCAL_PIC_REFS)
+        expected_local_pins["PIC12F675_DATA_LIMIT"] = "$CI_PIC12F675_DATA_LIMIT"
         check(
             not duplicate_assignment
-            and (goals, non_resource_assignments(assignments)) in local_commands,
+            and (goals, assignments) == (("ci-pic",), expected_local_pins),
             "scripts/ci-local.sh: noncanonical PIC job command: make "
             f"{' '.join(goals)}"
             + "".join(f" {key}={value}" for key, value in assignments.items()),
-        )
-    for goals, assignments in local_commands:
-        occurrences = sum(
-            not parsed[2] and parsed[0] == goals
-            and non_resource_assignments(parsed[1]) == assignments
-            for parsed in local_invocations
-        )
-        check(
-            occurrences == 1,
-            f"scripts/ci-local.sh: PIC command {' '.join(goals)} occurs "
-            f"{occurrences} time(s), expected 1",
         )
     strict_exports = sum(tokens == ["export", "STRICT_TOOLS=1"] for tokens in local_shell)
     check(
@@ -1862,10 +1937,16 @@ if len(pic_assert_steps) == 1:
         if isinstance(candidate, dict)
         and candidate.get("name") == "Save XC8 + DFP cache"
     ]
+    # Found by what the step RUNS, not by its name: the gate steps were folded
+    # into one goal invocation once already, and a name-matched search would
+    # have gone quietly vacuous rather than failing.
     first_pic_gate = [
         idx for idx, candidate in enumerate(pic_steps)
         if isinstance(candidate, dict)
-        and str(candidate.get("name", "")).startswith("PIC10F322 pre-hardware gate")
+        and any(
+            make_command(tokens) is not None and "ci-pic" in make_command(tokens)[0]
+            for tokens in shell_tokens(str(candidate.get("run", "")))
+        )
     ]
     check(
         len(verify_indices) == 1 and verify_indices[0] < assert_idx,

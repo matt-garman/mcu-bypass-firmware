@@ -3347,6 +3347,23 @@ ci-verify:
 ci-stress:
 	$(MAKE) stress STRICT_TOOLS=1
 
+# Five Make processes, not one: each PIC aggregate gets its own graph, and
+# PIC12F675's two goals deliberately share the last one so GNU Make qualifies
+# its retained shipping/simulator matrix once and every consumer lane reads the
+# same recorded bytes. What the five cover, in order: the 10F322 pre-hardware
+# gate; the 10F322 fail-closed target aggregate (explicit PASS sentinels from
+# fault, lock-step and I/O, so a partial run is a failure); the 10F320
+# pre-hardware gate (host equivalence against src/bypass_pure.c, per-variant
+# actuation, host fault injection, exact-line firmware coverage, build + 256-word
+# budget, reviewed image hashes, CONFIG and final-HEX return-stack checks,
+# cppcheck + MISRA, and the CLI-gpsim register test, the last two swept across
+# all three variants because each compiles a different output stage); the 10F320
+# target aggregate under the same contract as the 322's; and the 12F675 pair
+# (CONFIG, analysis, host coverage, calibration, CLI gpsim, stack, and every
+# fault/lock-step/I-O variant).
+#
+# STRICT_TOOLS=1 is the policy this goal exists to carry: the caller asserted
+# XC8, the DFP and gpsim are present, so these sub-gates must RUN, never skip.
 ci-pic:
 	$(call ci_pin,PIC_CC)
 	$(call ci_pin,PIC_DFP)

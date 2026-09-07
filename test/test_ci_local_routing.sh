@@ -193,12 +193,13 @@ tab=$'\t'
 expected_xt_static=16
 expected_xt_stack=32
 expected_pic_data=48
+# One command: the PIC job invokes the same ci-pic goal the hosted job does,
+# and the fake make below records the invocation rather than expanding it. What
+# the goal then runs is the Makefile's business, asserted by the workflow
+# contract against ci-pic's recipe; what belongs here is that local CI hands it
+# the installation its own preflight asserted, and the production data limit.
 pic_calls=(
-	$'STRICT_TOOLS=1\tpic10f322-test'
-	$'STRICT_TOOLS=1\tpic10f322-test-target-variants'
-	$'STRICT_TOOLS=1\tpic10f320-test'
-	$'STRICT_TOOLS=1\tpic10f320-test-target-variants'
-	"STRICT_TOOLS=1${tab}pic12f675-test${tab}pic12f675-test-target-variants${tab}PIC12F675_DATA_LIMIT=$expected_pic_data"
+	"STRICT_TOOLS=1${tab}ci-pic${tab}PIC_CC=$work/xc8${tab}PIC_DFP=$work/dfp${tab}PIC10F320_CC=$work/xc8${tab}PIC10F320_DFP=$work/dfp${tab}PIC12F675_DATA_LIMIT=$expected_pic_data"
 )
 xt_calls=(
 	"STRICT_TOOLS=1${tab}attiny202-test${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static${tab}XT_STACK_MAX_FRAME=$expected_xt_stack"

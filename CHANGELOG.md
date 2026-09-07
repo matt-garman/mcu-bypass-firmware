@@ -92,8 +92,22 @@ historical records and are not retroactively compacted by this policy.
   to whatever it finds, so the goal, the detection, and the policy assertions
   the step used to satisfy all move together -- the last against the goal's
   recipe, through a new `ci_goal_recipe()`, or they would retire silently. The
-  remaining jobs (`pic`, the mutation gate, `attiny202`, `build-matrix`) follow
-  the same pattern; [`docs/ci_parity.md`](docs/ci_parity.md) records it.
+  remaining jobs (the mutation gate, `attiny202`, `build-matrix`) follow the
+  same pattern; [`docs/ci_parity.md`](docs/ci_parity.md) records it.
+
+  The `pic` job followed: five steps became one `make ci-pic`, and
+  `scripts/ci-local.sh` runs that same goal rather than five equivalent
+  spellings of it. The five-process boundary -- each PIC aggregate in its own
+  Make graph, with the PIC12F675 pair sharing the last one so its retained
+  matrix is qualified once -- is now described in one place and asserted
+  against the recipe, so both surfaces are held to the same description. Two
+  hazards surfaced that inspection would not have: a goal *invokes* its gates
+  rather than depending on them, so recipe commands are invisible to Make's
+  prerequisite database and every reachability check asked through a wrapper
+  passes vacuously unless the edge set is seeded with them; and an assertion
+  that locates a workflow step by its `name:` goes quiet, not red, when that
+  step is folded away. Both are fixed structurally and recorded in the design
+  doc.
 
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its

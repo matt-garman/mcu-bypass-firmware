@@ -17,23 +17,16 @@
 #                    CI asserts inside each job, but CI's jobs run in PARALLEL;
 #                    a serial local run must not hide a missing toolchain behind
 #                    the jobs that happen to precede it.
-#   pic           -> make pic10f322-test          (10F322: XC8 + gpsim PORTA/LATA gate)
-#                    make pic10f322-test-target-variants
-#                                           (10F322: libgpsim fault recovery,
-#                                            firmware/model ctx_ lock-step,
-#                                            and target I/O, every variant)
-#                    make pic10f320-test       (10F320: host equivalence/actuation/
-#                                            fault/firmware-coverage + build,
-#                                            budget, reviewed hashes, CONFIG,
-#                                            return stack, cppcheck/MISRA and CLI
-#                                            gpsim across all variants)
-#                    make pic10f320-test-target-variants
-#                                           (10F320: the same fail-closed
-#                                            libgpsim aggregate)
-#                    make pic12f675-test pic12f675-test-target-variants
-#                                           (12F675: one retained hash-qualified
-#                                            matrix across pre-hardware and the
-#                                            fail-closed libgpsim aggregate)
+#   pic           -> make ci-pic           (all three parts, five Make graphs:
+#                                            the 10F322 and 10F320 pre-hardware
+#                                            gates and their fail-closed libgpsim
+#                                            target aggregates, then the 12F675
+#                                            pair sharing one retained
+#                                            hash-qualified matrix. The Makefile
+#                                            documents what each covers, next to
+#                                            the commands that run them; this
+#                                            script only chooses which XC8/DFP
+#                                            installation they point at.)
 #   build-matrix  -> make attiny13a attiny85 attiny45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
 #   attiny202     -> make attiny202-test    (fuses + smoke + build/budget +
@@ -103,10 +96,11 @@
 #   The PIC job uses the Makefile's PIC_CC / PIC_DFP defaults for the 10F322 and
 #   the 12F675, and the PIC10F320 lane's PIC10F320_CC / PIC10F320_DFP default to
 #   those in turn (one shared XC8 + DFP install serves all three parts). If your
-#   XC8/DFP live elsewhere, export PIC_CC and/or PIC_DFP before invoking and make
-#   will pick them up (they are `?=` defaults, so the environment wins); export
-#   PIC10F320_CC / PIC10F320_DFP as well only if you deliberately want that chip
-#   on a different toolchain.
+#   XC8/DFP live elsewhere, export PIC_CC and/or PIC_DFP before invoking: the
+#   preflight resolves each path from the environment, falling back to the
+#   Makefile default, and hands the result to `make ci-pic`, which requires the
+#   paths on its command line. Export PIC10F320_CC / PIC10F320_DFP as well only
+#   if you deliberately want that chip on a different toolchain.
 
 set -euo pipefail
 
@@ -269,12 +263,17 @@ assert_pic_toolchain() {
 	# recipe and each value below would arrive wrapped in "Entering/Leaving
 	# directory" lines -- reporting an installed toolchain as missing, at a path
 	# nobody configured.
-	local pic_cc pic_dfp pic10f320_cc pic10f320_dfp gpsim cppcheck
+	# The four selector paths are GLOBALS, not locals: `make ci-pic` refuses to
+	# run unless its caller supplies them on the command line, and the value it
+	# must be handed is exactly the one asserted here. Resolving them twice
+	# would let the assertion and the gate disagree about which installation is
+	# under test -- the failure this preflight exists to prevent.
+	local gpsim cppcheck
 	local pic_cxx gpsim_inc pic10f320_cxx pic10f320_gpsim_inc
-	pic_cc="${PIC_CC:-$(make -s --no-print-directory print-PIC_CC)}"
-	pic_dfp="${PIC_DFP:-$(make -s --no-print-directory print-PIC_DFP)}"
-	pic10f320_cc="${PIC10F320_CC:-$(make -s --no-print-directory print-PIC10F320_CC)}"
-	pic10f320_dfp="${PIC10F320_DFP:-$(make -s --no-print-directory print-PIC10F320_DFP)}"
+	PIN_PIC_CC="${PIC_CC:-$(make -s --no-print-directory print-PIC_CC)}"
+	PIN_PIC_DFP="${PIC_DFP:-$(make -s --no-print-directory print-PIC_DFP)}"
+	PIN_PIC10F320_CC="${PIC10F320_CC:-$(make -s --no-print-directory print-PIC10F320_CC)}"
+	PIN_PIC10F320_DFP="${PIC10F320_DFP:-$(make -s --no-print-directory print-PIC10F320_DFP)}"
 	gpsim="${GPSIM:-$(make -s --no-print-directory print-GPSIM)}"
 	cppcheck="${CPPCHECK:-$(make -s --no-print-directory print-CPPCHECK)}"
 	pic_cxx="${PIC_SOAK_CXX:-$(make -s --no-print-directory print-PIC_SOAK_CXX)}"
@@ -282,8 +281,8 @@ assert_pic_toolchain() {
 	pic10f320_cxx="${PIC10F320_SOAK_CXX:-$(make -s --no-print-directory print-PIC10F320_SOAK_CXX)}"
 	pic10f320_gpsim_inc="${PIC10F320_SOAK_GPSIM_INC:-$(make -s --no-print-directory print-PIC10F320_SOAK_GPSIM_INC)}"
 	"$REPO_ROOT/scripts/assert_pic_toolchain.sh" \
-		--pic-cc "$pic_cc" --pic-dfp "$pic_dfp" \
-		--pic10f320-cc "$pic10f320_cc" --pic10f320-dfp "$pic10f320_dfp" \
+		--pic-cc "$PIN_PIC_CC" --pic-dfp "$PIN_PIC_DFP" \
+		--pic10f320-cc "$PIN_PIC10F320_CC" --pic10f320-dfp "$PIN_PIC10F320_DFP" \
 		--gpsim "$gpsim" --cppcheck "$cppcheck" \
 		--pic-cxx "$pic_cxx" --pic-gpsim-inc "$gpsim_inc" \
 		--pic10f320-cxx "$pic10f320_cxx" \
@@ -498,15 +497,21 @@ fi
 if [ "$SKIP_PIC" -eq 1 ]; then
 	warn "--skip-pic: NOT running the PIC job (any of the three parts); this does not mirror CI."
 else
-	# Toolchain asserted in PREFLIGHT above.
-	run_step "pic job: make pic10f322-test" make pic10f322-test
-	run_step "pic job: pic10f322-test-target-variants" make pic10f322-test-target-variants
-	run_step "pic job: make pic10f320-test" make pic10f320-test
-	run_step "pic job: pic10f320-test-target-variants" make pic10f320-test-target-variants
-	# One Make graph is load-bearing: the two goals share one qualified retained
-	# PIC12F675 matrix and verify its hashes after every consumer lane.
-	run_step "pic job: PIC12F675 immutable-matrix aggregates" make \
-		pic12f675-test pic12f675-test-target-variants \
+	# Toolchain asserted in PREFLIGHT above, which also resolved the four
+	# selector paths this goal requires. The same `make ci-pic` the hosted job
+	# runs -- one goal, so local and CI cannot drift into running different
+	# things under the same name; the Makefile owns the five-process boundary
+	# and the strictness, and this script owns only WHICH installation to
+	# point them at.
+	#
+	# Locally there is no independent source of truth for those paths (CI has
+	# one: the installer wrote them), so the pins below echo back the
+	# environment-or-default this script documents. That satisfies ci-pic's
+	# command-line requirement without pretending to cross-check it.
+	run_step "pic job: make ci-pic" make ci-pic \
+		PIC_CC="$PIN_PIC_CC" PIC_DFP="$PIN_PIC_DFP" \
+		PIC10F320_CC="$PIN_PIC10F320_CC" \
+		PIC10F320_DFP="$PIN_PIC10F320_DFP" \
 		PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 fi
 

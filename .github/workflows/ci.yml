@@ -244,55 +244,22 @@ jobs:
           echo "gpsim:"  && (gpsim --version 2>&1 | head -1 || true)
           echo "cppcheck:" && cppcheck --version
 
-      - name: PIC10F322 pre-hardware gate (make pic10f322-test)
-        # STRICT_TOOLS=1: the assert step above proved XC8/DFP/gpsim are present,
-        # so the pic10f322-test sub-gates must run, not skip. (Consistent with that assert.)
+      # One step, one goal. `make ci-pic` owns the five-process boundary and the
+      # STRICT_TOOLS=1 policy that makes a missing XC8/DFP/gpsim a failure
+      # instead of a silent skip; the Makefile documents what each of the five
+      # aggregates covers, next to the commands that run them.
+      #
+      # The toolchain paths and the data limit are pinned HERE because this
+      # runner is what installed them: ci-pic refuses to run unless the caller
+      # supplies them on the command line, so a mismatch with the Makefile's own
+      # defaults fails instead of quietly agreeing with itself.
+      - name: PIC gates, all three parts (make ci-pic)
         run: |
-          make pic10f322-test STRICT_TOOLS=1 \
-            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # Fail-closed target aggregate (libgpsim), every variant. The aggregate
-      # itself requires explicit PASS sentinels from fault, lock-step, and I/O;
-      # a silent skip or partial run is therefore a failure.
-      - name: PIC10F322 target aggregate (make pic10f322-test-target-variants)
-        run: |
-          make pic10f322-test-target-variants STRICT_TOOLS=1 \
-            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # PIC10F320 pre-hardware gate. Covers every validation layer the child
-      # project had: host equivalence against src/bypass_pure.c, per-variant
-      # actuation sequence, host fault injection, the exact-line firmware
-      # coverage gate, build + 256-word budget, reviewed image hashes, CONFIG and
-      # final-HEX return-stack checks, cppcheck + MISRA, and the CLI-gpsim
-      # register-level test -- the last two swept across all three variants,
-      # because each compiles a different output stage.
-      - name: PIC10F320 pre-hardware gate (make pic10f320-test)
-        run: |
-          make pic10f320-test STRICT_TOOLS=1 \
-            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # ...and the PIC10F320 fail-closed target aggregate, same contract as the
-      # 322's above: explicit PASS sentinels from fault, lock-step and I/O, so a
-      # silent skip or a partial matrix is a failure.
-      - name: PIC10F320 target aggregate (make pic10f320-test-target-variants)
-        run: |
-          make pic10f320-test-target-variants STRICT_TOOLS=1 \
-            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # PIC12F675 pre-hardware and target aggregates share one qualified,
-      # hash-recorded shipping/simulator matrix only when requested in the same
-      # Make graph. This covers CONFIG, analysis, host coverage, calibration,
-      # CLI gpsim, stack, and every fault/lock-step/I-O variant without any
-      # consumer rebuilding or republishing the retained bytes.
-      - name: PIC12F675 immutable-matrix aggregates
-        run: |
-          make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
+          make ci-pic \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8" \
             PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 
       # The mutation driver also runs its core AVR and ATtiny202 mutants. Keep
