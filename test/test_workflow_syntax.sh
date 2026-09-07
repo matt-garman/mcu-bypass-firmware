@@ -934,6 +934,35 @@ def run_step_asserts(step, requirement):
     return False
 
 
+def ci_goal_recipe(goal):
+    """Return the recipe lines of a Makefile goal, without their leading tabs.
+
+    The fixed policy a CI job runs under -- STRICT_TOOLS, MUTATION_ALLOW_SKIP --
+    used to sit in the workflow step, where this file could read it directly.
+    It now sits in the goal the step invokes, which is the entire point of the
+    move: policy is a decision about how the project is verified, so it belongs
+    with the project. Asserting it therefore means reading the recipe rather
+    than the workflow, and asserting NOTHING would silently retire every policy
+    check the workflow used to carry.
+    """
+    with open(os.path.join(root, "Makefile"), encoding="utf-8") as handle:
+        lines = handle.read().split("\n")
+    recipe = []
+    collecting = False
+    for line in lines:
+        if line.startswith(goal + ":"):
+            collecting = True
+            continue
+        if collecting:
+            if line.startswith("\t"):
+                recipe.append(line[1:])
+                continue
+            if not line.strip():
+                continue
+            break
+    return recipe
+
+
 def prior_steps(workflow_name, job_id, first_use, description):
     doc = docs.get(workflow_name)
     jobs = doc.get("jobs") if isinstance(doc, dict) else None
@@ -958,8 +987,8 @@ def prior_steps(workflow_name, job_id, first_use, description):
 # runners happen to carry some of them, but the workflow contract must install
 # and assert them before the first make test/stress invocation.
 for job_id, gate_name in (
-    ("verify", "test"),
-    ("stress", "stress"),
+    ("verify", "ci-verify"),
+    ("stress", "ci-stress"),
 ):
     before = prior_steps(
         "ci.yml",
@@ -1486,25 +1515,41 @@ if check(isinstance(stress_job, dict), "ci.yml: required job 'stress' is missing
     if len(stress_invocations) == 1:
         _, idx, step, command_count, parsed, tokens = stress_invocations[0]
         check(
-            not parsed[2] and parsed[:2] == (("stress",), {"STRICT_TOOLS": "1"}),
-            "ci.yml: stress job does not invoke the canonical mutation-free "
-            f"FULL aggregate: {' '.join(tokens)}",
+            not parsed[2] and parsed[:2] == (("ci-stress",), {}),
+            "ci.yml: stress job does not invoke exactly the ci-stress goal "
+            f"with no overrides: {' '.join(tokens)}",
+        )
+        verify_recipe = ci_goal_recipe("ci-verify")
+        check(
+            any(line.split()[1:] == ["test", "STRICT_TOOLS=1"]
+                for line in verify_recipe if line.startswith("$(MAKE) ")),
+            "Makefile: ci-verify does not invoke the default suite under "
+            f"STRICT_TOOLS=1: {verify_recipe}",
+        )
+        stress_recipe = ci_goal_recipe("ci-stress")
+        check(
+            any(line.split()[1:] == ["stress", "STRICT_TOOLS=1"]
+                for line in stress_recipe if line.startswith("$(MAKE) ")),
+            "Makefile: ci-stress does not invoke the canonical mutation-free "
+            f"FULL aggregate under STRICT_TOOLS=1: {stress_recipe}",
+        )
+        check(
+            not any("MUTATION_ALLOW_SKIP" in line for line in stress_recipe),
+            "Makefile: mutation-free ci-stress still configures mutation skip policy",
         )
         check(
             command_count == 1,
             f"ci.yml: stress suite step {idx} must contain only its Make command",
         )
         check(
-            "MUTATION_ALLOW_SKIP" not in parsed[1],
-            "ci.yml: mutation-free stress still configures mutation skip policy",
-        )
-        check(
             step.get("continue-on-error", False) is False,
             "ci.yml: stress suite may continue after failure",
         )
+    # Membership in the parsed goal tuple, not a substring: the FULL aggregate
+    # is now reached through ci-stress, and only that goal may reach it.
     all_stress_invocations = [
         invocation for invocation in ci_make_invocations
-        if "stress" in invocation[4][0]
+        if "ci-stress" in invocation[4][0] or "stress" in invocation[4][0]
     ]
     check(
         all_stress_invocations == stress_invocations,

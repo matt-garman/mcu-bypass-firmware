@@ -115,7 +115,7 @@ jobs:
         # optional gate that would otherwise skip cleanly (cppcheck, cbmc, the
         # MISRA python addon, ...) must actually RUN -- a silent skip here would
         # mean a broken install masquerading as a green build.
-        run: make test STRICT_TOOLS=1
+        run: make ci-verify
 
   # -------------------------------------------------------------------------
   # PIC gate (ALL THREE parts): the PIC counterpart of `verify`.
@@ -666,4 +666,4 @@ jobs:
             || { echo "::error::PyYAML missing"; exit 1; }
 
       - name: Exhaustive suite (mutation runs fail-closed in pic)
-        run: make stress STRICT_TOOLS=1
+        run: make ci-stress

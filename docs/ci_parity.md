@@ -69,6 +69,25 @@ Whatever reads that inventory must pass `--no-print-directory`: a sub-make's
 variable query. `scripts/verify-release-artifact-commit.sh` already reads
 `RELEASE_ARTIFACT_GATES` that way.
 
+**The pattern, established on `verify` and `stress`.** Converting a job is
+three edits that must land together:
+
+1. the workflow step's `run:` invokes that job's goal from `CI_GOALS` and
+   nothing else, carrying only the pins the caller supplies;
+2. `test_workflow_syntax.sh`'s detection for that job matches the goal instead
+   of the literal command -- it locates each job's step by command and anchors
+   its ordering assertions to whatever it finds;
+3. every policy assertion the workflow step used to satisfy moves to reading the
+   goal's recipe, through `ci_goal_recipe()`. Dropping them instead would retire
+   real checks silently, which is the failure mode this whole document is about.
+
+`scripts/ci-local.sh` needs a fourth edit only where it mirrors a converted job
+directly. Its non-PR path deliberately folds `verify`, `stress` and the mutation
+gate into one `make test-long`, which is a local optimisation rather than drift;
+its PR path mirrors `verify` one-for-one and now invokes `ci-verify`. That moves
+what `test_ci_local_routing.sh` observes from the inner goal to the wrapper, so
+the inner command is asserted against the recipe instead.
+
 ## Part 2 - the parity gate: `test-ci-parity`
 
 Extends `test/test_workflow_syntax.sh`, which already parses both workflows
@@ -181,7 +200,7 @@ shape.
 | # | Increment | Catches |
 |---|-----------|---------|
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
-| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change | nothing yet -- pure restructure |
+| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress` **done**; `pic`, `mutation`, `attiny202`, `build-matrix` remain) | nothing yet -- pure restructure |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |

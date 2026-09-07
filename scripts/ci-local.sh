@@ -539,7 +539,7 @@ else
 fi
 
 if [ "$PR_MODE" -eq 1 ]; then
-	run_step "verify job: make test" make test
+	run_step "verify job: make ci-verify" make ci-verify
 else
 	# One test-long invocation combines hosted verify, mutation-free stress, and
 	# the pic job's mutation gate. Keep every unskipped substrate strict and

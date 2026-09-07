@@ -300,7 +300,11 @@ mapfile -t calls < "$log"
 [ "${#calls[@]}" -eq 2 ] \
 	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected 2"
 [ "${calls[0]}" = $'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45' ] \
-	&& [ "${calls[1]}" = $'STRICT_TOOLS=1\ttest' ] \
+	&& # ci-verify, not `test`: PR mode invokes the same goal the hosted verify job
+# invokes, so the two cannot drift into equivalent-looking spellings. What that
+# goal runs is asserted where it now lives -- against the recipe, in
+# test_workflow_syntax.sh.
+[ "${calls[1]}" = $'STRICT_TOOLS=1\tci-verify' ] \
 	|| fail "PR with both skips did not route the strict non-mutation suite"
 [[ "${calls[1]}" != *"MUTATION_ALLOW_SKIP"* ]] \
 	|| fail "PR mode unexpectedly configured mutation testing"

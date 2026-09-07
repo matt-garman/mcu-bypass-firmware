@@ -57,9 +57,11 @@ the parity gate and Part 4.
 
 The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
-ordering assertions to it, so pointing two steps at their goals produced 16
-failures reporting only that the known shape had changed. A job's goal and that
-job's detection move together.
+ordering assertions to it, so a job's goal, that job's detection, and the policy
+assertions the step used to satisfy all move together -- the last against the
+goal's recipe, or they retire silently. `verify` and `stress` are converted and
+document the pattern; `pic`, the mutation gate, `attiny202` and `build-matrix`
+remain, and carry more pin-and-goal assertions each.
 
 Acceptance: every `run:` step in both
 workflows invokes exactly one declared goal, with its required pins, and
@@ -70,7 +72,7 @@ Makefile does not define; and `--dry-run` produces the artifact-commit shape in
 a scratch clone so `scripts/verify-release-artifact-commit.sh` can be rehearsed
 before a soak rather than after.
 
-Dependencies: none. Effort: about 4-5 hours remaining, one workflow job at a
+Dependencies: none. Effort: about 4 hours remaining, one workflow job at a
 time, each step's before-and-after command compared and that job's detection in
 `test_workflow_syntax.sh` moved in the same change. Risk: Medium; the restructure
 touches every CI entry point, and a mistranslated step is a gate that silently
@@ -570,6 +572,20 @@ statements below are now the definition rather than a summary of one:
   the PIC12F675 with the same MPLAB hardware-tool set as the PIC10F322, but
   neither programmer binary is installed on any machine this repository is
   tested on, so the command shape is inherited and has never been executed.
+  The first real execution of `scripts/flash-pic12f675.py` against an installed
+  MPLAB X 6.20 (2026-09-07) reached the version probe and stopped there, on two
+  defects that no lane could see because both fakes were modelled on the helper
+  rather than on the tool: the version pin required the token `MPLAB` on the
+  banner line, which real `ipecmd -?` never prints, and the jar was handed over
+  as a sealed `memfd` copy, which destroys the manifest `Class-Path` every one
+  of its ~200 sibling jars loads through, so `ipecmd` could not start at all.
+  Both are fixed and both now have regression coverage. What this does NOT yet
+  establish is anything past the probe: no read or program transcript from real
+  `ipecmd` has ever been retained, so the device-id and revision parsing, the
+  full-device export shape `-GF` actually produces, and every argument spelling
+  in `read_argv`/`write_argv` remain modelled on the same invention that hid
+  these two. Capture a real `-GF` export and a real program transcript before
+  trusting the rest of the transaction; expect the next failure there.
 - **9 - GP2's readback margin.** The port-follows-shadow guard re-reads `GPIO`
   against the SRAM shadow every tick, and GP2 is the one output whose input
   buffer is a Schmitt Trigger (VIH min 0.8*VDD) rather than TTL. On

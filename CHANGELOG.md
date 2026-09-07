@@ -84,12 +84,16 @@ historical records and are not retroactively compacted by this policy.
   workflow that dropped one fails instead of silently agreeing with the default
   it was meant to be checked against.
 
-  The goals are inert until a workflow invokes one. Wiring them is the next
-  increment, and it is not separable from the parity gate:
-  `test/test_workflow_syntax.sh` locates each job's strict-suite step by its
-  literal command and anchors seven ordering assertions to it, so a job's goal
-  and that job's detection have to move in the same change.
-  [`docs/ci_parity.md`](docs/ci_parity.md) records that.
+  The `verify` and `stress` jobs now invoke `ci-verify` and `ci-stress`, and
+  `scripts/ci-local.sh`'s pull-request path invokes the same `ci-verify` the
+  hosted job does rather than an equivalent spelling. Wiring a job is not
+  separable from the gate that checks it: `test/test_workflow_syntax.sh` locates
+  each job's step by its literal command and anchors seven ordering assertions
+  to whatever it finds, so the goal, the detection, and the policy assertions
+  the step used to satisfy all move together -- the last against the goal's
+  recipe, through a new `ci_goal_recipe()`, or they would retire silently. The
+  remaining jobs (`pic`, the mutation gate, `attiny202`, `build-matrix`) follow
+  the same pattern; [`docs/ci_parity.md`](docs/ci_parity.md) records it.
 
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
