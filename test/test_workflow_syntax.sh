@@ -1441,16 +1441,6 @@ if check(
         prereqs = fields[1:fields.index("|")] if "|" in fields else fields[1:]
         make_edges.setdefault(target, set()).update(prereqs)
 
-# A CI goal INVOKES its gates rather than depending on them -- deliberately, so
-# each aggregate gets its own Make process -- and recipe commands are invisible
-# to the prerequisite database above. Without these edges every reachability
-# question asked through a wrapper would answer "no" and the routing checks
-# below would pass vacuously on a job that still runs the gate.
-for ci_goal in DECLARED_GOALS:
-    for goals, _, _ in ci_goal_commands(ci_goal):
-        make_edges.setdefault(ci_goal, set()).update(goals)
-
-
 def make_variable(name):
     """Expand one Make variable, so a workflow can be checked against Make.
 
@@ -1468,6 +1458,27 @@ def make_variable(name):
         check=False,
     )
     return result.stdout.split() if result.returncode == 0 else []
+
+
+# A CI goal INVOKES its gates rather than depending on them -- deliberately, so
+# each aggregate gets its own Make process -- and recipe commands are invisible
+# to the prerequisite database above. Without these edges every reachability
+# question asked through a wrapper would answer "no" and the routing checks
+# below would pass vacuously on a job that still runs the gate.
+for ci_goal in DECLARED_GOALS:
+    for goals, _, _ in ci_goal_commands(ci_goal):
+        make_edges.setdefault(ci_goal, set()).update(goals)
+        # A recipe may dispatch a LIST rather than a name: release-rebuild runs
+        # $(CI_CLASSIC_PARTS), release-artifact-gates runs
+        # $(RELEASE_ARTIFACT_GATES). Left unexpanded, such a goal reaches one
+        # node spelled "$(...)" and nothing past it, so every coverage question
+        # asked through it is answered by the empty set -- vacuously, and in the
+        # fail-open direction. Expanding needs make_variable, which is why the
+        # seeding sits below it rather than beside the database it extends.
+        for word in goals:
+            listed = re.fullmatch(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)", word)
+            if listed and word not in make_edges:
+                make_edges[word] = set(make_variable(listed.group(1)))
 
 
 def reachable_set(target):
@@ -1500,6 +1511,193 @@ def target_reaches(target, wanted):
         seen.add(current)
         pending.extend(make_edges.get(current, ()))
     return False
+
+
+# The list dispatches above must really have been expanded. Nothing else would
+# say so: an unexpanded $(VAR) is a node with no edges, so every coverage
+# question asked through it is answered by the empty set and passes.
+for listing_goal, listing_variable in (
+    ("release-rebuild", "CI_CLASSIC_PARTS"),
+    ("release-artifact-gates", "RELEASE_ARTIFACT_GATES"),
+):
+    listed_targets = make_variable(listing_variable)
+    unreached = sorted(set(listed_targets) - reachable_set(listing_goal))
+    check(
+        bool(listed_targets) and not unreached,
+        f"Makefile: $({listing_variable}) is {listed_targets!r}, and "
+        f"{unreached!r} of it is not reachable from {listing_goal}: an "
+        "unexpanded list dispatch is a node with no edges, so every coverage "
+        "question asked through it is answered by the empty set",
+    )
+
+
+# --- nothing reaches a gate except through a declared goal --------------------
+# Everything below this point asks whether the RIGHT goals run, in the right
+# order, with the right pins. This section asks the prior question, of both
+# files at once: is there anything ELSE? A gate reached any other way -- a bare
+# `make test`, a suite under test/ run directly, a `-k` that turns a red gate
+# into a green job, a variable no goal declares -- has no local counterpart,
+# and every ordering assertion further down would still pass while it ran.
+#
+# That needs a stricter reader than the canonical checks use. shell_tokens()
+# reports a logical line whose FIRST word is `make`, which is every invocation
+# either file contains today; it cannot see `cd x && make ...`,
+# `out=$(make ...)` or `... | make ...` -- three shapes a step takes when it
+# grows a gate call without anyone deciding to. So find command POSITIONS
+# instead: the start of a line, and whatever follows an operator.
+#
+# Heredoc bodies are read as commands too. That is the safe direction -- a line
+# of prose starting with the word "make" fails loudly, where skipping bodies
+# would hide a real dispatch -- and the one heredoc either file has holds
+# Python.
+SHELL_SEPARATORS = {
+    "&&", "||", ";", "|", "&", "(", ")", "{", "}", "!",
+    "then", "do", "else", "elif",
+}
+# Wrappers that run whatever follows them. `command` is deliberately not one:
+# `command -v make` is a probe for the tool, not a use of it.
+COMMAND_PREFIXES = {"sudo", "env", "time", "exec", "nohup"}
+SCRIPT_INTERPRETERS = {"bash", "sh", "python3", "python"}
+# A variable read is not a dispatch, and these two flags are what silences one.
+READ_MAKE_FLAGS = {"-s", "--no-print-directory"}
+
+
+def command_argvs(text):
+    """Yield the argv of every command position in a shell fragment."""
+    for line in logical_shell_commands(text):
+        # shlex keeps `$(` and a backtick glued to the word before them, so a
+        # substituted command is invisible unless the opener separates first.
+        line = re.sub(r"\$\(|`", " ; ", line)
+        try:
+            tokens = shlex.split(line, comments=True, posix=True)
+        except ValueError:
+            continue
+        argvs = []
+        argv = []
+        for token in tokens:
+            if token in SHELL_SEPARATORS:
+                if argv:
+                    argvs.append(argv)
+                argv = []
+                continue
+            # `make ci-stress; fi` tokenises as one word plus one: a separator
+            # only has to be spaced on one side to be a separator.
+            terminated = token.endswith(";")
+            token = token[:-1] if terminated else token
+            if token:
+                argv.append(token.rstrip(")"))
+            if terminated and argv:
+                argvs.append(argv)
+                argv = []
+        if argv:
+            argvs.append(argv)
+        for argv in argvs:
+            index = 0
+            while index < len(argv) and (
+                re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[index])
+                or argv[index] in COMMAND_PREFIXES
+            ):
+                index += 1
+            if index < len(argv):
+                yield argv[index:]
+
+
+def make_invocations(text):
+    """Yield (flags, goals, pins) for every `make` command in a fragment."""
+    for argv in command_argvs(text):
+        if argv[0] != "make":
+            continue
+        flags = []
+        goals = []
+        pins = {}
+        for word in argv[1:]:
+            assignment = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", word)
+            if word.startswith("-"):
+                flags.append(word)
+            elif assignment:
+                pins[assignment.group(1)] = assignment.group(2)
+            else:
+                goals.append(word)
+        yield flags, goals, pins
+
+
+def direct_test_program(argv):
+    """The program under test/ this command runs, if it runs one.
+
+    `test -f test/misra.json` is the shell builtin reading a data file and must
+    not match. `bash test/test_x.sh` is the bypass that must: run that way a
+    gate carries whatever policy the step happened to set, which is the
+    hand-maintained inventory this whole item exists to remove.
+    """
+    if re.search(r"(?:^|/)test/", argv[0]):
+        return argv[0]
+    if (argv[0] in SCRIPT_INTERPRETERS and len(argv) > 1
+            and re.search(r"(?:^|/)test/", argv[1])):
+        return argv[1]
+    return None
+
+
+workflow_job_goals = {}
+for workflow_name in ("ci.yml", "release.yml"):
+    workflow_doc = docs.get(workflow_name)
+    workflow_jobs = workflow_doc.get("jobs") if isinstance(workflow_doc, dict) else None
+    bypasses = []
+    for job_id, job in sorted((workflow_jobs or {}).items()):
+        steps = job.get("steps") if isinstance(job, dict) else None
+        for idx, step in enumerate(steps or [], 1):
+            if not isinstance(step, dict) or not isinstance(step.get("run"), str):
+                continue
+            where = f"{workflow_name}: job '{job_id}' step {idx}"
+            for argv in command_argvs(step["run"]):
+                program = direct_test_program(argv)
+                if program is not None:
+                    bypasses.append(f"job '{job_id}' step {idx} runs {program}")
+            for flags, goals, pins in make_invocations(step["run"]):
+                if len(goals) == 1 and goals[0].startswith("print-"):
+                    check(
+                        set(flags) <= READ_MAKE_FLAGS,
+                        f"{where} reads {goals[0]} with "
+                        f"{sorted(set(flags) - READ_MAKE_FLAGS)!r}: a variable "
+                        "read takes -s and --no-print-directory, nothing else",
+                    )
+                    continue
+                if not check(
+                    len(goals) == 1,
+                    f"{where} invokes make with {goals!r}; a step runs exactly "
+                    "one declared goal, so that one name carries the gate, its "
+                    "policy and its pins",
+                ):
+                    continue
+                goal = goals[0]
+                if not check(
+                    goal in DECLARED_GOALS,
+                    f"{where} invokes '{goal}', which no declared goal names: a "
+                    "gate reached outside a goal runs under whatever policy the "
+                    "step sets and has no local counterpart",
+                ):
+                    continue
+                workflow_job_goals.setdefault((workflow_name, job_id), set()).add(goal)
+                check(
+                    not flags,
+                    f"{where} passes Make {flags!r} to {goal}: -k and -i turn a "
+                    "failing gate into a passing job, and -j changes the "
+                    "serialisation these gates are written for",
+                )
+                required = set(ci_goal_pins(goal))
+                supplied = set(pins)
+                check(
+                    supplied == required,
+                    f"{where} invokes {goal} with {sorted(supplied)!r} but the "
+                    f"goal declares {sorted(required)!r}: missing "
+                    f"{sorted(required - supplied)!r} is refused at run time, "
+                    f"an hour in, and extra {sorted(supplied - required)!r} "
+                    "reaches every nested Make as unreviewed command-line input",
+                )
+    check(
+        not bypasses,
+        f"{workflow_name}: a step reaches a suite under test/ directly rather "
+        "than through a declared goal: " + ", ".join(bypasses),
+    )
 
 
 # --- the local mirror runs what ci.yml runs, by construction ------------------
@@ -1560,21 +1758,16 @@ for override, wanted in (
         f"(expected {wanted!r}); the CI_GOALS partition is not enforced",
     )
 
-# Every gate step in ci.yml invokes a declared CI goal, and between them the
-# jobs invoke ALL of them. Either direction failing is a hole: a job running a
-# gate directly bypasses the local mirror entirely, and a declared goal no job
-# invokes is a local run spending time on work CI does not do.
+# WHICH declared goals belong in which file. The section above already proved
+# that these are all of them -- found at every command position, each one
+# declared, unflagged and pinned as its recipe requires -- so what is left is
+# the two directions of the inventory. Either failing is a hole: a job that
+# invokes no goal is running gates the local mirror never hears about, and a
+# declared goal no job invokes is an hour of local work CI does not do.
 if isinstance(ci_jobs, dict):
     ci_yml_goals = set()
-    for job_id, job in sorted(ci_jobs.items()):
-        job_goals = set()
-        for step in (job.get("steps") or []) if isinstance(job, dict) else []:
-            if not isinstance(step, dict) or not isinstance(step.get("run"), str):
-                continue
-            for tokens in shell_tokens(step["run"]):
-                parsed = make_command(tokens)
-                if parsed is not None:
-                    job_goals.update(parsed[0])
+    for job_id in sorted(ci_jobs):
+        job_goals = workflow_job_goals.get(("ci.yml", job_id), set())
         check(
             job_goals and job_goals <= set(CI_GOALS),
             f"ci.yml job '{job_id}' invokes {sorted(job_goals)!r}, which is not "
@@ -1587,6 +1780,22 @@ if isinstance(ci_jobs, dict):
         f"ci.yml invokes {sorted(ci_yml_goals)!r} but CI_GOALS declares "
         f"{sorted(CI_GOALS)!r}",
     )
+
+# The same closing direction for release.yml. Not CI_GOALS: that workflow runs
+# different work -- it rebuilds from the tag and deliberately does not soak --
+# plus the one PIC gate both share, which is what makes "release re-runs the
+# identical PIC gate" true by construction. RELEASE_WORKFLOW_GOALS below holds
+# each of the four to its canonical step; this says there is nothing else.
+release_yml_goals = set()
+for (workflow_name, job_id), goals in workflow_job_goals.items():
+    if workflow_name == "release.yml":
+        release_yml_goals |= goals
+expected_release_yml_goals = set(RELEASE_GOALS) | {"ci-pic"}
+check(
+    release_yml_goals == expected_release_yml_goals,
+    f"release.yml invokes {sorted(release_yml_goals)!r}, expected "
+    f"{sorted(expected_release_yml_goals)!r}",
+)
 
 # "One `make test-long` covers these" is a claim about Make's graph. Ask it.
 # Not `test-long reaches ci-verify's target` -- it does not, and must not: `test`
@@ -2251,6 +2460,50 @@ if check(os.path.isfile(release_script_path), "scripts/make-release.sh: missing"
         "scripts/make-release.sh",
         MAKE_RELEASE_RESOURCE_ROUTES,
     )
+
+    # The local release pipeline must COVER the public attestation. Every gate
+    # release.yml runs on the tag has to have run here first, or a release
+    # qualifies over hours locally and then fails in a workflow that cannot be
+    # re-run without cutting another tag -- the exact cost this whole item
+    # exists to remove. It is the release half of what CI_LOCAL_SEQUENCE says
+    # for a push, and it has to be asked as COVERAGE for the same reason the
+    # CI_LOCAL_FOLDED claim is: the two callers reach the same gates by
+    # different routes. The workflow names goals; this script names each
+    # consumer directly and deliberately -- it resolves a toolchain path per
+    # command and tees each gate to its own evidence log -- so the goal NAMES
+    # are excluded from the question. What must match is everything under them.
+    script_targets = set()
+    for _, goals, _ in make_invocations(release_script_text):
+        for goal in goals:
+            if (re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", goal)
+                    and not goal.startswith("print-")):
+                script_targets.add(goal)
+    check(
+        bool(script_targets),
+        "scripts/make-release.sh invokes no Make target at all; the coverage "
+        "check below would pass on an empty pipeline",
+    )
+    local_release_covers = set()
+    for target in script_targets:
+        local_release_covers |= reachable_set(target)
+    for goal in sorted(release_yml_goals):
+        reached = {
+            target for target in reachable_set(goal)
+            if not target.startswith("$(")
+        }
+        uncovered = sorted(reached - local_release_covers - set(DECLARED_GOALS))
+        # Name a handful: dropping one aggregate from the script uncovers
+        # dozens at once, and the fact that matters is which gate went dark.
+        shown = ", ".join(uncovered[:5])
+        if len(uncovered) > 5:
+            shown += f", and {len(uncovered) - 5} more"
+        check(
+            not uncovered,
+            f"release.yml reaches {shown} through {goal}, and "
+            "scripts/make-release.sh reaches none of them: a release would "
+            "qualify locally over hours and then fail its public attestation, "
+            "on a tag that cannot be re-cut",
+        )
 
 
 # The public release attestation runs three goals. Two are release-specific

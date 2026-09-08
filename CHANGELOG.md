@@ -267,6 +267,39 @@ historical records and are not retroactively compacted by this policy.
   actually follows, so those two queries are checked as the literal names they
   are, and a negative case pins the distinction from both sides.
 
+  **Nothing reaches a gate except through a declared goal.** Every check above
+  asks whether the right goals run, in the right order, with the right pins;
+  none asked the prior question, of both files at once: is there anything
+  *else*? `release.yml` had no rule at all -- a step could have run `make test`
+  beside the four declared ones and every assertion would still have passed.
+  Both workflows are now read at each command POSITION rather than at the start
+  of a line, so `cd x && make ...`, `out=$(make ...)` and `... | make ...` are
+  visible, and every invocation must name exactly one declared goal and pass
+  exactly the pins that goal declares. No step may run a suite under `test/`
+  directly. Two of those are new coverage rather than preserved coverage: a
+  dispatch may carry no Make flags, since `-k` or `-i` turns a failing gate into
+  a passing job and `-j` changes the serialisation the gates are written for;
+  and the pin set must EQUAL the goal's declared pins, because a variable no
+  goal declares reaches every nested Make as command-line input nobody
+  reviewed.
+
+  **The local release pipeline must cover the public attestation.**
+  `scripts/ci-local.sh` mirrors `ci.yml` before a push; the release half of that
+  claim had no counterpart, and it is the expensive one -- `release.yml` runs on
+  a tag, and a tag cannot be re-cut. Every gate the workflow reaches through its
+  four goals must also be reached by `scripts/make-release.sh`. Coverage rather
+  than an inventory comparison, for the same reason the `make test-long` fold is
+  coverage: the workflow names goals while the script names each consumer
+  directly and deliberately, resolving a toolchain path per command and teeing
+  each gate to its own evidence log.
+
+  That question needed the goal graph to see through a list dispatch.
+  `release-rebuild` runs `$(CI_CLASSIC_PARTS)` and `release-artifact-gates` runs
+  `$(RELEASE_ARTIFACT_GATES)`; an unexpanded `$(...)` is a node with no edges, so
+  coverage asked through one is answered by the empty set and passes. The seeded
+  edges now expand it, and a check of its own proves they did, because nothing
+  else would notice.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

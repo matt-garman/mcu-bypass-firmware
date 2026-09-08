@@ -52,10 +52,10 @@ workflow runs as a Make goal, have each workflow step invoke exactly one of
 them, run the same goals locally, and check that shape rather than compare two
 hand-maintained inventories. The publishability gate that document's Part 3
 describes is done; every step in BOTH workflows now invokes a declared goal;
-`scripts/ci-local.sh` now EXECUTES the inventory rather than describing it; and
+`scripts/ci-local.sh` now EXECUTES the inventory rather than describing it;
 the artifact-commit verifier dispatches through a declared goal too, which was
-the last gate composition in the release path living in a shell script. What
-remains is the rest of the parity gate and Part 4.
+the last gate composition in the release path living in a shell script; and the
+parity gate itself is in place. What remains is Part 4.
 
 The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
@@ -107,6 +107,29 @@ checks that retired were replaced by a chain that is strictly stronger --
 local lists, and every sequenced goal must have a handler -- where the old one
 proved only that someone had typed a job name into a comment.
 
+The parity gate closed the file-level question the goal conversions had left
+open. Every check written so far asks whether the RIGHT goals run, in the right
+order, with the right pins; none asked, of both workflows at once, whether
+there is anything ELSE -- and `release.yml` had no rule of that kind at all, so
+a step could have run `make test` beside the four declared ones and every
+assertion would still have passed. That needs a stricter reader than the
+canonical checks use: theirs sees a logical line whose FIRST word is `make`,
+which is every invocation either file contains today and misses `cd x && make`,
+`$(make ...)` and `... | make ...`. Reading command POSITIONS instead also
+bought two rules the design's own list had not thought to ask for: a dispatch
+carries no Make flags, because `-k` or `-i` turns a failing gate into a passing
+job, and the pins a step passes must EQUAL the goal's declared set rather than
+merely include it -- an extra variable reaches every nested Make of that goal
+as command-line input nobody reviewed, which is what the release env-leak guard
+exists to refuse. The release half of the local-coverage claim landed here too,
+as coverage of `scripts/make-release.sh` rather than an inventory of goals it
+invokes: that script names each consumer directly and deliberately, since it
+resolves a toolchain path per command and tees each gate to its own evidence
+log. It was only askable after the seeded edges learned to expand a list
+dispatch -- `$(CI_CLASSIC_PARTS)`, `$(RELEASE_ARTIFACT_GATES)` -- because an
+unexpanded `$(...)` is a node with no edges, so coverage asked through one is
+answered by the empty set and passes.
+
 `release-artifact-gates` is the one declared goal no workflow invokes, and none
 can: the artifact commit does not exist until an operator has committed by hand
 after `make-release.sh` finishes. It lives in `RELEASE_PATH_GOALS` rather than
@@ -120,19 +143,18 @@ emptiness is now asserted from both ends.
 
 Acceptance: every `run:` step in both
 workflows invokes exactly one declared goal, with its required pins, and
-invokes nothing under `test/` directly; `scripts/ci-local.sh` executes the
-inventory rather than describing it; a gate parses both workflows and fails
-closed on a step with no local counterpart, on a dropped pin, and on a goal the
-Makefile does not define; and `--dry-run` produces the artifact-commit shape in
-a scratch clone so `scripts/verify-release-artifact-commit.sh` can be rehearsed
-before a soak rather than after.
+invokes nothing under `test/` directly (**done**); `scripts/ci-local.sh`
+executes the inventory rather than describing it (**done**); a gate parses both
+workflows and fails closed on a step with no local counterpart, on a dropped
+pin, and on a goal the Makefile does not define (**done**); and `--dry-run`
+produces the artifact-commit shape in a scratch clone so
+`scripts/verify-release-artifact-commit.sh` can be rehearsed before a soak
+rather than after.
 
-Dependencies: none. Effort: about 4 hours remaining, one workflow job at a
-time, each step's before-and-after command compared and that job's detection in
-`test_workflow_syntax.sh` moved in the same change. Risk: Medium; the restructure
-touches every CI entry point, and a mistranslated step is a gate that silently
-stops running -- which is why each goal lands as an exact wrapper of the
-command it replaces before anything is simplified.
+Dependencies: none. Effort: about 1 hour remaining -- Part 4 only. Risk:
+Medium; the restructure touches every CI entry point, and a mistranslated step
+is a gate that silently stops running -- which is why each goal lands as an
+exact wrapper of the command it replaces before anything is simplified.
 
 ---
 
@@ -915,7 +937,7 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
-| T2-ci-parity | Make local/remote CI parity structural | 2 | 2 h | High - a failed remote gate costs a 25-hour release |
+| T2-ci-parity | Make local/remote CI parity structural | 2 | 1 h | High - a failed remote gate costs a 25-hour release |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

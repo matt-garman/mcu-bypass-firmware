@@ -222,20 +222,29 @@ with a duplicate-key-safe loader and already knows that `ci-local.sh` mirrors
 
 1. Every `run:` step that invokes `make` invokes exactly one goal, and that
    goal is in `$(CI_GOALS)`. Matrix jobs are expanded from `strategy.matrix`
-   before matching.
+   before matching. *(Done in increment 3, for both workflows and against
+   `$(DECLARED_GOALS)`, plus a rule this list did not think to ask for: a
+   dispatch carries no Make flags, because `-k` or `-i` turns a failing gate
+   into a passing job.)*
 2. No `run:` step invokes a program under `test/` directly, and no step invokes
    a project gate outside a `ci-*` goal. Environment steps -- `apt-get`, the
    toolchain installers under `scripts/`, cache and checkout actions -- carry no
    Make or test invocation at all, so they need no allowlist to be distinguished.
+   *(Done in increment 3.)*
 3. Every variable name passed on a `ci-*` invocation is in that goal's declared
-   allowlist, and every pin the goal requires is passed.
+   allowlist, and every pin the goal requires is passed. *(Done in increment 3,
+   and as EQUALITY rather than two containments: the allowlist is the pin set
+   itself. A variable no goal declares is not merely undeclared -- it reaches
+   every nested Make of that goal as command-line input nobody reviewed.)*
 4. Every goal in `$(CI_GOALS)` appears in some workflow step or is declared
    local-only (`ci-preflight`). *(Done in increment 2: the set of goals `ci.yml`
    invokes is required to equal `CI_GOALS` exactly, in both directions.)*
 5. `ci-local.sh` runs every `ci-*` goal `ci.yml` uses; the release recipe runs
-   every one `release.yml` uses. *(The `ci-local.sh` half is done in increment
-   2, by the partition refusal plus the handler correspondence, so what remains
-   here is the release recipe.)*
+   every one `release.yml` uses. *(Done: the `ci-local.sh` half in increment 2,
+   by the partition refusal plus the handler correspondence; the release half in
+   increment 3, as coverage of `scripts/make-release.sh` rather than an
+   inventory of goals it invokes, because that script names each consumer
+   directly and deliberately -- see below.)*
 
 Tool policy follows the existing file: PyYAML absent skips cleanly, and fails
 under `STRICT_TOOLS=1`, which `ci-local.sh` sets.
@@ -247,6 +256,36 @@ have to come from the parsed YAML. (Writing those three as inline code here
 would make this document itself name three goals the Makefile does not have,
 which `test-makefile-name-contract` reports; the scanner and the parity test
 are looking for the same class of mistake from opposite ends.)
+
+Parsed YAML is necessary and still not sufficient. The reader the canonical
+checks use reports a logical line whose *first* word is `make`, which is every
+invocation either file contains today -- and would not see `cd x && make ...`,
+`out=$(make ...)` or `... | make ...`, which are the three shapes a step takes
+when it grows a gate call without anyone deciding to. So this asks at every
+command POSITION instead: the start of a line, and whatever follows an
+operator. `$(` and a backtick have to become separators first, because the
+tokenizer keeps them glued to the word before them. Heredoc bodies are read as
+commands too, which is the safe direction -- a line of prose beginning with the
+word "make" fails loudly, where skipping bodies would hide a real dispatch --
+and the one heredoc either file has holds Python.
+
+The release half of item 5 is a *coverage* question, for the same reason the
+`make test-long` fold is one. `release.yml` names goals; `scripts/make-release.sh`
+names each consumer directly and deliberately, because it resolves a toolchain
+path per command and tees each gate to its own evidence log. Requiring it to
+invoke the release goals would delete that, and requiring the two inventories to
+match would compare things that are not the same kind. What must hold is that
+every gate the workflow reaches through its four goals is also reached by the
+script -- so a release cannot qualify locally over hours and then fail an
+attestation running on a tag that cannot be re-cut.
+
+That question is only askable if the goal graph sees through a list dispatch.
+`release-rebuild` runs `$(CI_CLASSIC_PARTS)` and `release-artifact-gates` runs
+`$(RELEASE_ARTIFACT_GATES)`; unexpanded, such a goal reaches one node spelled
+`$(...)` and nothing past it, so coverage asked through it is answered by the
+empty set -- vacuously, and in the fail-open direction. The seeded edges expand
+it, and a check of its own proves they did, because no other check would
+notice.
 
 ## Part 3 - the artifact commit must prove itself before the tag
 
@@ -350,7 +389,7 @@ shape.
 | 1b | every `ci.yml` job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection moved in the same change (**done**) | a build matrix that no longer covers the parts Make declares |
 | 1c | `release.yml` likewise, sharing `ci-pic` and adding `RELEASE_GOALS` for the work release does differently (**done**) | a release rebuild that skips the clean, or stops re-running CI's own PIC gate |
 | 2 | `ci-local.sh` reads the sequence from Make (**done**) | a CI goal with no local counterpart; a local handler for a gate CI retired |
-| 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
+| 3 | `test-ci-parity` in `make test` (**done**, inside `test-workflow-syntax`: one file already parses both workflows) | a workflow step with no local counterpart; a dropped pin; a gate reached outside a goal; a local release that does not cover the tagged one |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal (**done**) | every post-staging failure, at zero cost; a gate dispatched outside the declared goal; a pin handed to gates that do not read it |
 | 5 | `--dry-run` builds the artifact-commit shape | the same, before the soak rather than after |
 
