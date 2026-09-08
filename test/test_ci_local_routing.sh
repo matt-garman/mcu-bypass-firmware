@@ -210,7 +210,16 @@ xt_calls=(
 	"STRICT_TOOLS=1${tab}ci-attiny202-build${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static${tab}XT_STACK_MAX_FRAME=$expected_xt_stack"
 	"STRICT_TOOLS=1${tab}ci-attiny202-target${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static"
 )
-build_call=$'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45'
+# One command per classic AVR part, mirroring the hosted matrix row for row.
+# The parts are read from the Makefile at run time (the fake make delegates
+# `print-*` to the real one), so this expectation follows CI_CLASSIC_PARTS
+# rather than restating it -- a new part changes both surfaces at once.
+build_calls=()
+for part in $("$REAL_MAKE" -s --no-print-directory -C "$ROOT" print-CI_CLASSIC_PARTS); do
+	build_calls+=("STRICT_TOOLS=1${tab}ci-build-classic${tab}CI_CLASSIC_PART=$part")
+done
+[ "${#build_calls[@]}" -gt 0 ] || fail "CI_CLASSIC_PARTS is empty"
+checks=$((checks + 1))
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'
 pic_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=PIC'
 xt_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=ATtiny202'
@@ -240,7 +249,7 @@ if ! output=$(run_ci); then
 	fail "push without skips failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push without skips" "${pic_calls[@]}" "$build_call" \
+expect_calls "push without skips" "${pic_calls[@]}" "${build_calls[@]}" \
 	"${xt_calls[@]}" "$strict_stress"
 [[ "$output" != *"job was skipped"* ]] \
 	|| fail "push without skips emitted a skipped-job warning"
@@ -264,7 +273,7 @@ if ! output=$(run_ci_clean); then
 fi
 mapfile -t calls < "$log"
 expect_calls "clean push without skips" $'STRICT_TOOLS=1\tclean' \
-	"${pic_calls[@]}" "$build_call" "${xt_calls[@]}" "$strict_stress"
+	"${pic_calls[@]}" "${build_calls[@]}" "${xt_calls[@]}" "$strict_stress"
 [[ "$output" == *"Safe to push"* && "$output" != *"not a full push reproduction"* ]] \
 	|| fail "clean push without skips omitted the safe-to-push verdict"
 checks=$((checks + 1))
@@ -273,7 +282,7 @@ if ! output=$(run_ci --skip-pic); then
 	fail "push --skip-pic failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push --skip-pic" "$build_call" "${xt_calls[@]}" "$pic_partial_stress"
+expect_calls "push --skip-pic" "${build_calls[@]}" "${xt_calls[@]}" "$pic_partial_stress"
 [[ "$output" == *"PIC job was skipped"* && "$output" != *"ATtiny202 job was skipped"* ]] \
 	|| fail "push --skip-pic emitted the wrong skipped-job warnings"
 [[ "$output" != *"Safe to push"* && "$output" == *"not a full push reproduction"* ]] \
@@ -284,7 +293,7 @@ if ! output=$(run_ci --skip-attiny202); then
 	fail "push --skip-attiny202 failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push --skip-attiny202" "${pic_calls[@]}" "$build_call" "$xt_partial_stress"
+expect_calls "push --skip-attiny202" "${pic_calls[@]}" "${build_calls[@]}" "$xt_partial_stress"
 [[ "$output" == *"ATtiny202 job was skipped"* && "$output" != *"PIC job was skipped"* ]] \
 	|| fail "push --skip-attiny202 emitted the wrong skipped-job warnings"
 checks=$((checks + 1))
@@ -293,7 +302,7 @@ if ! output=$(run_ci --skip-pic --skip-attiny202); then
 	fail "push with both target toolchains skipped failed: $output"
 fi
 mapfile -t calls < "$log"
-expect_calls "push with both skips" "$build_call" "$both_partial_stress"
+expect_calls "push with both skips" "${build_calls[@]}" "$both_partial_stress"
 [[ "$output" == *"PIC job was skipped"* && "$output" == *"ATtiny202 job was skipped"* ]] \
 	|| fail "push with both skips omitted a skipped-job warning"
 checks=$((checks + 1))
@@ -302,15 +311,19 @@ if ! output=$(run_ci --pr --skip-pic --skip-attiny202); then
 	fail "PR with both skips routing failed: $output"
 fi
 mapfile -t calls < "$log"
-[ "${#calls[@]}" -eq 2 ] \
-	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected 2"
-[ "${calls[0]}" = $'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45' ] \
-	&& # ci-verify, not `test`: PR mode invokes the same goal the hosted verify job
+# The build matrix still runs in PR mode (it has no --skip), so the expected
+# tail is one command per classic part, then the verify goal.
+pr_expected=("${build_calls[@]}" $'STRICT_TOOLS=1\tci-verify')
+[ "${#calls[@]}" -eq "${#pr_expected[@]}" ] \
+	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected ${#pr_expected[@]}"
+# ci-verify, not `test`: PR mode invokes the same goal the hosted verify job
 # invokes, so the two cannot drift into equivalent-looking spellings. What that
 # goal runs is asserted where it now lives -- against the recipe, in
 # test_workflow_syntax.sh.
-[ "${calls[1]}" = $'STRICT_TOOLS=1\tci-verify' ] \
-	|| fail "PR with both skips did not route the strict non-mutation suite"
+for i in "${!pr_expected[@]}"; do
+	[ "${calls[$i]}" = "${pr_expected[$i]}" ] \
+		|| fail "PR with both skips command $((i + 1)) was '${calls[$i]}', expected '${pr_expected[$i]}'"
+done
 [[ "${calls[1]}" != *"MUTATION_ALLOW_SKIP"* ]] \
 	|| fail "PR mode unexpectedly configured mutation testing"
 checks=$((checks + 1))

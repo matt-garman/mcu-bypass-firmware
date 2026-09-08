@@ -3331,7 +3331,7 @@ RELEASE_ARTIFACT_GATES = \
 # A goal therefore refuses to run when a pin it names is unset, rather than
 # falling back to the default: a workflow that dropped XT_STATIC_RAM_LIMIT would
 # otherwise silently lose the independence the two-value scheme exists for.
-CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny202-target
+CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny202-target ci-build-classic
 
 # Non-emptiness is NOT the test. Every pin below has a default in this file, so
 # a goal that only checked for a value would pass on the default -- which is the
@@ -3340,6 +3340,12 @@ CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny20
 ci_pin = $(if $(filter command line,$(origin $(1))),,$(error $@ requires $(1) to be supplied on the command line; it is pinned by the caller so a mismatch with this Makefile's default fails instead of agreeing with itself))
 
 .PHONY: $(CI_GOALS)
+
+# The classic-AVR parts a CI build matrix must cover, DERIVED from the same
+# TINYX5 list that generates their targets rather than restated. A hosted matrix
+# naming a different set is then a disagreement with the Makefile that can be
+# detected, instead of two hand-kept lists quietly agreeing to be stale.
+CI_CLASSIC_PARTS := attiny13a $(foreach n,$(TINYX5),attiny$(n))
 
 ci-verify:
 	$(MAKE) test STRICT_TOOLS=1
@@ -3460,6 +3466,27 @@ ci-attiny202-target:
 	p=$$(grep -c "SOAK PASS" $(XT_BUILD_DIR)/ci-soak.log || true); \
 	[ "$$p" -eq "$$n" ] \
 		|| { echo "FAIL: attiny202-soak: $$p/$$n variants PASSed (skip or fail)" >&2; exit 1; }
+
+# One build-matrix row: every variant for ONE classic AVR part, plus its
+# flash/RAM report. The part arrives as a pin and is checked against
+# CI_CLASSIC_PARTS before it reaches a sub-make, so a matrix typo names an
+# unsupported part loudly rather than expanding to some other goal.
+#
+# `make <part>` already depends on `<part>-size`, so the second invocation
+# re-runs the report with AVR_REBUILD_PREREQ= (report only, no rebuild) purely
+# to capture it in a file a caller can publish. That file goes under
+# $(AVR_BUILD_DIR), which is gitignored and removed by `make clean`, so running
+# this goal locally does not leave the tree dirty.
+ci-build-classic:
+	$(call ci_pin,CI_CLASSIC_PART)
+	@case " $(CI_CLASSIC_PARTS) " in \
+	*" $(CI_CLASSIC_PART) "*) ;; \
+	*) echo "FAIL: CI_CLASSIC_PART=$(CI_CLASSIC_PART) is not a supported classic AVR part; expected one of: $(CI_CLASSIC_PARTS)" >&2; exit 1 ;; \
+	esac
+	$(MAKE) $(CI_CLASSIC_PART)
+	$(MAKE) $(CI_CLASSIC_PART)-size AVR_REBUILD_PREREQ= \
+		> $(AVR_BUILD_DIR)/size-$(CI_CLASSIC_PART).txt
+	@cat $(AVR_BUILD_DIR)/size-$(CI_CLASSIC_PART).txt
 
 # The smoke soak's duration is policy, not a host pin: it says how much soak a
 # CI run is worth, which is the project's decision and the same everywhere.

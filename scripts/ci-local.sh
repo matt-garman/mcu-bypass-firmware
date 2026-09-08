@@ -27,8 +27,13 @@
 #                                            the commands that run them; this
 #                                            script only chooses which XC8/DFP
 #                                            installation they point at.)
-#   build-matrix  -> make attiny13a attiny85 attiny45 (every variant builds for every
-#                                            AVR; each prints flash/RAM)
+#   build-matrix  -> make ci-build-classic CI_CLASSIC_PART=<part>, once per part
+#                                           (every variant builds for every
+#                                            release-supported classic AVR; each
+#                                            prints flash/RAM and records it.
+#                                            The part list comes from the
+#                                            Makefile's CI_CLASSIC_PARTS, not
+#                                            from a copy here)
 #   attiny202     -> make ci-attiny202-build
 #                                           (fuses + smoke + build/budget +
 #                                            cppcheck/MISRA + coil-pulse width
@@ -472,7 +477,17 @@ else
 		PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
 fi
 
-run_step "build-matrix: make attiny13a attiny85 attiny45" make attiny13a attiny85 attiny45
+# One row per part, exactly as the hosted matrix runs them -- and the parts
+# come from the Makefile rather than from a list here, so a new classic AVR
+# part is covered locally the moment it is declared. `make print-...` is issued
+# between steps: a complete Make invocation holds the worktree lock, so a query
+# made while another make is in flight would block rather than answer.
+CLASSIC_PARTS=$(make -s --no-print-directory print-CI_CLASSIC_PARTS)
+[ -n "$CLASSIC_PARTS" ] || die "CI_CLASSIC_PARTS is empty; the build matrix would cover nothing"
+for part in $CLASSIC_PARTS; do
+	run_step "build-matrix: make ci-build-classic ($part)" \
+		make ci-build-classic CI_CLASSIC_PART="$part"
+done
 
 if [ "$SKIP_ATTINY202" -eq 1 ]; then
 	warn "--skip-attiny202: NOT running the ATtiny202 job; this does not mirror CI."

@@ -148,6 +148,21 @@ historical records and are not retroactively compacted by this policy.
   is the argument for executing a new goal rather than reading it: the goal
   parsed, passed every structural check, and could not have run.
 
+  `build-matrix` completes the set, and is the first conversion that bought
+  coverage rather than preserving it. Its rows selected work through workflow
+  expressions (`make ${{ matrix.build }}`) that literal command parsing cannot
+  resolve, so the gate pinned a reviewed list of `{mcu, build, size}` triples --
+  a second hand-kept copy of what the Makefile already knew, checked against a
+  third copy in the test. A row now carries only the part name;
+  `ci-build-classic` derives the build and size targets from a pin it validates
+  against `CI_CLASSIC_PARTS`, which is itself derived from the `TINYX5` list
+  that generates those targets. So the question the gate asks is whether the
+  workflow covers the parts *Make* declares. Adding a classic AVR part to the
+  Makefile now fails the gate until the matrix covers it; before, the two lists
+  could quietly agree to be stale. `scripts/ci-local.sh` reads the same list
+  instead of naming the three parts, and its per-part size report lands under
+  `build_avr_classic/` rather than the repo root.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

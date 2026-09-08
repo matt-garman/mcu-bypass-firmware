@@ -1058,7 +1058,10 @@ FLAG_TAKES_ARG = {"-C", "-f", "-j", "-l", "-o", "-W",
 # the missing MCU field is the exact defect the whole rename existed to kill.
 # A placeholder with no mapping fails; skipping it silently is how that one
 # survived in a live document.
-PLACEHOLDERS = {"variant": "VARIANTS"}
+# <part> resolves through CI_CLASSIC_PARTS, the same variable ci-build-classic
+# validates its pin against -- so the prose above that goal is checked to name
+# real targets for every part the Makefile declares, rather than exempted.
+PLACEHOLDERS = {"variant": "VARIANTS", "part": "CI_CLASSIC_PARTS"}
 PLACEHOLDER = re.compile(r"<([a-z][a-z0-9_]*)>")
 
 

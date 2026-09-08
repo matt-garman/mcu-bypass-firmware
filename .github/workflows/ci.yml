@@ -545,17 +545,13 @@ jobs:
     needs: pic   # gate behind the fast PIC job (see `verify`)
     strategy:
       fail-fast: false
+      # Only the part name. The goal derives its build and size targets, and
+      # the workflow contract checks this list against the Makefile's own
+      # CI_CLASSIC_PARTS -- so adding a classic AVR part to the Makefile fails
+      # this gate until the matrix covers it, rather than the two lists
+      # agreeing to be stale.
       matrix:
-        include:
-          - mcu: attiny13a
-            build: attiny13a
-            size: attiny13a-size
-          - mcu: attiny85
-            build: attiny85
-            size: attiny85-size
-          - mcu: attiny45
-            build: attiny45
-            size: attiny45-size
+        mcu: [attiny13a, attiny85, attiny45]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -566,11 +562,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y make util-linux gcc-avr avr-libc
 
-      - name: Build all variants for ${{ matrix.mcu }}
-        run: make ${{ matrix.build }}
-
-      - name: Resource utilization (flash / RAM)
-        run: make ${{ matrix.size }} AVR_REBUILD_PREREQ= | tee size-${{ matrix.mcu }}.txt
+      - name: Build + size ${{ matrix.mcu }} (make ci-build-classic)
+        run: make ci-build-classic CI_CLASSIC_PART="${{ matrix.mcu }}"
 
       - name: Upload firmware images
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -578,7 +571,7 @@ jobs:
           name: firmware-${{ matrix.mcu }}
           path: |
             build_avr_classic/*.hex
-            size-${{ matrix.mcu }}.txt
+            build_avr_classic/size-${{ matrix.mcu }}.txt
           if-no-files-found: error
 
   # -------------------------------------------------------------------------

@@ -51,19 +51,26 @@ pass here means the CI matrix will be green" is an assertion in a comment.
 workflow runs as a Make goal, have each workflow step invoke exactly one of
 them, run the same goals locally, and check that shape rather than compare two
 hand-maintained inventories. The publishability gate that document's Part 3
-describes is done, and `CI_GOALS` now declares the five `ci.yml` gate jobs as
-exact wrappers; what remains is wiring the workflows to them, the local mirror,
-the parity gate and Part 4.
+describes is done, and every `ci.yml` job now invokes its goal, as does
+`scripts/ci-local.sh`; what remains is `release.yml`, having `ci-local.sh`
+execute the goal inventory rather than describe it in a prose header, the
+parity gate itself, and Part 4.
 
 The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
 ordering assertions to it, so a job's goal, that job's detection, and the policy
 assertions the step used to satisfy all move together -- the last against the
-goal's recipe, or they retire silently. `verify`, `stress`, `pic`, the mutation
-gate and `attiny202` are converted; `build-matrix` remains. Note that one job
-does not always mean one goal: `attiny202` splits into a DFP half and a
-yasimavr half because the workflow provisions those inputs between them, and
-the gate asserts the build half runs first. Run every new goal before trusting
+goal's recipe, or they retire silently. All seven `ci.yml` gate steps are
+converted. Note that one job does not always mean one goal: `attiny202` splits
+into a DFP half and a yasimavr half because the workflow provisions those
+inputs between them, and the gate asserts the build half runs first.
+`build-matrix` converts differently again -- its rows selected work through
+expressions the gate could not parse, so it pinned a reviewed copy of the part
+list. The row now carries only the part name, `ci-build-classic` validates it
+against `CI_CLASSIC_PARTS`, and the gate asks whether the matrix covers the
+parts MAKE declares. That is the first conversion that bought coverage rather
+than preserving it: adding a classic AVR part now fails the gate until the
+matrix covers it. Run every new goal before trusting
 it: wiring the ATtiny202 lane found a `set -o pipefail` bashism that had
 shipped dormant in the `CI_GOALS` commit, because Make recipes run under
 `/bin/sh` while a workflow `run:` block runs under bash. Two hazards

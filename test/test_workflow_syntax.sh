@@ -1290,9 +1290,9 @@ CI_GOALS = makefile_ci_goals()
 check(
     CI_GOALS == (
         "ci-verify", "ci-stress", "ci-pic", "ci-mutation",
-        "ci-attiny202-build", "ci-attiny202-target",
+        "ci-attiny202-build", "ci-attiny202-target", "ci-build-classic",
     ),
-    f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed six",
+    f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed seven",
 )
 
 
@@ -1400,6 +1400,25 @@ if check(
 for ci_goal in CI_GOALS:
     for goals, _, _ in ci_goal_commands(ci_goal):
         make_edges.setdefault(ci_goal, set()).update(goals)
+
+
+def make_variable(name):
+    """Expand one Make variable, so a workflow can be checked against Make.
+
+    Reading it from the -pRrq dump above would give the unexpanded definition;
+    a `print-<VAR>` query gives the value a build actually sees. The lock token
+    is the same one the dump uses: a complete Make invocation holds the worktree
+    lock, and this gate can run inside one.
+    """
+    result = subprocess.run(
+        ["make", "-s", "--no-print-directory", f"print-{name}",
+         f"_MAKE_SERIAL_LOCK_HELD={worktree_id}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.split() if result.returncode == 0 else []
 
 
 def target_reaches(target, wanted):
@@ -1750,26 +1769,106 @@ if check(isinstance(stress_job, dict), "ci.yml: required job 'stress' is missing
         "ci.yml: another normal-CI job invokes the FULL stress aggregate",
     )
 
-# Matrix-selected goals are expressions in the run command, so literal command
-# parsing cannot see their concrete values. Pin the small reviewed matrix here;
-# otherwise a row could route test-long/mutation without changing the command.
+# A matrix row selects its work through an expression, which literal command
+# parsing cannot resolve. It used to be pinned here as a reviewed list of
+# {mcu, build, size} triples -- a second hand-kept copy of what the Makefile
+# already knows, checked against a third copy in this file. The row now carries
+# only the part name and the goal derives the rest, so the question becomes
+# whether the workflow covers the parts MAKE declares. Adding a classic AVR
+# part to the Makefile fails this check until the matrix covers it.
 build_matrix_job = ci_jobs.get("build-matrix") if isinstance(ci_jobs, dict) else None
 if check(
         isinstance(build_matrix_job, dict),
         "ci.yml: required job 'build-matrix' is missing"):
     strategy = build_matrix_job.get("strategy")
     matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
-    include = matrix.get("include") if isinstance(matrix, dict) else None
-    expected_build_matrix = [
-        {"mcu": "attiny13a", "build": "attiny13a", "size": "attiny13a-size"},
-        {"mcu": "attiny85", "build": "attiny85", "size": "attiny85-size"},
-        {"mcu": "attiny45", "build": "attiny45", "size": "attiny45-size"},
-    ]
+    rows = matrix.get("mcu") if isinstance(matrix, dict) else None
+    declared_parts = make_variable("CI_CLASSIC_PARTS")
     check(
-        include == expected_build_matrix,
-        "ci.yml: build-matrix goals no longer match the reviewed Classic AVR set",
+        bool(declared_parts),
+        "Makefile: CI_CLASSIC_PARTS is empty; the build matrix would be unchecked",
+    )
+    check(
+        rows == declared_parts,
+        f"ci.yml: build-matrix covers {rows!r}, but the Makefile declares "
+        f"CI_CLASSIC_PARTS={declared_parts!r}",
+    )
+    check(
+        isinstance(matrix, dict) and "include" not in matrix,
+        "ci.yml: build-matrix reintroduced per-row goal fields; the goal owns "
+        "which targets a part builds",
     )
 
+    build_invocations = [
+        invocation for invocation in ci_make_invocations
+        if "ci-build-classic" in invocation[4][0]
+    ]
+    check(
+        len(build_invocations) == 1,
+        f"ci.yml: ci-build-classic is invoked {len(build_invocations)} time(s), "
+        "expected 1",
+    )
+    if len(build_invocations) == 1:
+        job_id, idx, step, command_count, parsed, tokens = build_invocations[0]
+        check(
+            job_id == "build-matrix" and not parsed[2]
+            and parsed[:2] == (
+                ("ci-build-classic",), {"CI_CLASSIC_PART": "${{ matrix.mcu }}"}
+            ),
+            "ci.yml: the build-matrix invocation is not the canonical pinned "
+            f"ci-build-classic command: {' '.join(tokens)}",
+        )
+        check(
+            command_count == 1,
+            f"ci.yml: build-matrix step {idx} must contain only its Make command",
+        )
+        check("if" not in step, f"ci.yml: build-matrix step {idx} is conditional")
+        check(
+            step.get("continue-on-error", False) is False,
+            f"ci.yml: build-matrix step {idx} may continue after failure",
+        )
+
+    # No job may name a classic part target directly: the pin is what makes an
+    # unsupported part fail loudly instead of expanding to some other goal.
+    direct_classic = [
+        f"{invocation[0]} step {invocation[1]}: {goal}"
+        for invocation in ci_make_invocations
+        for goal in invocation[4][0]
+        if goal in declared_parts or goal in {f"{p}-size" for p in declared_parts}
+    ]
+    check(
+        not direct_classic,
+        "ci.yml: a job bypasses ci-build-classic with a direct part target: "
+        + ", ".join(direct_classic),
+    )
+
+    build_recipe = ci_goal_commands("ci-build-classic")
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in build_recipe
+        ) == (
+            (("$(CI_CLASSIC_PART)",), {}),
+            (("$(CI_CLASSIC_PART)-size",), {"AVR_REBUILD_PREREQ": ""}),
+        )
+        and not any(duplicate for _, _, duplicate in build_recipe),
+        "Makefile: ci-build-classic no longer builds the part and re-reports "
+        "its size without rebuilding: "
+        + " | ".join(" ".join(goals) for goals, _, _ in build_recipe),
+    )
+    check(
+        ci_goal_pins("ci-build-classic") == ["CI_CLASSIC_PART"],
+        "Makefile: ci-build-classic does not refuse the pin its callers supply: "
+        f"{ci_goal_pins('ci-build-classic')}",
+    )
+    # The pin reaches a sub-make as a goal name, so it must be checked against
+    # the declared set FIRST. Without this the recipe would run whatever it was
+    # handed.
+    check(
+        any("CI_CLASSIC_PARTS" in line for line in ci_goal_recipe("ci-build-classic")),
+        "Makefile: ci-build-classic does not validate CI_CLASSIC_PART against "
+        "CI_CLASSIC_PARTS before using it as a goal",
+    )
 pic_job = ci_jobs.get("pic") if isinstance(ci_jobs, dict) else None
 if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
     check("if" not in pic_job, "ci.yml: job 'pic' must be unconditional")

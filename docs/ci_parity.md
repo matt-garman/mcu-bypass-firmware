@@ -112,6 +112,19 @@ and `ci-attiny202-target`, split exactly where the toolchain and the fail-fast
 boundary already sat, and the gate asserts the build half runs first. Part 2's
 rule is one goal per *step*, not per job -- the `pic` job already ran two.
 
+A matrix job converts differently again. `build-matrix`'s rows selected their
+work through expressions (`make ${{ matrix.build }}`), which literal command
+parsing cannot resolve, so the gate pinned the reviewed `{mcu, build, size}`
+triples -- a second hand-kept copy of what the Makefile already knew, checked
+against a third copy in the test. The row now carries only the part name and
+`ci-build-classic` derives the rest from a pin it validates against
+`CI_CLASSIC_PARTS`, itself derived from the same `TINYX5` list that generates
+those targets. The check becomes: does the workflow cover the parts *Make*
+declares? Adding a classic AVR part to the Makefile now fails the gate until
+the matrix covers it, where before the two lists could agree to be stale. That
+is the first place in this item where converting a job bought coverage rather
+than merely preserving it.
+
 **Run each new goal before trusting it.** Wiring `ci-attiny202-target` found a
 defect that had shipped dormant in the `CI_GOALS` commit: its soak lane used
 `set -o pipefail`, a bashism, and Make recipes run under `/bin/sh`. It had
@@ -270,7 +283,7 @@ shape.
 | # | Increment | Catches |
 |---|-----------|---------|
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
-| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress`, `pic`, the mutation gate, `attiny202` **done**; `build-matrix` remains) | nothing yet -- pure restructure |
+| 1b | every `ci.yml` job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection moved in the same change (**done**) | a build matrix that no longer covers the parts Make declares |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |
