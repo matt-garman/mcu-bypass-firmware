@@ -3331,7 +3331,7 @@ RELEASE_ARTIFACT_GATES = \
 # A goal therefore refuses to run when a pin it names is unset, rather than
 # falling back to the default: a workflow that dropped XT_STATIC_RAM_LIMIT would
 # otherwise silently lose the independence the two-value scheme exists for.
-CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202
+CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny202-target
 
 # Non-emptiness is NOT the test. Every pin below has a default in this file, so
 # a goal that only checked for a value would pass on the default -- which is the
@@ -3403,11 +3403,23 @@ ci-mutation:
 		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
 		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)"
 
-# The three assertions the workflow carried as loose shell -- that every
-# declared image was actually built, and that the soak PASSed once per supported
-# variant rather than skipping -- are decisions about what the gate proves, so
-# they live here rather than in a `run:` block no local run executes.
-ci-attiny202:
+# TWO goals, not one, because this lane has two out-of-apt inputs with
+# different jobs: the vendored ATtiny_DFP device files COMPILE the image, and
+# the patched yasimavr venv RUNS it. A caller provisions them in that order and
+# wants to know the image built before spending minutes compiling a simulator,
+# so the split is the fail-fast boundary as well as the toolchain boundary. It
+# is also where a caller may cache the DFP: after the images are proven, before
+# anything that needs the venv.
+#
+# The assertions the workflow carried as loose shell -- that every declared
+# image was actually built, and that the soak PASSed once per supported variant
+# rather than skipping -- are decisions about what the gate proves, so they live
+# here rather than in a `run:` block no local run executes.
+#
+# ci-attiny202-build needs the DFP and nothing else. Its image check is not
+# redundant with the build: every attiny202-* target exits 0 when the DFP is
+# absent, so without it a failed fetch reads as a pass that produced no images.
+ci-attiny202-build:
 	$(call ci_pin,XT_STATIC_RAM_LIMIT)
 	$(call ci_pin,XT_STACK_MAX_FRAME)
 	$(MAKE) attiny202-test STRICT_TOOLS=1 \
@@ -3417,15 +3429,35 @@ ci-attiny202:
 		test -f "$(XT_BUILD_DIR)/$$hex" \
 			|| { echo "FAIL: missing $(XT_BUILD_DIR)/$$hex (DFP fetch or build failed)" >&2; exit 1; }; \
 	done
+
+# ci-attiny202-target needs the patched yasimavr venv. The soak stays a lane of
+# its own rather than a member of the target aggregate, so its result is counted
+# separately: attiny202-soak iterates the variants and a SKIPPED variant still
+# leaves the target at exit 0, so `make` returning 0 does not mean the matrix
+# was covered. The expected count comes from XT_VARIANTS_SUPPORTED, which is
+# declared `override` and so cannot be shrunk from the command line. The
+# transcript goes under $(XT_BUILD_DIR): gitignored and removed by `make clean`,
+# so a local run of this goal does not leave the tree dirty.
+#
+# The soak is redirected rather than piped through `tee` because recipes run
+# under /bin/sh, where `set -o pipefail` is not available and a piped `make`
+# would report the exit status of `tee`. Keeping the sub-make its own recipe
+# line makes its status govern directly, with no bashism in a Makefile that has
+# none. The cost is that the transcript prints when the soak ends rather than
+# streaming; it is printed in full either way, including on failure.
+ci-attiny202-target:
+	$(call ci_pin,XT_STATIC_RAM_LIMIT)
 	$(MAKE) attiny202-test-target STRICT_TOOLS=1 \
 		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)"
-	@set -o pipefail; \
-	n=$$(printf '%s\n' $(XT_VARIANTS_SUPPORTED) | grep -c .); \
+	@mkdir -p $(XT_BUILD_DIR)
 	$(MAKE) attiny202-soak XT_SOAK_DURATION_MS=$(CI_XT_SOAK_DURATION_MS) \
 		XT_SOAK_PROGRESS_INTERVAL_MS=$(CI_XT_SOAK_DURATION_MS) \
 		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
-		2>&1 | tee ci-attiny202-soak.log; \
-	p=$$(grep -c "SOAK PASS" ci-attiny202-soak.log || true); \
+		> $(XT_BUILD_DIR)/ci-soak.log 2>&1 \
+		|| { cat $(XT_BUILD_DIR)/ci-soak.log; exit 1; }
+	@cat $(XT_BUILD_DIR)/ci-soak.log
+	@n=$$(printf '%s\n' $(XT_VARIANTS_SUPPORTED) | grep -c .); \
+	p=$$(grep -c "SOAK PASS" $(XT_BUILD_DIR)/ci-soak.log || true); \
 	[ "$$p" -eq "$$n" ] \
 		|| { echo "FAIL: attiny202-soak: $$p/$$n variants PASSed (skip or fail)" >&2; exit 1; }
 

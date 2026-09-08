@@ -82,7 +82,11 @@ three edits that must land together:
    to parse its sub-makes with the same parser that reads workflow steps, and
    `ci_goal_pins()` for the pins the goal refuses to run without. Dropping them
    instead would retire real checks silently, which is the failure mode this
-   whole document is about.
+   whole document is about. `ci_goal_commands()` splits a recipe line on shell
+   operators before parsing, because a recipe line is a command *list*: a
+   sub-make can follow a `;` (a guard computed first) and can end at a `|` (its
+   output teed so result lines can be counted). Reading the line whole would
+   miss the first and swallow the pipeline into the second's goal list.
 
 Two hazards, both found by converting `pic` rather than by inspection:
 
@@ -96,6 +100,26 @@ Two hazards, both found by converting `pic` rather than by inspection:
 * **A step found by name goes quiet, not red.** Assertions that located a step
   by its `name:` (`"PIC10F322 pre-hardware gate..."`) simply stop matching when
   the step is folded away. Locate steps by what they *run*.
+
+One job does not always mean one goal. The `attiny202` job has two out-of-apt
+inputs with different jobs -- the vendored ATtiny_DFP *compiles* the image, the
+patched yasimavr venv *runs* it -- and the workflow provisions them in that
+order, caching the DFP once the images are proven and only then paying for a
+simulator build. Folding all four of its gate steps into one goal would have
+destroyed that boundary: a broken image would be found after the venv build
+rather than before it. So it converts to **two** goals, `ci-attiny202-build`
+and `ci-attiny202-target`, split exactly where the toolchain and the fail-fast
+boundary already sat, and the gate asserts the build half runs first. Part 2's
+rule is one goal per *step*, not per job -- the `pic` job already ran two.
+
+**Run each new goal before trusting it.** Wiring `ci-attiny202-target` found a
+defect that had shipped dormant in the `CI_GOALS` commit: its soak lane used
+`set -o pipefail`, a bashism, and Make recipes run under `/bin/sh`. It had
+worked as a workflow `run:` block only because Actions runs those under bash.
+The goal parsed, satisfied every structural check in this gate, and could not
+have executed. Goals are inert until something invokes one, so "it is an exact
+wrapper" is a claim about text until a real run makes it a claim about
+behaviour.
 
 Those recipe edges then pay for themselves. Converting the mutation gate, the
 "exactly one normal-CI path runs mutants" check stopped being a match against
@@ -246,7 +270,7 @@ shape.
 | # | Increment | Catches |
 |---|-----------|---------|
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
-| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress`, `pic`, the mutation gate **done**; `attiny202`, `build-matrix` remain) | nothing yet -- pure restructure |
+| 1b | each job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection for that job moved in the same change (`verify`, `stress`, `pic`, the mutation gate, `attiny202` **done**; `build-matrix` remains) | nothing yet -- pure restructure |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |

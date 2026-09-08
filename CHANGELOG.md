@@ -120,6 +120,34 @@ historical records and are not retroactively compacted by this policy.
   broken trees rather than assumed: a stray second mutation path and a deleted
   `MUTATION_ALLOW_SKIP=0` are each reported by name.
 
+  The `attiny202` job showed that one job does not always mean one goal. It has
+  two out-of-apt inputs with different jobs -- the vendored ATtiny_DFP
+  *compiles* the image, the patched yasimavr venv *runs* it -- and the workflow
+  provisions them in that order, caching the DFP once the images are proven and
+  only then paying for a simulator build. Folding its four gate steps into one
+  goal would have destroyed that: a broken image would be found after the venv
+  build rather than before it. It converts to two goals,
+  `ci-attiny202-build` and `ci-attiny202-target`, split where the toolchain
+  boundary already sat, with the gate asserting the build half runs first.
+
+  Both assertions that job carried as loose shell -- that every declared image
+  was actually built, and that the soak reported one PASS per supported variant
+  -- moved into the goals and are now themselves checked; nothing had been
+  watching them before. Each was verified by deletion. `scripts/ci-local.sh`
+  loses its own copy of the soak count, which is the point: a local count that
+  could drift from the hosted one is the failure this work exists to prevent.
+  The soak transcript now lands under `build_avr_xt/`, gitignored and removed
+  by `make clean`, so running the goal locally no longer dirties the tree.
+
+  Running the goal for real found a defect that had been shipped, dormant, in
+  the `CI_GOALS` commit: the soak lane used `set -o pipefail`, which is a
+  bashism, and Make recipes run under `/bin/sh`. It had worked as a workflow
+  `run:` block only because GitHub Actions runs those under bash. The soak is
+  now redirected rather than piped, so the sub-make's own exit status governs
+  and the Makefile keeps the POSIX-shell recipes it has everywhere else. This
+  is the argument for executing a new goal rather than reading it: the goal
+  parsed, passed every structural check, and could not have run.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

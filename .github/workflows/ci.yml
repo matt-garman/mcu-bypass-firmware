@@ -456,22 +456,17 @@ jobs:
             && test -f test/misra_suppressions.txt \
             || { echo "::error::MISRA analysis inputs missing"; exit 1; }
 
-      - name: ATtiny202 pre-hardware gate (make attiny202-test)
+      # The DFP half: compile every variant and prove the images exist. Both
+      # need the ATtiny_DFP and nothing else, which is why they run before the
+      # yasimavr venv is built -- a failed fetch or a broken build is found in
+      # seconds instead of after a simulator compile. The image assertion lives
+      # in the goal because every attiny202-* target exits 0 when the DFP is
+      # missing, so a failed fetch would otherwise read as a pass.
+      - name: ATtiny202 build gate (make ci-attiny202-build)
         run: >-
-          make attiny202-test STRICT_TOOLS=1
+          make ci-attiny202-build
           XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
           XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
-
-      - name: Assert ATtiny202 images built (fail loud, do NOT skip)
-        run: |
-          # Ask the Makefile for the canonical basenames rather than composing
-          # them here. The output-stage field is exactly the variant name, but a
-          # second copy of the prefix/MCU/stage composition could drift after a
-          # future naming change.
-          for hex in $(make -s print-XT_RELEASE_IMAGES); do
-            test -f "build_avr_xt/$hex" \
-              || { echo "::error::missing build_avr_xt/$hex (DFP fetch or build failed)"; exit 1; }
-          done
 
       - name: Save ATtiny_DFP cache
         if: steps.cache-dfp.outputs.cache-hit != 'true'
@@ -517,28 +512,18 @@ jobs:
           echo "== yasimavr ==" && third_party/yasimavr/venv/bin/python -c \
             "import yasimavr; print(getattr(yasimavr,'__version__','(patched 0.1.6)'))"
 
-      # One Make aggregate owns the sim/fault/lock-step orchestration and rejects
-      # incomplete matrices, per-variant skips, and missing boot scenarios.
-      - name: Fail-closed target aggregate (make attiny202-test-target)
+      # The venv half: the fail-closed target aggregate (sim/fault/lock-step,
+      # rejecting incomplete matrices, per-variant skips and missing boot
+      # scenarios) and the 5-minute simulated soak smoke, which proves the soak
+      # harness and liveness path work on every variant. The soak stays a lane
+      # of its own, so the goal counts one PASS per immutable supported variant
+      # -- a soak that skips a variant still exits 0. Longer soaks remain an
+      # optional local run via XT_SOAK_DURATION_MS and are not part of release
+      # qualification.
+      - name: ATtiny202 target + soak gate (make ci-attiny202-target)
         run: >-
-          make attiny202-test-target STRICT_TOOLS=1
+          make ci-attiny202-target
           XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
-
-      # Short soak smoke (5 min simulated ~= 2 s/variant) -- proves the soak
-      # harness + liveness path work on every variant. Longer soaks remain an
-      # optional local development run via XT_SOAK_DURATION_MS; they are not part
-      # of release qualification. This lane remains separate from the aggregate,
-      # so independently count one PASS per immutable supported variant.
-      - name: Soak smoke (make attiny202-soak, 5 min simulated)
-        run: |
-          set -o pipefail
-          n=$(make -s print-XT_VARIANTS_SUPPORTED | wc -w)
-          make attiny202-soak XT_SOAK_DURATION_MS=300000 \
-               XT_SOAK_PROGRESS_INTERVAL_MS=300000 \
-               XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
-               2>&1 | tee soak.log
-          p=$(grep -c "SOAK PASS" soak.log || true)
-          [ "$p" -eq "$n" ] || { echo "::error::attiny202-soak: $p/$n variants PASSed (skip or fail)"; exit 1; }
 
       - name: Upload ATtiny202 firmware images
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

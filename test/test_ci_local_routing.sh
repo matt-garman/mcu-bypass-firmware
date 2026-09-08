@@ -201,10 +201,14 @@ expected_pic_data=48
 pic_calls=(
 	"STRICT_TOOLS=1${tab}ci-pic${tab}PIC_CC=$work/xc8${tab}PIC_DFP=$work/dfp${tab}PIC10F320_CC=$work/xc8${tab}PIC10F320_DFP=$work/dfp${tab}PIC12F675_DATA_LIMIT=$expected_pic_data"
 )
+# Two commands, in order: the DFP half then the venv half. As with the PIC job
+# the fake make records the wrapper rather than expanding it -- what each goal
+# then runs, including the soak's per-variant PASS count, is asserted by the
+# workflow contract against the recipe. What belongs here is that local CI runs
+# the same two goals the hosted job does, with the same policy pins.
 xt_calls=(
-	"STRICT_TOOLS=1${tab}attiny202-test${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static${tab}XT_STACK_MAX_FRAME=$expected_xt_stack"
-	"STRICT_TOOLS=1${tab}attiny202-test-target${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static"
-	"STRICT_TOOLS=1${tab}attiny202-soak${tab}XT_SOAK_DURATION_MS=300000${tab}XT_SOAK_PROGRESS_INTERVAL_MS=300000${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static"
+	"STRICT_TOOLS=1${tab}ci-attiny202-build${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static${tab}XT_STACK_MAX_FRAME=$expected_xt_stack"
+	"STRICT_TOOLS=1${tab}ci-attiny202-target${tab}XT_STATIC_RAM_LIMIT=$expected_xt_static"
 )
 build_call=$'STRICT_TOOLS=1\tattiny13a\tattiny85\tattiny45'
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'

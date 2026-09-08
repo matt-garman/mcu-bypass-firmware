@@ -29,18 +29,20 @@
 #                                            installation they point at.)
 #   build-matrix  -> make attiny13a attiny85 attiny45 (every variant builds for every
 #                                            AVR; each prints flash/RAM)
-#   attiny202     -> make attiny202-test    (fuses + smoke + build/budget +
+#   attiny202     -> make ci-attiny202-build
+#                                           (fuses + smoke + build/budget +
 #                                            cppcheck/MISRA + coil-pulse width
-#                                            oracle; STRICT_TOOLS=1)
-#                    make attiny202-test-target
+#                                            oracle, then the assertion that
+#                                            every declared image exists; needs
+#                                            the vendored ATtiny_DFP only)
+#                    make ci-attiny202-target
 #                                           (fail-closed yasimavr functional +
-#                                            fault + lock-step aggregate)
-#                    make attiny202-soak    (yasimavr 5-min soak smoke)
-#                                           (the AVR-XT lane; needs the vendored
-#                                            ATtiny_DFP + the patched yasimavr
-#                                            venv)
+#                                            fault + lock-step aggregate, then
+#                                            the 5-min soak smoke with its
+#                                            per-variant PASS count; needs the
+#                                            patched yasimavr venv)
 #                    The target aggregate validates every component PASS count;
-#                    xt_gate() independently counts the separate soak results.
+#                    ci-attiny202-target independently counts the soak results.
 #   verify        -> make test              ) covered together by the local
 #   stress        -> make stress            ) `make test-long` invocation, which
 #                                             combines the fast gates, FULL_*
@@ -173,70 +175,25 @@ run_step() {
 }
 
 # ----------------------------------------------------------------------------
-# Standalone ATtiny202 harness gates: run the target AND count its per-variant
-# PASS lines. The authoritative target aggregate performs this validation for
-# sim/fault/lock-step; this helper remains for the separately scheduled soak.
-#
-# WHY THIS IS NOT JUST `run_step make attiny202-<x>`
-#   CI deliberately does not trust this target's exit status. attiny202-soak
-#   harness target iterates VARIANTS, and a variant that is skipped rather than
-#   run still leaves the target at exit 0 -- so `make` returning 0 does not mean
-#   the matrix was covered. ci.yml therefore greps one PASS marker per variant
-#   and fails the step on a short count. Without the same assertion here, a tree
-#   that covers fewer variants than it claims passes locally and fails in CI,
-#   which is precisely the outcome this script exists to prevent.
-#
-#   The expected count comes from XT_VARIANTS_SUPPORTED (declared `override` in
-#   the Makefile, so it cannot be shrunk from the command line) rather than from
-#   VARIANTS, which can.
-#
-# Usage: xt_gate <marker> <count> [<marker> <count>...] -- <command...>
+# The ATtiny202 soak's per-variant PASS count used to live here, in a local
+# xt_gate() helper, because `make attiny202-soak` returning 0 does not mean the
+# matrix was covered: the target iterates the variants and a SKIPPED variant
+# still leaves it at exit 0. That assertion now lives in ci-attiny202-target,
+# where the hosted job reads the same copy -- a local count that could drift
+# from the hosted one is exactly the class of failure this script exists to
+# prevent. The expected count still comes from XT_VARIANTS_SUPPORTED, declared
+# `override` in the Makefile so it cannot be shrunk from the command line.
 # ----------------------------------------------------------------------------
-XT_LOG_DIR=""
-
-xt_gate() {
-	local -a specs=()
-	while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
-		specs+=("$1"); shift
-	done
-	[ "${1-}" = "--" ] || die "xt_gate: missing -- before the command"
-	shift
-	[ "$#" -gt 0 ] || die "xt_gate: no command given"
-	[ "${#specs[@]}" -gt 0 ] && [ $(( ${#specs[@]} % 2 )) -eq 0 ] \
-		|| die "xt_gate: expected <marker> <count> pairs"
-
-	[ -n "$XT_LOG_DIR" ] \
-		|| XT_LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ci-local-attiny202.XXXXXX")
-	local logfile
-	logfile=$(mktemp "$XT_LOG_DIR/gate.XXXXXX")
-
-	# pipefail is already set; a failing make aborts here exactly as before,
-	# before any count is consulted.
-	"$@" 2>&1 | tee "$logfile"
-
-	local i marker want got
-	for (( i = 0; i < ${#specs[@]}; i += 2 )); do
-		marker=${specs[i]}
-		want=${specs[i + 1]}
-		got=$(grep -c "$marker" "$logfile" || true)
-		[ "$got" -eq "$want" ] \
-			|| die "$CURRENT: '$marker' appeared $got time(s), expected $want (a variant was skipped or did not report)"
-		ok "  '$marker' x$got (expected $want)"
-	done
-}
 
 on_exit() {
 	local rc=$?
 	if [ "$rc" -eq 0 ]; then
-		[ -z "$XT_LOG_DIR" ] || rm -rf "$XT_LOG_DIR"
 		return 0
 	fi
 	if [ -n "$CURRENT" ]; then
 		printf '\n%sFAILED%s during: %s (exit %d)\n' "$RED" "$RST" "$CURRENT" "$rc" >&2
 		log "CI would be RED. Fix the above and re-run."
 	fi
-	# Kept on failure only: the gate output is what a short count needs read.
-	[ -z "$XT_LOG_DIR" ] || log "ATtiny202 gate logs kept in: $XT_LOG_DIR"
 	return 0   # preserve original exit code
 }
 trap on_exit EXIT
@@ -520,27 +477,19 @@ run_step "build-matrix: make attiny13a attiny85 attiny45" make attiny13a attiny8
 if [ "$SKIP_ATTINY202" -eq 1 ]; then
 	warn "--skip-attiny202: NOT running the ATtiny202 job; this does not mirror CI."
 else
-	# Toolchain asserted in PREFLIGHT above.
+	# Toolchain asserted in PREFLIGHT above. The same two goals the hosted job
+	# runs, in the same order: the DFP half first, so a broken image is found
+	# before anything that needs the simulator, then the venv half.
 	#
-	# XT_N is read once before the standalone soak runs: a complete Make
-	# invocation holds the worktree lock, so `make print-...` issued while another
-	# make is in flight would block rather than answer.
-	XT_N=$(make -s --no-print-directory print-XT_VARIANTS_SUPPORTED | wc -w)
-	[ "$XT_N" -gt 0 ] || die "XT_VARIANTS_SUPPORTED is empty; nothing would be gated"
-
-	run_step "attiny202 job: make attiny202-test" make attiny202-test \
+	# The soak's per-variant PASS count used to be counted here by a local
+	# helper. It now lives in ci-attiny202-target, which is the point: the
+	# count is a decision about what the gate proves, and a local copy of it
+	# could disagree with the hosted one while both stayed green.
+	run_step "attiny202 job: make ci-attiny202-build" make ci-attiny202-build \
 		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
 		XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
-	run_step "attiny202 job: make attiny202-test-target" \
-		make attiny202-test-target \
+	run_step "attiny202 job: make ci-attiny202-target" make ci-attiny202-target \
 		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
-	# CI runs a 5-minute simulated soak smoke, with the progress interval set to
-	# the full duration so the log carries one progress line per variant.
-	run_step "attiny202 job: make attiny202-soak" \
-		xt_gate "SOAK PASS" "$XT_N" -- \
-		make attiny202-soak XT_SOAK_DURATION_MS=300000 \
-			XT_SOAK_PROGRESS_INTERVAL_MS=300000 \
-			XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
 fi
 
 if [ "$PR_MODE" -eq 1 ]; then

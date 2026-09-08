@@ -1128,14 +1128,11 @@ CI_RESOURCE_ROUTES = {
         "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
         "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
     },
-    "attiny202-test": {
+    "ci-attiny202-build": {
         "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
         "XT_STACK_MAX_FRAME": CI_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
     },
-    "attiny202-test-target": {
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-    },
-    "attiny202-soak": {
+    "ci-attiny202-target": {
         "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
     },
 }
@@ -1154,6 +1151,16 @@ CI_GOAL_RESOURCE_ROUTES = {
             "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
             "PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)",
         },
+    },
+    "ci-attiny202-build": {
+        "attiny202-test": {
+            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
+            "XT_STACK_MAX_FRAME": "$(XT_STACK_MAX_FRAME)",
+        },
+    },
+    "ci-attiny202-target": {
+        "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
+        "attiny202-soak": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
     },
 }
 
@@ -1239,10 +1246,20 @@ def ci_goal_commands(goal):
     """
     text = "\n".join(ci_goal_recipe(goal)).replace("$(MAKE)", "make")
     parsed_commands = []
-    for tokens in shell_tokens(text):
-        parsed = make_command(tokens)
-        if parsed is not None:
-            parsed_commands.append(parsed)
+    for line in logical_shell_commands(text):
+        # A recipe line is a shell command LIST, not a single command: a
+        # sub-make may follow a `;` (a guard computed first) and may end at a
+        # `|` (its output teed so PASS lines can be counted). Reading the line
+        # whole would miss the first and swallow the pipeline into the second's
+        # goal list, so split on the operators before parsing.
+        for segment in re.split(r"[;&|]+|\d*>[>&]?\S*", line):
+            try:
+                tokens = shlex.split(segment, comments=True, posix=True)
+            except ValueError:
+                continue
+            parsed = make_command(tokens)
+            if parsed is not None:
+                parsed_commands.append(parsed)
     return parsed_commands
 
 
@@ -1271,8 +1288,11 @@ def makefile_ci_goals():
 
 CI_GOALS = makefile_ci_goals()
 check(
-    CI_GOALS == ("ci-verify", "ci-stress", "ci-pic", "ci-mutation", "ci-attiny202"),
-    f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed five",
+    CI_GOALS == (
+        "ci-verify", "ci-stress", "ci-pic", "ci-mutation",
+        "ci-attiny202-build", "ci-attiny202-target",
+    ),
+    f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed six",
 )
 
 
@@ -1458,61 +1478,148 @@ check_resource_routes(
 # release qualification. test-target-matrix independently executes the aggregate
 # with a fake Make and proves sim, fault, and lock-step remain required members;
 # this check owns only workflow routing and does not restate that orchestration.
+#
+# The job runs TWO goals, in order, and the split is load-bearing: the first
+# needs only the vendored ATtiny_DFP (compile the images and prove they exist),
+# the second needs the patched yasimavr venv (run them). The workflow
+# provisions the venv and caches the DFP between them, so a single folded goal
+# would spend a simulator build before knowing the image compiled.
+ATTINY_CI_GOALS = (
+    ("ci-attiny202-build", {
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "XT_STACK_MAX_FRAME": CI_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
+    }),
+    ("ci-attiny202-target", {
+        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+    }),
+)
+
 attiny_job = ci_jobs.get("attiny202") if isinstance(ci_jobs, dict) else None
 if check(isinstance(attiny_job, dict), "ci.yml: required job 'attiny202' is missing"):
-    target_invocations = [
-        invocation for invocation in ci_make_invocations
-        if invocation[0] == "attiny202"
-        and "attiny202-test-target" in invocation[4][0]
-    ]
-    check(
-        len(target_invocations) == 1,
-        "ci.yml: attiny202 job must invoke attiny202-test-target exactly once",
-    )
-    if len(target_invocations) == 1:
-        _, idx, step, command_count, parsed, tokens = target_invocations[0]
+    attiny_step_index = {}
+    for goal, expected_pins in ATTINY_CI_GOALS:
+        invocations = [
+            invocation for invocation in ci_make_invocations
+            if goal in invocation[4][0]
+        ]
         check(
-            not parsed[2] and parsed[:2] == (
-                ("attiny202-test-target",),
-                {
-                    "STRICT_TOOLS": "1",
-                    "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-                },
-            ),
-            "ci.yml: ATtiny202 target aggregate invocation is not canonical: "
-            f"{' '.join(tokens)}",
+            len(invocations) == 1,
+            f"ci.yml: {goal} is invoked {len(invocations)} time(s), expected 1",
+        )
+        if len(invocations) != 1:
+            continue
+        job_id, idx, step, command_count, parsed, tokens = invocations[0]
+        attiny_step_index[goal] = idx
+        check(
+            job_id == "attiny202" and not parsed[2]
+            and parsed[:2] == ((goal,), expected_pins),
+            f"ci.yml: the {goal} invocation is not canonical: {' '.join(tokens)}",
         )
         check(
             command_count == 1,
-            f"ci.yml: ATtiny202 target aggregate step {idx} must contain only "
-            "its Make command",
+            f"ci.yml: {goal} step {idx} must contain only its Make command",
         )
-        check("if" not in step, "ci.yml: ATtiny202 target aggregate is conditional")
+        check("if" not in step, f"ci.yml: {goal} step {idx} is conditional")
         check(
             step.get("continue-on-error", False) is False,
-            "ci.yml: ATtiny202 target aggregate may continue after failure",
+            f"ci.yml: {goal} step {idx} may continue after failure",
         )
-
-    component_goals = {"attiny202-sim", "attiny202-fault", "attiny202-lockstep"}
-    direct_components = [
-        goal
-        for invocation in ci_make_invocations if invocation[0] == "attiny202"
-        for goal in invocation[4][0] if goal in component_goals
-    ]
     check(
-        not direct_components,
-        "ci.yml: attiny202 job bypasses its target aggregate with direct "
-        f"component calls: {direct_components}",
-    )
-    soak_invocations = [
-        invocation for invocation in ci_make_invocations
-        if invocation[0] == "attiny202" and "attiny202-soak" in invocation[4][0]
-    ]
-    check(
-        len(soak_invocations) == 1,
-        "ci.yml: attiny202 job must retain one separately routed soak",
+        attiny_step_index.get("ci-attiny202-build") is not None
+        and attiny_step_index.get("ci-attiny202-target") is not None
+        and attiny_step_index["ci-attiny202-build"]
+        < attiny_step_index["ci-attiny202-target"],
+        "ci.yml: the ATtiny202 build gate must run before the target/soak gate, "
+        "so a broken image is found before a simulator is built",
     )
 
+    # Every ATtiny202 gate must be reached THROUGH those goals. A step naming
+    # one directly would run it under a second, unpinned policy -- and the two
+    # component checks below (that the aggregate is not bypassed, and that the
+    # soak stays a separately counted lane) are why the aggregate is trusted.
+    direct_goals = {
+        "attiny202-test", "attiny202-test-target", "attiny202-soak",
+        "attiny202-sim", "attiny202-fault", "attiny202-lockstep",
+    }
+    direct_attiny = [
+        f"{invocation[0]} step {invocation[1]}: {goal}"
+        for invocation in ci_make_invocations
+        for goal in invocation[4][0] if goal in direct_goals
+    ]
+    check(
+        not direct_attiny,
+        "ci.yml: a job bypasses the ATtiny202 CI goals with direct calls: "
+        + ", ".join(direct_attiny),
+    )
+
+    build_recipe = ci_goal_commands("ci-attiny202-build")
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in build_recipe
+        ) == ((("attiny202-test",), {"STRICT_TOOLS": "1"}),)
+        and not any(duplicate for _, _, duplicate in build_recipe),
+        "Makefile: ci-attiny202-build no longer runs the pre-hardware gate "
+        "under STRICT_TOOLS=1: "
+        + " | ".join(" ".join(goals) for goals, _, _ in build_recipe),
+    )
+    check(
+        sorted(ci_goal_pins("ci-attiny202-build"))
+        == ["XT_STACK_MAX_FRAME", "XT_STATIC_RAM_LIMIT"],
+        "Makefile: ci-attiny202-build does not refuse every pin its callers "
+        f"supply: {ci_goal_pins('ci-attiny202-build')}",
+    )
+    check_resource_routes(
+        build_recipe, "Makefile ci-attiny202-build",
+        CI_GOAL_RESOURCE_ROUTES["ci-attiny202-build"],
+    )
+    # The assertion that used to be loose shell in the workflow. Without it a
+    # failed DFP fetch is a green run that produced no images, because every
+    # attiny202-* target exits 0 when the DFP is absent.
+    build_lines = ci_goal_recipe("ci-attiny202-build")
+    check(
+        any("XT_RELEASE_IMAGES" in line for line in build_lines)
+        and any("$(XT_BUILD_DIR)/$$hex" in line for line in build_lines),
+        "Makefile: ci-attiny202-build no longer asserts every declared image "
+        "was actually built",
+    )
+
+    target_recipe = ci_goal_commands("ci-attiny202-target")
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in target_recipe
+        ) == (
+            (("attiny202-test-target",), {"STRICT_TOOLS": "1"}),
+            (("attiny202-soak",), {
+                "XT_SOAK_DURATION_MS": "$(CI_XT_SOAK_DURATION_MS)",
+                "XT_SOAK_PROGRESS_INTERVAL_MS": "$(CI_XT_SOAK_DURATION_MS)",
+            }),
+        )
+        and not any(duplicate for _, _, duplicate in target_recipe),
+        "Makefile: ci-attiny202-target no longer runs the fail-closed aggregate "
+        "and one separately routed soak: "
+        + " | ".join(" ".join(goals) for goals, _, _ in target_recipe),
+    )
+    check(
+        ci_goal_pins("ci-attiny202-target") == ["XT_STATIC_RAM_LIMIT"],
+        "Makefile: ci-attiny202-target does not refuse every pin its callers "
+        f"supply: {ci_goal_pins('ci-attiny202-target')}",
+    )
+    check_resource_routes(
+        target_recipe, "Makefile ci-attiny202-target",
+        CI_GOAL_RESOURCE_ROUTES["ci-attiny202-target"],
+    )
+    # The other assertion the workflow carried as loose shell: a soak that skips
+    # a variant still exits 0, so the PASS count is the only thing that proves
+    # the matrix was covered. XT_VARIANTS_SUPPORTED is the immutable expectation.
+    target_lines = ci_goal_recipe("ci-attiny202-target")
+    check(
+        any("SOAK PASS" in line for line in target_lines)
+        and any("XT_VARIANTS_SUPPORTED" in line for line in target_lines),
+        "Makefile: ci-attiny202-target no longer counts one soak PASS per "
+        "supported variant",
+    )
 # Exactly one normal-CI path may run mutants, and it must be the fully
 # provisioned one. The question is asked by REACHABILITY, not by goal name: a
 # wrapper hides the inner goal, and `test-long` carries mutation too, so
