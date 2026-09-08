@@ -125,6 +125,30 @@ the matrix covers it, where before the two lists could agree to be stale. That
 is the first place in this item where converting a job bought coverage rather
 than merely preserving it.
 
+`release.yml` is not a fourth variation on the same job -- it runs *different
+work*. It rebuilds every image from the tagged source, re-runs `test-long` with
+the flashing-helper gate pointed at those rebuilt images rather than the
+previous release's shipped HEXes, and deliberately does **not** soak (release
+qualification's soaks belong to `scripts/make-release.sh` and run for their full
+duration before the tag exists; a five-minute smoke here would attest to
+something weaker than the release already claims). So it gets its own goals --
+`release-rebuild`, `release-test-long`, `release-attiny202` -- declared in
+`RELEASE_GOALS`, with `WORKFLOW_GOALS` the union that seeds the recipe edges.
+
+The exception is `ci-pic`, which release invokes directly. Its five commands
+were already *identical* to release's five PIC steps -- the gate proved that by
+checking both against a single shared command tuple. Sharing the goal turns "these
+two lists match" into "there is one list", so the public attestation re-runs the
+identical PIC gate normal CI runs, by construction. That is the strongest form
+of the parity this whole document is about, and it is what makes the naming
+`CI_GOALS` slightly off: these are the gates a *workflow* runs, CI or release.
+
+One thing that had been doing double duty came apart here.
+`RELEASE_RESOURCE_ROUTES` was checked against both `release.yml` and
+`scripts/make-release.sh`. The workflow now names goals while the local pipeline
+still names consumers directly, so they need separate maps; folding them back
+together would make one of the two vacuous.
+
 **Run each new goal before trusting it.** Wiring `ci-attiny202-target` found a
 defect that had shipped dormant in the `CI_GOALS` commit: its soak lane used
 `set -o pipefail`, a bashism, and Make recipes run under `/bin/sh`. It had
@@ -284,6 +308,7 @@ shape.
 |---|-----------|---------|
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
 | 1b | every `ci.yml` job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection moved in the same change (**done**) | a build matrix that no longer covers the parts Make declares |
+| 1c | `release.yml` likewise, sharing `ci-pic` and adding `RELEASE_GOALS` for the work release does differently (**done**) | a release rebuild that skips the clean, or stops re-running CI's own PIC gate |
 | 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |

@@ -1098,6 +1098,42 @@ RELEASE_RESOURCE_REFS = {
 
 
 def release_resource_routes(refs):
+    """Which release.yml commands carry which resource-policy pins.
+
+    Keyed on the GOALS the workflow now invokes. The consumers those goals
+    reach -- attiny202, pic12f675, test-long, attiny202-test and the rest -- are
+    checked inside each recipe by RELEASE_GOAL_RESOURCE_ROUTES below, so the
+    routing is asserted end to end rather than only at whichever end happens to
+    be visible.
+    """
+    static = refs["XT_STATIC_RAM_LIMIT"]
+    stack = refs["XT_STACK_MAX_FRAME"]
+    data = refs["PIC12F675_DATA_LIMIT"]
+    return {
+        "release-rebuild": {
+            "XT_STATIC_RAM_LIMIT": static,
+            "PIC12F675_DATA_LIMIT": data,
+        },
+        "release-test-long": {
+            "XT_STATIC_RAM_LIMIT": static,
+            "PIC12F675_DATA_LIMIT": data,
+        },
+        "release-attiny202": {
+            "XT_STATIC_RAM_LIMIT": static,
+            "XT_STACK_MAX_FRAME": stack,
+        },
+        "ci-pic": {"PIC12F675_DATA_LIMIT": data},
+    }
+
+
+def make_release_resource_routes(refs):
+    """Which scripts/make-release.sh commands carry which resource-policy pins.
+
+    This is the map release.yml used before its steps invoked goals: the local
+    pipeline still names each consumer directly, so the expectation stays
+    consumer-keyed. Keeping the two apart is the point -- they are different
+    callers, and folding them back together would make one of the two vacuous.
+    """
     static = refs["XT_STATIC_RAM_LIMIT"]
     stack = refs["XT_STACK_MAX_FRAME"]
     data = refs["PIC12F675_DATA_LIMIT"]
@@ -1137,6 +1173,10 @@ CI_RESOURCE_ROUTES = {
     },
 }
 RELEASE_RESOURCE_ROUTES = release_resource_routes(RELEASE_RESOURCE_REFS)
+# scripts/make-release.sh is NOT a workflow: it drives the local release
+# pipeline and invokes the gate goals directly, so its routing is checked
+# against the consumers themselves rather than against workflow goals.
+MAKE_RELEASE_RESOURCE_ROUTES = make_release_resource_routes(RELEASE_RESOURCE_REFS)
 # Inside a CI goal's recipe the same routing question is asked of $(VAR)
 # forwards rather than of shell references.
 # Keyed by CI goal, because each recipe is its own surface: asking ci-pic's
@@ -1161,6 +1201,23 @@ CI_GOAL_RESOURCE_ROUTES = {
     "ci-attiny202-target": {
         "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
         "attiny202-soak": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
+    },
+    "release-rebuild": {
+        "attiny202": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
+        "pic12f675": {"PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)"},
+    },
+    "release-test-long": {
+        "test-long": {
+            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
+            "PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)",
+        },
+    },
+    "release-attiny202": {
+        "attiny202-test": {
+            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
+            "XT_STACK_MAX_FRAME": "$(XT_STACK_MAX_FRAME)",
+        },
+        "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
     },
 }
 
@@ -1214,8 +1271,11 @@ MAKE_PIC_REFS = {name: f"$({name})" for name in XC8_PIC_REFS}
 # goal it asserted the toolchain for.
 CI_LOCAL_PIC_REFS = {name: f"$PIN_{name}" for name in XC8_PIC_REFS}
 
-PIC_COMMANDS = pic_commands(XC8_PIC_REFS)
-PIC_GOALS = tuple(goal for goals, _ in PIC_COMMANDS for goal in goals)
+# The goal NAMES are the same whichever refs are substituted, so take them from
+# the Make-level form -- the one ci-pic's recipe is checked against. There is no
+# longer a workflow-level PIC command list: both workflows invoke ci-pic, and
+# the boundary is asserted once, against its recipe.
+PIC_GOALS = tuple(goal for goals, _ in pic_commands(MAKE_PIC_REFS) for goal in goals)
 
 
 def make_command(tokens):
@@ -1278,21 +1338,29 @@ def ci_goal_pins(goal):
     ]
 
 
-def makefile_ci_goals():
+def makefile_goal_list(name):
     with open(os.path.join(root, "Makefile"), encoding="utf-8") as handle:
         for line in handle:
-            if line.startswith("CI_GOALS ="):
+            if line.startswith(f"{name} ="):
                 return tuple(line.split("=", 1)[1].split())
     return ()
 
 
-CI_GOALS = makefile_ci_goals()
+CI_GOALS = makefile_goal_list("CI_GOALS")
+RELEASE_GOALS = makefile_goal_list("RELEASE_GOALS")
+# Every goal a workflow may invoke. Recipe edges are seeded from this, so a
+# release goal's sub-makes are as visible to the routing checks as a CI goal's.
+WORKFLOW_GOALS = CI_GOALS + RELEASE_GOALS
 check(
     CI_GOALS == (
         "ci-verify", "ci-stress", "ci-pic", "ci-mutation",
         "ci-attiny202-build", "ci-attiny202-target", "ci-build-classic",
     ),
     f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed seven",
+)
+check(
+    RELEASE_GOALS == ("release-rebuild", "release-test-long", "release-attiny202"),
+    f"Makefile: RELEASE_GOALS is {RELEASE_GOALS!r}, expected the reviewed three",
 )
 
 
@@ -1397,7 +1465,7 @@ if check(
 # to the prerequisite database above. Without these edges every reachability
 # question asked through a wrapper would answer "no" and the routing checks
 # below would pass vacuously on a job that still runs the gate.
-for ci_goal in CI_GOALS:
+for ci_goal in WORKFLOW_GOALS:
     for goals, _, _ in ci_goal_commands(ci_goal):
         make_edges.setdefault(ci_goal, set()).update(goals)
 
@@ -2052,25 +2120,52 @@ if check(os.path.isfile(release_script_path), "scripts/make-release.sh: missing"
     check_resource_routes(
         release_script_commands,
         "scripts/make-release.sh",
-        RELEASE_RESOURCE_ROUTES,
+        MAKE_RELEASE_RESOURCE_ROUTES,
     )
 
 
-# The public release attestation must use the same five-process PIC boundary as
-# normal CI. In particular, PIC12F675's two goals must occupy one command so GNU
-# Make executes their shared matrix qualifier once.
+# The public release attestation runs three goals. Two are release-specific
+# because release runs DIFFERENT work from CI -- it rebuilds from the tag, and
+# it does not soak. The third is ci-pic itself: normal CI and the attestation
+# re-run the identical PIC gate, which is the strongest form of the parity this
+# whole item exists for, and it is now true by construction rather than by two
+# command lists happening to match.
+RELEASE_WORKFLOW_GOALS = (
+    ("release-rebuild", {
+        **XC8_PIC_REFS,
+        "XT_STATIC_RAM_LIMIT": RELEASE_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "PIC12F675_DATA_LIMIT": RELEASE_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
+    }),
+    ("release-test-long", {
+        "XT_STATIC_RAM_LIMIT": RELEASE_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "PIC12F675_DATA_LIMIT": RELEASE_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
+    }),
+    ("release-attiny202", {
+        "XT_STATIC_RAM_LIMIT": RELEASE_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
+        "XT_STACK_MAX_FRAME": RELEASE_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
+    }),
+    ("ci-pic", {
+        **XC8_PIC_REFS,
+        "PIC12F675_DATA_LIMIT": RELEASE_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
+    }),
+)
+
 if check(isinstance(release_job, dict), "release.yml: required job 'release' is missing"):
-    release_pic_invocations = []
     release_make_commands = []
+    release_goal_steps = {}
     for idx, step in enumerate(release_job.get("steps") or [], 1):
         run = step.get("run") if isinstance(step, dict) else None
         commands = shell_tokens(run) if isinstance(run, str) else []
         for tokens in commands:
             parsed = make_command(tokens)
-            if parsed is not None:
-                release_make_commands.append(parsed)
-            if parsed is not None and any(goal in PIC_GOALS for goal in parsed[0]):
-                release_pic_invocations.append((idx, step, len(commands), parsed, tokens))
+            if parsed is None:
+                continue
+            release_make_commands.append(parsed)
+            for goal in parsed[0]:
+                if goal in WORKFLOW_GOALS:
+                    release_goal_steps.setdefault(goal, []).append(
+                        (idx, step, len(commands), parsed, tokens)
+                    )
 
     check_resource_routes(
         release_make_commands,
@@ -2078,44 +2173,114 @@ if check(isinstance(release_job, dict), "release.yml: required job 'release' is 
         RELEASE_RESOURCE_ROUTES,
     )
 
-    for idx, step, command_count, parsed, tokens in release_pic_invocations:
-        goals, assignments, duplicate_assignment = parsed
+    for goal, expected_pins in RELEASE_WORKFLOW_GOALS:
+        invocations = release_goal_steps.get(goal, [])
         check(
-            not duplicate_assignment
-            and (goals, non_resource_assignments(assignments)) in PIC_COMMANDS,
-            f"release.yml: PIC step {idx} has a noncanonical aggregate command: "
-            f"{' '.join(tokens)}",
+            len(invocations) == 1,
+            f"release.yml: {goal} is invoked {len(invocations)} time(s), expected 1",
+        )
+        if len(invocations) != 1:
+            continue
+        idx, step, command_count, parsed, tokens = invocations[0]
+        check(
+            not parsed[2] and parsed[:2] == ((goal,), expected_pins),
+            f"release.yml: the {goal} invocation is not canonical: {' '.join(tokens)}",
         )
         check(
             command_count == 1,
-            f"release.yml: PIC aggregate step {idx} must contain only its direct Make command",
+            f"release.yml: {goal} step {idx} must contain only its Make command",
         )
-        check("if" not in step, f"release.yml: PIC aggregate step {idx} is conditional")
+        check("if" not in step, f"release.yml: {goal} step {idx} is conditional")
         check(
             step.get("continue-on-error", False) is False,
-            f"release.yml: PIC aggregate step {idx} may continue after failure",
+            f"release.yml: {goal} step {idx} may continue after failure",
         )
 
-    for goals, assignments in PIC_COMMANDS:
-        matches = sum(
-            not parsed[2] and parsed[0] == goals
-            and non_resource_assignments(parsed[1]) == assignments
-            for _, _, _, parsed, _ in release_pic_invocations
+    # The rebuild must reproduce from NOTHING, and must cover the same parts the
+    # Makefile declares. "The committed images reproduce bit-for-bit" is a claim
+    # about a clean build; a rebuild that skipped the clean would compare the
+    # committed images against whatever happened to be on disk.
+    rebuild_recipe = ci_goal_commands("release-rebuild")
+    check(
+        rebuild_recipe and rebuild_recipe[0][0] == ("clean",),
+        "Makefile: release-rebuild does not start from a clean tree: "
+        + " | ".join(" ".join(goals) for goals, _, _ in rebuild_recipe),
+    )
+    check(
+        any("$(CI_CLASSIC_PARTS)" in line for line in ci_goal_recipe("release-rebuild")),
+        "Makefile: release-rebuild names its own classic-AVR set instead of "
+        "the declared CI_CLASSIC_PARTS",
+    )
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in rebuild_recipe
+        ) == (
+            (("clean",), {}),
+            (("$(CI_CLASSIC_PARTS)",), {}),
+            (("attiny202",), {"STRICT_TOOLS": "1"}),
+            (("pic10f322",), dict(PIC_CC=MAKE_PIC_REFS["PIC_CC"],
+                                  PIC_DFP=MAKE_PIC_REFS["PIC_DFP"])),
+            (("pic10f320-variants",),
+             dict(PIC10F320_CC=MAKE_PIC_REFS["PIC10F320_CC"],
+                  PIC10F320_DFP=MAKE_PIC_REFS["PIC10F320_DFP"])),
+            (("pic12f675",), dict(PIC_CC=MAKE_PIC_REFS["PIC_CC"],
+                                  PIC_DFP=MAKE_PIC_REFS["PIC_DFP"])),
         )
-        check(
-            matches == 1,
-            f"release.yml: PIC command {' '.join(goals)} appears canonically "
-            f"{matches} time(s), expected 1",
+        and not any(duplicate for _, _, duplicate in rebuild_recipe),
+        "Makefile: release-rebuild no longer rebuilds the reviewed release image "
+        "set: " + " | ".join(" ".join(goals) for goals, _, _ in rebuild_recipe),
+    )
+
+    # The whole reason release-test-long is not ci-verify or a bare test-long.
+    check(
+        any("PIC12F675_FLASH_IMAGES=build" in line
+            for line in ci_goal_recipe("release-test-long")),
+        "Makefile: release-test-long no longer points the flashing-helper gate "
+        "at the images rebuilt from the tagged source",
+    )
+
+    # Release does NOT soak: qualification soaks belong to make-release.sh and
+    # run for the full duration before the tag exists. A 5-minute smoke here
+    # would attest to something weaker than the release already claims.
+    attiny_release_recipe = ci_goal_commands("release-attiny202")
+    check(
+        tuple(
+            (goals, non_resource_assignments(assignments))
+            for goals, assignments, _ in attiny_release_recipe
+        ) == (
+            (("attiny202-test",), {"STRICT_TOOLS": "1"}),
+            (("attiny202-test-target",), {"STRICT_TOOLS": "1"}),
         )
-    for goal in PIC_GOALS:
-        occurrences = sum(
-            parsed[0].count(goal) for _, _, _, parsed, _ in release_pic_invocations
-        )
-        check(
-            occurrences == 1,
-            f"release.yml: PIC aggregate '{goal}' occurs {occurrences} time(s), expected 1",
+        and not any(duplicate for _, _, duplicate in attiny_release_recipe),
+        "Makefile: release-attiny202 no longer runs exactly the pre-hardware "
+        "gate and the fail-closed target aggregate: "
+        + " | ".join(" ".join(goals) for goals, _, _ in attiny_release_recipe),
+    )
+
+    for goal in RELEASE_GOALS:
+        check_resource_routes(
+            ci_goal_commands(goal), f"Makefile {goal}",
+            CI_GOAL_RESOURCE_ROUTES[goal],
         )
 
+    # Nothing in release.yml may reach a gate except through a declared goal.
+    release_direct = [
+        f"step {idx}: {goal}"
+        for idx, step in enumerate(release_job.get("steps") or [], 1)
+        for tokens in (shell_tokens(step.get("run"))
+                       if isinstance(step, dict) and isinstance(step.get("run"), str)
+                       else [])
+        for parsed in (make_command(tokens),) if parsed is not None
+        for goal in parsed[0]
+        if goal in PIC_GOALS
+        or goal in {"test-long", "attiny202-test", "attiny202-test-target"}
+    ]
+    check(
+        not release_direct,
+        "release.yml: a step bypasses the declared goals with a direct gate "
+        "call: " + ", ".join(release_direct),
+    )
 
 # Normal CI must invoke the same strict PIC capability helper as ci-local, with
 # every independently selectable tool/header surface explicit. The helper's own

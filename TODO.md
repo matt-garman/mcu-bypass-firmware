@@ -51,8 +51,8 @@ pass here means the CI matrix will be green" is an assertion in a comment.
 workflow runs as a Make goal, have each workflow step invoke exactly one of
 them, run the same goals locally, and check that shape rather than compare two
 hand-maintained inventories. The publishability gate that document's Part 3
-describes is done, and every `ci.yml` job now invokes its goal, as does
-`scripts/ci-local.sh`; what remains is `release.yml`, having `ci-local.sh`
+describes is done, and every step in BOTH workflows now invokes a declared
+goal, as does `scripts/ci-local.sh`; what remains is having `ci-local.sh`
 execute the goal inventory rather than describe it in a prose header, the
 parity gate itself, and Part 4.
 
@@ -61,7 +61,11 @@ locates each job's strict-suite step by its literal command and anchors seven
 ordering assertions to it, so a job's goal, that job's detection, and the policy
 assertions the step used to satisfy all move together -- the last against the
 goal's recipe, or they retire silently. All seven `ci.yml` gate steps are
-converted. Note that one job does not always mean one goal: `attiny202` splits
+converted, and so is `release.yml`. That workflow runs different work, not the
+same work differently -- it rebuilds from the tag and deliberately does not
+soak -- so it has its own `RELEASE_GOALS`; but it now invokes `ci-pic` itself,
+which turns "release's five PIC commands match CI's" into "there is one PIC
+gate". Note that one job does not always mean one goal: `attiny202` splits
 into a DFP half and a yasimavr half because the workflow provisions those
 inputs between them, and the gate asserts the build half runs first.
 `build-matrix` converts differently again -- its rows selected work through
@@ -880,7 +884,7 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
-| T2-ci-parity | Make local/remote CI parity structural | 2 | 2-3 h | High - a failed remote gate costs a 25-hour release |
+| T2-ci-parity | Make local/remote CI parity structural | 2 | 2 h | High - a failed remote gate costs a 25-hour release |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

@@ -21,11 +21,11 @@ name: Release
 #      (fails the release if not). The fourth set is what makes the other three
 #      mean anything: three sets derived by globbing the same directories agree
 #      perfectly on a release that is missing an entire MCU;
-#   4. re-runs `make test-long` + `make attiny202-test` +
-#      `make attiny202-test-target` + `make pic10f322-test` +
-#      `make pic10f322-test-target-variants` + `make pic10f320-test` +
-#      `make pic10f320-test-target-variants` + both PIC12F675 aggregates in one
-#      Make graph on the clean runner -- the same gates the MANIFEST claims;
+#   4. re-runs `make release-test-long`, `make release-attiny202` and
+#      `make ci-pic` on the clean runner -- the same gates the MANIFEST claims.
+#      Those goals name what each covers; the last is shared with normal CI on
+#      purpose, so this attestation re-runs the identical PIC gate rather than
+#      an equivalent-looking spelling of it;
 #   5. rechecks the protected remote tag and the complete frozen publication
 #      inventory, then re-verifies the detached checksum signature and image
 #      checksums from the exact directory passed to `gh release create`, which
@@ -151,8 +151,8 @@ jobs:
             clang clang-tidy cppcheck cbmc python3 unzip wget
 
       # --- toolchain: XC8 + PIC10-12Fxxx DFP (Microchip downloads) ----------
-      # gpsim CLI drives `make pic10f322-test`; gpsim-dev + libglib2.0-dev + g++ build
-      # the libgpsim harnesses behind `make pic10f322-test-target-variants`.
+      # The gpsim CLI and the libgpsim harnesses behind the PIC target
+      # aggregates; `make ci-pic` drives both.
       - name: Install gpsim + libgpsim build deps (apt)
         run: sudo apt-get install -y gpsim gpsim-dev libglib2.0-dev g++ pkg-config
 
@@ -255,24 +255,17 @@ jobs:
           echo "== cbmc ==" && cbmc --version
 
       # --- rebuild from the tag --------------------------------------------
+      # The goal owns the clean, the per-part build set and the strictness --
+      # see the Makefile for why each is what it is. This step supplies only the
+      # toolchain this runner installed and the release policy pins.
       - name: Rebuild all release images from the tagged source
         run: |
-          make clean
-          make attiny13a attiny85 attiny45
-          # STRICT_TOOLS=1: an absent ATtiny_DFP must fail the reproducibility
-          # gate, never skip it into an image set that is short three files.
-          make attiny202 STRICT_TOOLS=1 \
-            XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
-          make pic10f322 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
-          # pic10f320-variants, not pic10f320: it builds all three output stages and
-          # removes the whole image set if any one of them fails, so a partial
-          # matrix can never reach the reproducibility gate.
-          make pic10f320-variants PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
-          # PIC12F675 shares PIC_CC/PIC_DFP with the 322. Its three shipped HEXes
-          # are in RELEASE_IMAGES, so they must be rebuilt here or the
-          # reproducibility gate below fails on a set short three files.
-          make pic12f675 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+          make release-rebuild \
+            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8" \
+            XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
             PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
 
       # --- THE reproducibility gate ----------------------------------------
@@ -393,67 +386,34 @@ jobs:
       # --- re-run the gates on the clean runner -----------------------------
       # STRICT_TOOLS=1 throughout: this is THE public attestation, so every gate
       # must actually run -- a silently-skipped tool must fail the release.
-      # PIC12F675_FLASH_IMAGES=build: the flashing-helper gate must exercise the
-      # images rebuilt from the tagged source above, never fall back to the
-      # previous release's HEXes.
-      - name: Re-run make test-long
-        run: >-
-          make test-long STRICT_TOOLS=1
-          XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
-          PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
-          PIC12F675_FLASH_IMAGES=build
-
-      - name: Re-run make attiny202-test
-        run: >-
-          make attiny202-test STRICT_TOOLS=1
-          XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
-          XT_STACK_MAX_FRAME="$RELEASE_XT_STACK_MAX_FRAME"
-
-      # The AVR-XT target aggregate: functional + modeled-pin output trace, fault
-      # injection, and firmware/model ctx_ lock-step on the real built image.
-      - name: Re-run make attiny202-test-target (yasimavr, every variant)
-        run: >-
-          make attiny202-test-target STRICT_TOOLS=1
-          XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT"
-
-      - name: Re-run make pic10f322-test
-        run: make pic10f322-test STRICT_TOOLS=1 PIC_CC="${XC8_DIR}/bin/xc8-cc" PIC_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # The MANIFEST's Validation line claims the fail-closed PIC target aggregate;
-      # the public clean-runner attestation must actually re-run it rather than
-      # lean on committed local evidence. The aggregate fails on any silent skip.
-      - name: Re-run make pic10f322-test-target-variants (libgpsim, every variant)
+      # Three goals cover what were eight steps. Each is the same gate the
+      # Makefile defines for it; the release-* goals exist where release runs
+      # different work from CI, and ci-pic is shared where it runs the SAME
+      # work -- the public attestation re-running the identical PIC gate normal
+      # CI runs is the strongest form of that claim.
+      - name: Re-run the full suite against the rebuilt images
         run: |
-          make pic10f322-test-target-variants STRICT_TOOLS=1 \
-            PIC_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC_DFP="${XC8_DFP_ROOT}/xc8"
+          make release-test-long \
+            XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
+            PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
 
-      # The PIC10F320 half of the same claim. Its images are in the release set,
-      # so its gates belong in the public attestation on identical terms -- and
-      # the constrained target is the one whose evidence a reader is most likely
-      # to want to see re-run on a clean machine.
-      - name: Re-run make pic10f320-test
+      - name: Re-run the ATtiny202 gates (yasimavr, every variant)
         run: |
-          make pic10f320-test STRICT_TOOLS=1 \
-            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
+          make release-attiny202 \
+            XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
+            XT_STACK_MAX_FRAME="$RELEASE_XT_STACK_MAX_FRAME"
 
-      - name: Re-run make pic10f320-test-target-variants (libgpsim, every variant)
+      # The MANIFEST's Validation line claims the fail-closed PIC target
+      # aggregates for all three parts; the public clean-runner attestation must
+      # actually re-run them rather than lean on committed local evidence. Each
+      # aggregate fails on any silent skip.
+      - name: Re-run the PIC gates, all three parts (make ci-pic)
         run: |
-          make pic10f320-test-target-variants STRICT_TOOLS=1 \
-            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
-            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8"
-
-      # The PIC12F675, on identical terms: release-supported since v0.9.9, images
-      # in the release set, so both its aggregates belong in the public
-      # attestation. They must share one Make graph and therefore one retained
-      # shipping/simulator/sidecar matrix; pic12f675-test also carries the
-      # calibration contract that binds simcal to the shipped HEX.
-      - name: Re-run PIC12F675 qualification (one retained matrix)
-        run: |
-          make pic12f675-test pic12f675-test-target-variants STRICT_TOOLS=1 \
+          make ci-pic \
             PIC_CC="${XC8_DIR}/bin/xc8-cc" \
             PIC_DFP="${XC8_DFP_ROOT}/xc8" \
+            PIC10F320_CC="${XC8_DIR}/bin/xc8-cc" \
+            PIC10F320_DFP="${XC8_DFP_ROOT}/xc8" \
             PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT"
 
       # --- publish ----------------------------------------------------------

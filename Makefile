@@ -3331,7 +3331,16 @@ RELEASE_ARTIFACT_GATES = \
 # A goal therefore refuses to run when a pin it names is unset, rather than
 # falling back to the default: a workflow that dropped XT_STATIC_RAM_LIMIT would
 # otherwise silently lose the independence the two-value scheme exists for.
+# The named gates a WORKFLOW runs -- CI or release. ci-pic appears in both, and
+# deliberately: the public attestation re-running the identical PIC gate that
+# normal CI runs is the strongest form of the parity this naming exists for.
+# The release goals are separate because release runs different work, not the
+# same work differently: it rebuilds from the tag, re-runs test-long with the
+# flashing helper pointed at the rebuilt images, and does NOT soak (soaks belong
+# to scripts/make-release.sh).
 CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny202-target ci-build-classic
+RELEASE_GOALS = release-rebuild release-test-long release-attiny202
+WORKFLOW_GOALS = $(CI_GOALS) $(RELEASE_GOALS)
 
 # Non-emptiness is NOT the test. Every pin below has a default in this file, so
 # a goal that only checked for a value would pass on the default -- which is the
@@ -3339,7 +3348,7 @@ CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny20
 # distinguishes a caller's pin from this file's own answer.
 ci_pin = $(if $(filter command line,$(origin $(1))),,$(error $@ requires $(1) to be supplied on the command line; it is pinned by the caller so a mismatch with this Makefile's default fails instead of agreeing with itself))
 
-.PHONY: $(CI_GOALS)
+.PHONY: $(WORKFLOW_GOALS)
 
 # The classic-AVR parts a CI build matrix must cover, DERIVED from the same
 # TINYX5 list that generates their targets rather than restated. A hosted matrix
@@ -3487,6 +3496,71 @@ ci-build-classic:
 	$(MAKE) $(CI_CLASSIC_PART)-size AVR_REBUILD_PREREQ= \
 		> $(AVR_BUILD_DIR)/size-$(CI_CLASSIC_PART).txt
 	@cat $(AVR_BUILD_DIR)/size-$(CI_CLASSIC_PART).txt
+
+# ----------------------------------------------------------------------------
+# Release-workflow goals. These belong to the tag-triggered public attestation
+# in .github/workflows/release.yml, which re-derives a published release from
+# its tagged source on a clean runner.
+# ----------------------------------------------------------------------------
+
+# Rebuild every release image from the tagged source. `clean` FIRST and in this
+# goal, not in the caller: "the committed images reproduce bit-for-bit" is a
+# claim about a build from nothing, and a caller that forgot the clean would
+# still verify committed images against whatever happened to be on disk.
+#
+# The classic parts come from CI_CLASSIC_PARTS for the same reason the CI matrix
+# does -- one declaration, so a new part is rebuilt here the moment it exists.
+#
+# pic10f320-variants, not pic10f320: it builds all three output stages and
+# removes the whole image set if any one fails, so a partial matrix can never
+# reach the reproducibility gate. STRICT_TOOLS=1 on the ATtiny202 build for the
+# same reason: an absent ATtiny_DFP must fail this gate, never skip it into an
+# image set that is short three files.
+release-rebuild:
+	$(call ci_pin,PIC_CC)
+	$(call ci_pin,PIC_DFP)
+	$(call ci_pin,PIC10F320_CC)
+	$(call ci_pin,PIC10F320_DFP)
+	$(call ci_pin,XT_STATIC_RAM_LIMIT)
+	$(call ci_pin,PIC12F675_DATA_LIMIT)
+	$(MAKE) clean
+	$(MAKE) $(CI_CLASSIC_PARTS)
+	$(MAKE) attiny202 STRICT_TOOLS=1 \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)"
+	$(MAKE) pic10f322 PIC_CC="$(PIC_CC)" PIC_DFP="$(PIC_DFP)"
+	$(MAKE) pic10f320-variants \
+		PIC10F320_CC="$(PIC10F320_CC)" PIC10F320_DFP="$(PIC10F320_DFP)"
+	$(MAKE) pic12f675 PIC_CC="$(PIC_CC)" PIC_DFP="$(PIC_DFP)" \
+		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)"
+
+# PIC12F675_FLASH_IMAGES=build is the point of a release-specific goal here: the
+# flashing-helper gate must exercise the images just rebuilt from the tagged
+# source, never fall back to the previous release's shipped HEXes.
+release-test-long:
+	$(call ci_pin,XT_STATIC_RAM_LIMIT)
+	$(call ci_pin,PIC12F675_DATA_LIMIT)
+	$(MAKE) test-long STRICT_TOOLS=1 \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
+		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)" \
+		PIC12F675_FLASH_IMAGES=build
+
+# The ATtiny202 half of the public attestation: the pre-hardware gate and the
+# fail-closed yasimavr target aggregate (functional + modeled-pin output trace,
+# fault injection, firmware/model ctx_ lock-step) on the real rebuilt image.
+#
+# Deliberately NOT ci-attiny202-target: that goal also runs a soak smoke, and
+# soaking is not this workflow's job. Release qualification's soaks belong to
+# scripts/make-release.sh, which runs them for the full duration before the tag
+# exists. Re-running a 5-minute smoke here would attest to something weaker
+# than the release already claims.
+release-attiny202:
+	$(call ci_pin,XT_STATIC_RAM_LIMIT)
+	$(call ci_pin,XT_STACK_MAX_FRAME)
+	$(MAKE) attiny202-test STRICT_TOOLS=1 \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
+		XT_STACK_MAX_FRAME="$(XT_STACK_MAX_FRAME)"
+	$(MAKE) attiny202-test-target STRICT_TOOLS=1 \
+		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)"
 
 # The smoke soak's duration is policy, not a host pin: it says how much soak a
 # CI run is worth, which is the project's decision and the same everywhere.

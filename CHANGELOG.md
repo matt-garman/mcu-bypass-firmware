@@ -163,6 +163,29 @@ historical records and are not retroactively compacted by this policy.
   instead of naming the three parts, and its per-part size report lands under
   `build_avr_classic/` rather than the repo root.
 
+  **The release workflow now shares CI's PIC gate outright.** `release.yml`
+  runs different work from CI, not the same work differently: it rebuilds every
+  image from the tagged source, re-runs `test-long` with the flashing-helper
+  gate pointed at those rebuilt images rather than the previous release's
+  shipped HEXes, and deliberately does not soak -- qualification soaks belong to
+  `scripts/make-release.sh` and run for their full duration before the tag
+  exists. So it gets `release-rebuild`, `release-test-long` and
+  `release-attiny202`, declared in a new `RELEASE_GOALS`.
+
+  The exception is the PIC gate. Release's five PIC steps were already
+  byte-for-byte the same commands `ci-pic` runs -- the workflow contract proved
+  it by checking both against one shared tuple. Release now invokes `ci-pic`,
+  which turns "these two lists match" into "there is one list": the public
+  attestation re-runs the identical gate normal CI runs, by construction rather
+  than by coincidence. Eight steps became three.
+
+  Two things the goals now hold that no check previously watched: that
+  `release-rebuild` starts from `make clean` (a reproducibility claim is about a
+  build from nothing -- a rebuild that skipped the clean would compare committed
+  images against whatever was on disk), and that it covers the parts
+  `CI_CLASSIC_PARTS` declares rather than a list of its own. Both were verified
+  by deletion.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body
