@@ -358,14 +358,44 @@ local run whose tree is the tree that gets published.
 
 ## Part 4 - rehearse the shape, not just the tools
 
-`--dry-run` today proves the pipeline runs and produces a staging directory. It
-does not produce the shape that fails: no artifact commit, no registry append,
-no `HEAD` for the gates to read. Extend it to stage into a scratch clone,
-create the artifact commit there, and run Part 3's verifier against it.
+`--dry-run` proved the pipeline runs and produced a staging directory. It did
+not produce the shape that fails: no artifact commit, no registry append, no
+`HEAD` for the gates to read. It now does. `scripts/rehearse-artifact-commit.sh`
+clones the repository into a throwaway directory, checks out the commit the
+staged `QUALIFICATION` records -- not the branch tip, which may have moved --
+copies the staging in, appends the publication registration with the same
+command the handoff prints, commits, and runs Part 3's verifier against it.
 
 The staged *shape* does not depend on soak duration; only the evidence content
 does. So a dry run costs about an hour and can be done BEFORE starting the real
 soak. Both `v0.9.12` failures would have surfaced there, with nothing spent.
+
+The verifier needed a mode for this, because two things a real artifact commit
+has are things a dry run cannot have: the staging carries the DRY RUN banner,
+and `SHA256SUMS.asc` does not exist, since signing is the operator's own step
+and no release path signs on their behalf. `--allow-dry-run` relaxes exactly
+those two and nothing else -- the clean tree, the absent tag, the required
+files, the single-parent-plus-registry-append history shape and all eight gates
+run unchanged -- and it *requires* the banner it permits, so it can only ever
+accept what the publishable mode refuses. It prints no tag or push command.
+
+One gate had to learn the same distinction, and finding out which one is the
+argument for building this rather than reasoning about it.
+`test-published-release-immutability` is the only artifact gate that reads the
+release directory on disk, and it requires all four files a release signs for
+itself -- so an unsigned staging failed it every time, on the one gate whose
+`IMAGE_CONTINUITY` check is the exact thing that cost `v0.9.12` its tag. It now
+exempts a directory that is banner-marked AND untagged from the signature
+requirement alone. Both conditions are load-bearing: the banner is what makes a
+directory unpublishable everywhere else, and the absent tag is what makes the
+claim checkable from the repository rather than from the file's own say-so, so
+that a published release still owes the signature it was published with
+whatever its manifest is later edited to say.
+
+The rehearsal runs the gates AS OF THE QUALIFIED SOURCE COMMIT, because that is
+the tree it checks out -- which is correct, and worth stating: the gates a
+release is judged by are the ones that release ships, not the ones the working
+tree happens to have.
 
 ## Sequencing
 
@@ -391,7 +421,7 @@ shape.
 | 2 | `ci-local.sh` reads the sequence from Make (**done**) | a CI goal with no local counterpart; a local handler for a gate CI retired |
 | 3 | `test-ci-parity` in `make test` (**done**, inside `test-workflow-syntax`: one file already parses both workflows) | a workflow step with no local counterpart; a dropped pin; a gate reached outside a goal; a local release that does not cover the tagged one |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal (**done**) | every post-staging failure, at zero cost; a gate dispatched outside the declared goal; a pin handed to gates that do not read it |
-| 5 | `--dry-run` builds the artifact-commit shape | the same, before the soak rather than after |
+| 5 | `--dry-run` builds the artifact-commit shape (**done**) | the same, before the soak rather than after |
 
 Increment 4 was the highest value per line and did not depend on 1-3, so it
 landed first; its goal-composition half waited for Part 1, as noted above.

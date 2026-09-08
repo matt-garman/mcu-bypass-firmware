@@ -94,8 +94,10 @@
 #   options:
 #     --preflight              run every release capability/precondition check,
 #                              then exit before cleaning, building, or staging
-#     --dry-run                rehearse the whole pipeline with a SHORT soak
-#                              (does not produce a real release; output is
+#     --dry-run                rehearse the whole pipeline with a SHORT soak,
+#                              including the artifact COMMIT the tag will name,
+#                              built in a scratch clone and put through the same
+#                              gates (does not produce a real release; output is
 #                              clearly marked and no git commands are emitted)
 #     --express                stage a REAL, publishable release whose soak runs
 #                              1 h per combination instead of 24 h. Every other
@@ -3644,11 +3646,35 @@ release_render_commit_message "$VERSION" "$RELEASE_MODE" "$GIT_SHORT" \
 ls -1 "$OUTPUT_DIR" >&2
 
 # ============================================================================
+# 4b. ARTIFACT-COMMIT REHEARSAL -- dry run only
+# ============================================================================
+# Everything above qualified the SOURCE tree. The tree a tag names is the one
+# that CONTAINS this staging plus the publication-registry append, and it does
+# not exist until an operator has committed by hand -- so no gate in this run
+# has seen it. On a real release that window is closed by
+# scripts/verify-release-artifact-commit.sh, but only after the 24-hour soak is
+# already spent: v0.9.12 was tagged, pushed, reproduced bit for bit on the
+# clean runner, and then refused on its own tree.
+#
+# The staged SHAPE does not depend on soak duration; only the evidence CONTENT
+# does. So a dry run can reach that whole failure class here, an hour in, for
+# the cost of the gates -- which is the entire reason to run one.
+if [ "$DRY_RUN" -eq 1 ]; then
+	section "4b. artifact-commit rehearsal"
+	scripts/rehearse-artifact-commit.sh "$OUTPUT_DIR" "$VERSION" "$WORK" \
+		|| die "the artifact-commit rehearsal FAILED: this staging does not make a publishable commit, and a real release would have discovered that after the soak."
+	ok "the artifact commit this staging would produce passes every gate whose verdict it can change."
+fi
+
+# ============================================================================
 # 5. HAND OFF -- print the git + signing recipe (this script runs NOTHING below)
 # ============================================================================
 if [ "$DRY_RUN" -eq 1 ]; then
 	section "DRY RUN complete"
 	warn "This was a rehearsal with a short soak. Output staged at $OUTPUT_DIR is NOT a real release."
+	ok "The artifact-commit SHAPE was rehearsed and passed: a real run of this staging"
+	ok "would produce a commit every release gate accepts. Soak EVIDENCE is the part a"
+	ok "short soak cannot stand in for."
 	warn "Re-run WITHOUT --dry-run (full 24-h soak) to produce a publishable release."
 	exit 0
 fi

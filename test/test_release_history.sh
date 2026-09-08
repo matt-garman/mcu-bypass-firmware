@@ -431,6 +431,74 @@ rm -rf "$repo/release/v99.bad"
 checks=$((checks + 1))
 version=v99.0.0
 
+# --- a dry run's staging owes no signature, and nothing else is excused -----
+# scripts/rehearse-artifact-commit.sh assembles a dry run's staged output into
+# the artifact commit a tag would name and runs the release-artifact gates on
+# it -- an hour into a release rather than a day, which is the only point at
+# which the continuity declaration above can still be written. That staging has
+# no SHA256SUMS.asc: signing is the operator's own step, on the real staging.
+# So the immutability gate exempts a directory that says of itself it is not a
+# release. This is where that exemption is held to its scope, because this is
+# the fixture that can produce a release directory the gate has never seen.
+restage_v99_as() {
+	# The staging as a dry run leaves it: the banner (or not), no detached
+	# signature, the signed list regenerated over what is actually present,
+	# and the record rebuilt from the tree exactly as --print-record builds
+	# it for a real one.
+	local banner=$1 recorded
+	if [ "$banner" = banner ]; then
+		printf '> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n\nmanifest %s\n' \
+			"$version" > "$repo/release/$version/MANIFEST.md"
+	else
+		printf 'manifest %s\n' "$version" > "$repo/release/$version/MANIFEST.md"
+	fi
+	rm -f "$repo/release/$version/SHA256SUMS.asc"
+	(
+		cd "$repo/release/$version"
+		sha256sum -- firmware.hex QUALIFICATION MANIFEST.md README.md \
+			evidence/result.log > SHA256SUMS
+	)
+	cp "$DIGEST_RECORD_SOURCE" "$repo/test/published_release_digests.txt"
+	for recorded in v99.0.0-rc.1 "$version"; do
+		python3 "$repo/test/test_published_release_immutability.py" \
+			--print-record "$recorded" \
+			>> "$repo/test/published_release_digests.txt"
+	done
+}
+
+restage_v99_as banner
+PUBLISHED_RELEASE_ROOT="$repo" \
+	python3 "$repo/test/test_published_release_immutability.py" >/dev/null \
+	|| fail "the immutability gate refused an unsigned dry-run staging; no rehearsal could ever run it"
+checks=$((checks + 1))
+
+# Without the banner it is just an unsigned release, and the gate must say so.
+restage_v99_as plain
+if output=$(PUBLISHED_RELEASE_ROOT="$repo" \
+		python3 "$repo/test/test_published_release_immutability.py" 2>&1); then
+	fail "the immutability gate accepted a release directory with no signature and no dry-run banner"
+fi
+[[ "$output" == *"release/$version has no SHA256SUMS.asc"* ]] \
+	|| fail "an unsigned release failed for the wrong reason: $output"
+checks=$((checks + 2))
+
+# The exemption is for a staging, never for a publication. A tagged version is
+# published whatever its manifest now says, and owes the signature it was
+# published with -- otherwise the banner would be a way to retire a released
+# signature by editing a file this gate exists to protect.
+restage_v99_as banner
+git -C "$repo" add -A
+git -C "$repo" -c commit.gpgsign=false commit -qm rehearsal-staging
+git -C "$repo" tag "$version"
+if output=$(PUBLISHED_RELEASE_ROOT="$repo" \
+		python3 "$repo/test/test_published_release_immutability.py" 2>&1); then
+	fail "a TAGGED release with no signature was excused by its own dry-run banner"
+fi
+[[ "$output" == *"release/$version has no SHA256SUMS.asc"* ]] \
+	|| fail "a tagged unsigned release failed for the wrong reason: $output"
+checks=$((checks + 2))
+git -C "$repo" tag -d "$version" >/dev/null
+
 setup_fixture
 git -C "$repo" tag -a event-object -m "annotated event" "$release_sha"
 tag_object=$(git -C "$repo" rev-parse refs/tags/event-object)

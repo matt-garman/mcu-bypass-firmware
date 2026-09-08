@@ -3267,6 +3267,7 @@ TEST_GATES_LATE = \
         test-release-images test-release-preflight test-release-provenance \
         test-release-qualification test-release-history \
         test-published-release-immutability test-release-artifact-commit \
+        test-release-rehearsal \
         test-pic12f675-flash-helper \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
@@ -3812,6 +3813,13 @@ test-release-provenance:
 # when it does, since it is the only source of the tag and push commands.
 test-release-artifact-commit:
 	./test/test_release_artifact_commit.sh
+
+# Scratch-clone proof that a dry run rehearses the SHAPE that gate reads: the
+# artifact commit a tag would name, assembled from the staged output as a
+# single-parent child of the QUALIFIED source commit and put through the same
+# verifier an hour into a release rather than a day into one.
+test-release-rehearsal:
+	./test/test_release_rehearsal.sh
 
 # Host-only proof that publication requires exact clean qualification metadata,
 # the canonical retained-evidence set, and one complete result per release soak.

@@ -182,9 +182,14 @@ qualification verification read the completed directory and belong there too.
 Rehearsing those would mean synthesising soak evidence, and a rehearsal that
 passes on fiction is worse than no rehearsal.
 
-This overlaps `docs/ci_parity.md` Part 4 and should land with it: that part
-rehearses the artifact-commit *shape* before the soak, this one rehearses the
-staged *content*. Same phase, same argument.
+This overlaps `docs/ci_parity.md` Part 4, which has now landed too: that part
+rehearses the artifact-commit *shape*, this one the staged *content*. Same
+argument, different phases in the end -- the content rehearsal runs before the
+soak, because it only needs the built images, while the shape rehearsal needs a
+complete staging and so runs after one. What makes the second cheap is that a
+DRY RUN's soak is minutes: the shape does not depend on soak duration, so the
+whole artifact-commit failure class is reachable in an hour, before the real
+soak is ever started.
 
 ## Part 3 - attest the soak, and reuse it when the inputs are identical
 

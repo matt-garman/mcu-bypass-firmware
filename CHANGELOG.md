@@ -300,6 +300,48 @@ historical records and are not retroactively compacted by this policy.
   edges now expand it, and a check of its own proves they did, because nothing
   else would notice.
 
+  **A dry run now rehearses the artifact commit, not just the pipeline.**
+  `scripts/make-release.sh --dry-run` proved the pipeline runs and produced a
+  staging directory. It did not produce the shape that fails: no artifact
+  commit, no registry append, no `HEAD` for the gates to read. That shape is
+  what cost `v0.9.12` its tag -- the release was qualified, tagged, pushed, and
+  reproduced bit for bit on the clean runner, and then failed re-running the
+  gates on the tag's own tree, because a continuity declaration only becomes
+  owed once `release/v0.9.12/` exists on disk.
+
+  `scripts/rehearse-artifact-commit.sh` builds that tree. It clones the
+  repository into a throwaway directory, checks out the commit the staged
+  `QUALIFICATION` records -- not the branch tip, which may have moved -- copies
+  the staging in, appends the publication registration with the same command
+  the handoff prints, commits, and runs
+  `scripts/verify-release-artifact-commit.sh` against it. A dry run's soak is
+  minutes, and the staged SHAPE does not depend on soak duration, so the whole
+  failure class is now reachable an hour into a release instead of a day. The
+  repository itself is untouched: every Git write is inside the clone.
+
+  Two things a real artifact commit has, a dry run cannot: the staging carries
+  the DRY RUN banner, and `SHA256SUMS.asc` does not exist, because signing is
+  the operator's own step and no release path signs on their behalf. The
+  verifier's new `--allow-dry-run` relaxes exactly those two -- the clean tree,
+  the absent tag, the required files, the history shape and all eight gates run
+  unchanged -- and it REQUIRES the banner it permits, so it can only accept what
+  the publishable mode refuses outright. It prints no tag or push command.
+
+  Building it found which gate that leaves. `test-published-release-immutability`
+  is the only artifact gate that reads the release directory on disk, and it
+  requires all four files a release signs for itself, so an unsigned staging
+  failed it every time -- on precisely the gate whose `IMAGE_CONTINUITY` check
+  is the `v0.9.12` failure. It now exempts a banner-marked, UNTAGGED directory
+  from the signature requirement alone. Both conditions carry weight: the banner
+  is what makes a directory unpublishable everywhere else, and the absent tag is
+  what makes the claim checkable from the repository rather than from the file's
+  own say-so, so a published release still owes the signature it was published
+  with however its manifest is later edited.
+
+  `test-release-rehearsal` is the new gate over the assembly, and the exemption
+  is pinned from both sides in `test-release-history`, which already builds
+  synthetic published releases to exercise the immutability gate.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

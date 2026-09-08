@@ -41,121 +41,6 @@ Dependencies: exact AVR vendor datasheets. Effort: about 1 hour with the source
 documents open. Risk if deferred: incomplete reference-grade traceability, not
 a known firmware defect.
 
-### T2-ci-parity - Make local and remote CI parity structural
-
-`scripts/ci-local.sh` reconstructed `ci.yml`'s jobs from a prose comment header,
-`release.yml` kept its own list of gate re-runs, and `test/README.md` a third.
-Nothing machine-checked that the local path covered the remote one, so "a clean
-pass here means the CI matrix will be green" was an assertion in a comment.
-[`docs/ci_parity.md`](docs/ci_parity.md) is the design: name every gate a
-workflow runs as a Make goal, have each workflow step invoke exactly one of
-them, run the same goals locally, and check that shape rather than compare two
-hand-maintained inventories. The publishability gate that document's Part 3
-describes is done; every step in BOTH workflows now invokes a declared goal;
-`scripts/ci-local.sh` now EXECUTES the inventory rather than describing it;
-the artifact-commit verifier dispatches through a declared goal too, which was
-the last gate composition in the release path living in a shell script; and the
-parity gate itself is in place. What remains is Part 4.
-
-The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
-locates each job's strict-suite step by its literal command and anchors seven
-ordering assertions to it, so a job's goal, that job's detection, and the policy
-assertions the step used to satisfy all move together -- the last against the
-goal's recipe, or they retire silently. All seven `ci.yml` gate steps are
-converted, and so is `release.yml`. That workflow runs different work, not the
-same work differently -- it rebuilds from the tag and deliberately does not
-soak -- so it has its own `RELEASE_GOALS`; but it now invokes `ci-pic` itself,
-which turns "release's five PIC commands match CI's" into "there is one PIC
-gate". Note that one job does not always mean one goal: `attiny202` splits
-into a DFP half and a yasimavr half because the workflow provisions those
-inputs between them, and the gate asserts the build half runs first.
-`build-matrix` converts differently again -- its rows selected work through
-expressions the gate could not parse, so it pinned a reviewed copy of the part
-list. The row now carries only the part name, `ci-build-classic` validates it
-against `CI_CLASSIC_PARTS`, and the gate asks whether the matrix covers the
-parts MAKE declares. That is the first conversion that bought coverage rather
-than preserving it: adding a classic AVR part now fails the gate until the
-matrix covers it. Run every new goal before trusting
-it: wiring the ATtiny202 lane found a `set -o pipefail` bashism that had
-shipped dormant in the `CI_GOALS` commit, because Make recipes run under
-`/bin/sh` while a workflow `run:` block runs under bash. Two hazards
-the `pic` conversion exposed, both recorded in the design doc: a goal's recipe
-sub-makes are invisible to Make's prerequisite database, so reachability checks
-asked through a wrapper pass vacuously unless the edge set is seeded with them;
-and an assertion that finds a workflow step by its `name:` goes quiet rather
-than red when that step is folded away. Those seeded edges then let the
-mutation gate's "exactly one normal-CI path runs mutants" check become a
-reachability question rather than a literal-name match, which also catches a
-second wrapper.
-
-The local mirror closed differently than the design expected. A local push does
-not invoke every CI goal -- it covers `verify`, `stress` and the mutation gate
-with one `make test-long`, since those three re-aggregate one shared host suite
--- so the sequence needed a declared complement rather than a derived one:
-`CI_LOCAL_SEQUENCE` and `CI_LOCAL_FOLDED` must PARTITION `CI_GOALS`, and the
-Makefile refuses to parse when they do not. A refusal rather than a check,
-because the script reads both lists through `make print-...`: it cannot run, or
-even ask, while the claim is false. Treating the folded half as "whatever is
-left over" would have been the wrong default -- that silently assumes a NEW
-goal is covered, which is the drift the item exists to remove. Both directions
-of the handler correspondence are load-bearing, and both were confirmed by
-deletion: without the forward check a sequence naming an unhandled goal runs
-every other gate first and dies an hour later on `command not found`; without
-the reverse a handler outlives the goal it served. The five prose-mapping
-checks that retired were replaced by a chain that is strictly stronger --
-`ci.yml`'s invoked goals must equal `CI_GOALS`, that must partition into the
-local lists, and every sequenced goal must have a handler -- where the old one
-proved only that someone had typed a job name into a comment.
-
-The parity gate closed the file-level question the goal conversions had left
-open. Every check written so far asks whether the RIGHT goals run, in the right
-order, with the right pins; none asked, of both workflows at once, whether
-there is anything ELSE -- and `release.yml` had no rule of that kind at all, so
-a step could have run `make test` beside the four declared ones and every
-assertion would still have passed. That needs a stricter reader than the
-canonical checks use: theirs sees a logical line whose FIRST word is `make`,
-which is every invocation either file contains today and misses `cd x && make`,
-`$(make ...)` and `... | make ...`. Reading command POSITIONS instead also
-bought two rules the design's own list had not thought to ask for: a dispatch
-carries no Make flags, because `-k` or `-i` turns a failing gate into a passing
-job, and the pins a step passes must EQUAL the goal's declared set rather than
-merely include it -- an extra variable reaches every nested Make of that goal
-as command-line input nobody reviewed, which is what the release env-leak guard
-exists to refuse. The release half of the local-coverage claim landed here too,
-as coverage of `scripts/make-release.sh` rather than an inventory of goals it
-invokes: that script names each consumer directly and deliberately, since it
-resolves a toolchain path per command and tees each gate to its own evidence
-log. It was only askable after the seeded edges learned to expand a list
-dispatch -- `$(CI_CLASSIC_PARTS)`, `$(RELEASE_ARTIFACT_GATES)` -- because an
-unexpanded `$(...)` is a node with no edges, so coverage asked through one is
-answered by the empty set and passes.
-
-`release-artifact-gates` is the one declared goal no workflow invokes, and none
-can: the artifact commit does not exist until an operator has committed by hand
-after `make-release.sh` finishes. It lives in `RELEASE_PATH_GOALS` rather than
-`RELEASE_GOALS` so the latter keeps meaning "what `release.yml` runs" and stays
-checkable against that file. Moving the composition found what reading it would
-not have: the verifier handed those gates `release.yml`'s three independent
-pins, and none of the eight gates reads any of them -- while they did reach the
-gates' own nested Makes as environment origin, which `test-release-preflight`
-(a member of the list) already scrubs against. The goal takes no pins, and that
-emptiness is now asserted from both ends.
-
-Acceptance: every `run:` step in both
-workflows invokes exactly one declared goal, with its required pins, and
-invokes nothing under `test/` directly (**done**); `scripts/ci-local.sh`
-executes the inventory rather than describing it (**done**); a gate parses both
-workflows and fails closed on a step with no local counterpart, on a dropped
-pin, and on a goal the Makefile does not define (**done**); and `--dry-run`
-produces the artifact-commit shape in a scratch clone so
-`scripts/verify-release-artifact-commit.sh` can be rehearsed before a soak
-rather than after.
-
-Dependencies: none. Effort: about 1 hour remaining -- Part 4 only. Risk:
-Medium; the restructure touches every CI entry point, and a mistranslated step
-is a gate that silently stops running -- which is why each goal lands as an
-exact wrapper of the command it replaces before anything is simplified.
-
 ---
 
 
@@ -937,7 +822,6 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
-| T2-ci-parity | Make local/remote CI parity structural | 2 | 1 h | High - a failed remote gate costs a 25-hour release |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

@@ -84,8 +84,14 @@ HEADING = re.compile(r"^#\s*(%s)\s*--\s*(\d+) files signed by its own "
                      r"SHA256SUMS, (\d+) recorded here\s*$" % VERSION_TEXT)
 
 # Files a release signs for itself, and therefore the four this gate requires
-# before it will believe a directory is a published release at all.
+# before it will believe a directory is a published release at all. The one
+# exception is a dry run's staging, which has not been signed yet and must not
+# pretend otherwise: see is_rehearsal_staging below.
 REQUIRED = ("SHA256SUMS", "SHA256SUMS.asc", "MANIFEST.md", "README.md")
+
+# What scripts/make-release.sh writes into MANIFEST.md under --dry-run, and
+# what scripts/verify-release-artifact-commit.sh refuses to publish.
+DRY_RUN_BANNER = "DRY RUN -- NOT A VALIDATED RELEASE"
 
 # The one amendment ever made to a published release, and what makes it legible
 # rather than a quiet edit: the files it touched, the text that must survive in
@@ -172,6 +178,42 @@ def counted(condition, identifier, witness):
     if not condition:
         note(identifier, witness)
     return condition
+
+
+def is_rehearsal_staging(version):
+    """True when this directory is a dry run's staging, not a published release.
+
+    scripts/rehearse-artifact-commit.sh assembles a dry run's staged output
+    into the artifact commit a tag would name and runs this gate on it, an hour
+    into a release rather than a day -- which is how the continuity declaration
+    below comes to be owed while there is still time to write it, instead of
+    after a tag has been spent. That staging carries no SHA256SUMS.asc: the
+    operator signs by hand, at step 2 of the handoff, on the real staging, and
+    no release path signs on their behalf.
+
+    Two conditions, and both are load-bearing. The banner is what a dry run
+    writes and what makes the directory unpublishable everywhere else. The
+    absent tag is what makes the claim checkable HERE, from the repository
+    rather than from the file's own say-so: a published release has a tag, and
+    a tagged release owes the signature it was published with whatever its
+    manifest now says about itself. Anything unreadable answers no, so the
+    signature stays required by default.
+    """
+    try:
+        manifest = (RELEASE / version / "MANIFEST.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    if DRY_RUN_BANNER not in manifest:
+        return False
+    try:
+        resolved = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "-q", "--verify",
+             "refs/tags/%s^{commit}" % version],
+            capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return resolved.returncode != 0
 
 
 def digest_of(path):
@@ -545,7 +587,11 @@ def the_directories_and_the_record_name_the_same_releases():
                 "the record covers release/%s, which is not in the tree; a "
                 "published release was deleted" % version)
     for version in sorted(on_disk):
-        for name in REQUIRED:
+        required = REQUIRED
+        if is_rehearsal_staging(version):
+            required = tuple(name for name in REQUIRED
+                             if name != "SHA256SUMS.asc")
+        for name in required:
             counted((RELEASE / version / name).is_file(), identifier,
                     "release/%s has no %s" % (version, name))
 

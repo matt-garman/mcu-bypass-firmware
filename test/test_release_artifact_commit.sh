@@ -229,6 +229,97 @@ git -C "$repo" add -A
 git -C "$repo" -c commit.gpgsign=false commit -qm broken-makefile
 expect_refusal "unreadable gate inventory" "cannot read RELEASE_ARTIFACT_GATES" "$version"
 
+# --- the rehearsal mode -----------------------------------------------------
+# --allow-dry-run is how scripts/rehearse-artifact-commit.sh runs this script
+# against a scratch clone during a dry run, an hour into a release rather than
+# a day. It must relax exactly two things -- the banner a dry-run MANIFEST
+# carries, and the signature a dry run has not made -- and nothing else. The
+# refusals below are the same cases already proved above, re-proved with the
+# flag set, because a rehearsal that accepts what the real thing refuses would
+# report a shape publishable that is not.
+stage_dry_run() {
+	printf 'DRY RUN -- NOT A VALIDATED RELEASE\n' >> "$repo/release/$version/MANIFEST.md"
+	rm -f "$repo/release/$version/SHA256SUMS.asc"
+	git -C "$repo" add -A
+	git -C "$repo" -c commit.gpgsign=false commit -qm dry-run-staging
+}
+
+setup_fixture
+stage_dry_run
+output=$(run_verify --allow-dry-run "$version") \
+	|| fail "a dry-run staging was refused in rehearsal mode: $output"
+# The two relaxations, each named in the output rather than silent: a rehearsal
+# that does not say what it skipped is how one comes to be read as a release.
+[[ "$output" == *"NOT PROVEN"* ]] \
+	|| fail "the rehearsal did not report the signature as unproven: $output"
+[[ "$output" == *"rehearsal passed"* ]] \
+	|| fail "the rehearsal printed no verdict: $output"
+# And the property that makes the flag safe to have at all.
+[[ "$output" != *"git tag -s"* ]] \
+	|| fail "the rehearsal printed the tag command"
+[[ "$output" != *"git push origin"* ]] \
+	|| fail "the rehearsal printed the push command"
+checks=$((checks + 5))
+
+# The gates are the expensive half and the whole reason to rehearse: they must
+# run here exactly as they run for a publishable verdict.
+grep -q '^gate-one STRICT_TOOLS=1 PINS=\[\]$' "$state/gates.log" \
+	|| fail "the rehearsal did not run the gates under the real policy: $(cat "$state/gates.log")"
+grep -q '^gate-two ' "$state/gates.log" \
+	|| fail "the rehearsal did not run every gate in RELEASE_ARTIFACT_GATES"
+checks=$((checks + 2))
+
+# The flag REQUIRES the banner it permits. Without this it would be a way to
+# accept a publishable staging under weaker rules -- signature not verified --
+# and print a passing verdict for it.
+setup_fixture
+expect_refusal "rehearsal mode on a publishable staging" \
+	"carries no dry-run banner" --allow-dry-run "$version"
+
+# Everything else the flag must NOT relax. Each of these is refused above
+# without the flag; the point here is that the rehearsal refuses them too.
+setup_fixture
+stage_dry_run
+printf 'uncommitted\n' >> "$repo/release/$version/MANIFEST.md"
+expect_refusal "rehearsal with a dirty tree" "the working tree is not HEAD" \
+	--allow-dry-run "$version"
+
+setup_fixture
+stage_dry_run
+git -C "$repo" tag "$version"
+expect_refusal "rehearsal of an already-tagged version" "already exists in this clone" \
+	--allow-dry-run "$version"
+
+setup_fixture
+stage_dry_run
+rm "$repo/release/$version/QUALIFICATION"
+git -C "$repo" add -A
+git -C "$repo" -c commit.gpgsign=false commit -qm no-qualification
+expect_refusal "rehearsal without QUALIFICATION" "QUALIFICATION is missing" \
+	--allow-dry-run "$version"
+
+setup_fixture
+stage_dry_run
+: > "$state/verify-release-history.sh.fail"
+expect_refusal "rehearsal of a commit that is not an artifact commit" \
+	"not a publishable release-artifact commit" --allow-dry-run "$version"
+
+setup_fixture
+stage_dry_run
+: > "$state/gates.fail"
+expect_refusal "rehearsal with a failing gate" "gates failed on HEAD" \
+	--allow-dry-run "$version"
+
+# A signature the dry run somehow DOES carry is still verified: the flag
+# permits the file to be absent, it does not stop checking one that is present.
+setup_fixture
+printf 'DRY RUN -- NOT A VALIDATED RELEASE\n' >> "$repo/release/$version/MANIFEST.md"
+git -C "$repo" add -A
+git -C "$repo" -c commit.gpgsign=false commit -qm dry-run-signed
+: > "$state/verify-release-signature.sh.fail"
+expect_refusal "rehearsal with a signature that does not verify" \
+	"does not verify against the pinned key" --allow-dry-run "$version"
+
 # --- arguments --------------------------------------------------------------
 setup_fixture
 expect_refusal "malformed version" "invalid release version" "9.9.9"
