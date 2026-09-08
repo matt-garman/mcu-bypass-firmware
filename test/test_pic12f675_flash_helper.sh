@@ -823,15 +823,22 @@ check "--show-commands resolves a path under a directory descriptor" \
 check "the echo stays on stderr, out of the result lines" \
 	"$(grep -q '^+ ' "$CASE_DIR/stdout.txt" && echo 0 || echo 1)"
 
-# The device ID is withheld unless asked for: ipecmd defaults to "Do Not
-# Display", so without -I the transcript names the part and its revision but
-# never the ID the two pre-write reads are compared on.
+# -I is documented as "Display Device ID" and prints no ID at all for this part
+# on a PICkit 3 -- it repeats the identity block. A device command must not
+# carry an option that costs the device work and returns nothing.
 new_case
 program_run ''
-check "every device read asks for the device ID" \
-	"$([ "$(grep -c -- $'\t-I\t' "$ARGVLOG")" = 3 ] && echo 1 || echo 0)"
-check "the baseline records the device ID the read asked for" \
-	"$([ "$(reservation_field baseline_device_id)" = 0x0FC0 ] && echo 1 || echo 0)"
+check "no device read asks for a device ID the tool will not print" \
+	"$([ "$(grep -c -- $'\t-I\t' "$ARGVLOG")" = 0 ] && echo 1 || echo 0)"
+# ipecmd prints no numeric device ID for this part under any option, so the
+# identity comes out of configuration memory in the export the read already
+# produced -- device memory, not tool prose.
+check "the device ID is read from the export's DEVID word" \
+	"$([ "$(reservation_field baseline_device_id)" = 0x0FC0 ] \
+		&& [ "$(reservation_field baseline_device_id_source)" = export-devid-word ] \
+		&& echo 1 || echo 0)"
+check "no transcript carries a numeric device ID to be read instead" \
+	"$(grep -qiE '^\s*device\s+id\s*[=:]' "$EVIDENCE/baseline.log" && echo 0 || echo 1)"
 # Real 6.20 prints "Device Revision ID = b" -- the word ID between "Revision"
 # and the "=", which the shape modelled on the stub could not match at all.
 check "the revision is parsed from the spelling real silicon prints" \
@@ -1550,15 +1557,26 @@ assert_rejects "a baseline export that is not Intel HEX" "does not start with"
 
 new_case
 program_run 'noid:0'
-assert_rejects "a baseline transcript with no device identity" "Device ID and Device Revision"
+assert_rejects "a baseline transcript with no device revision" "reports no device revision"
 # The refusal has to carry the transcript, not just the complaint. This is the
 # one failure mode that fires precisely because the tool printed a shape this
 # helper does not know, and the lines it printed are the whole diagnosis.
-check "the identity refusal names which field was missing" \
-	"$([[ "$OUT" == *"Device ID and Device Revision not found"* ]] && echo 1 || echo 0)"
 check "the identity refusal quotes the transcript's identity lines" \
 	"$([[ "$OUT" == *"The transcript's identity lines were:"* ]] \
 		&& [[ "$OUT" == *"Target device PIC12F675 found."* ]] && echo 1 || echo 0)"
+
+# An export with no DEVID word is recorded, not refused: the part is identified,
+# the revision is present, and the two pre-write reads are still compared word
+# for word. Aborting a powered device over a missing evidence field is worse
+# than saying plainly that the field was unavailable.
+new_case
+program_run 'nodevid:*'
+check "an export with no DEVID word still completes the transaction" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the record says the numeric identity was unavailable" \
+	"$([ "$(reservation_field baseline_device_id)" = None ] \
+		&& [ "$(reservation_field baseline_device_id_source)" = unavailable ] \
+		&& echo 1 || echo 0)"
 
 new_case
 program_run 'noosccal:0'

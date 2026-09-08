@@ -183,7 +183,7 @@ def truncate_last_byte(content):
     return "\n".join(lines) + "\n"
 
 
-def do_read(export_path, state, fault):
+def do_read(export_path, state, fault, want_device_id=True):
     index = state["reads"]
     state["reads"] = index + 1
     version = fault.get("version", "6.20")
@@ -194,12 +194,20 @@ def do_read(export_path, state, fault):
 
     lines = [BANNER % version, "Connecting to MPLAB PICkit 3...",
              "Target voltage detected"]
+    # OBSERVED, twice over, on a PICkit 3 under MPLAB X 6.20: the identity is
+    # two lines -- the part as "Target device PIC12F675 found." and the revision
+    # as "Device Revision ID = b", with the word ID between "Revision" and the
+    # "=". There is no "Device Name" line, and NO NUMERIC DEVICE ID ANYWHERE.
+    # -I ("Display Device ID") does not add one; it repeats the identity block,
+    # so a read taken with it prints both lines twice. That is modelled here
+    # exactly, because the helper's device ID now comes from the export's DEVID
+    # word and this transcript is the evidence that it has to.
+    identity = ["Target device PIC12F675 found."]
     if not at(fault, "noid", index):
-        # Reported from device memory, so a fault that swaps the part is
-        # observable the way it would be on a bench: in the transcript.
-        lines.append("Device ID = 0x%04X" % state["words"][str(DEVICE_ID_WORD_ADDR)])
-        lines.append("Revision = 0x000A")
-    lines.append("Device Name = PIC12F675")
+        identity.append("Device Revision ID = b")
+    lines.extend(identity)
+    if want_device_id:
+        lines.extend(identity)
 
     if at(fault, "readfail", index):
         lines.append("Failed to get Device ID")
@@ -224,6 +232,13 @@ def do_read(export_path, state, fault):
         elif at(fault, "noconfig", index):
             words = dict(state["words"])
             words.pop(str(CONFIG_WORD_ADDR), None)
+            content = emit_hex(words)
+        elif at(fault, "nodevid", index):
+            # An export that omits the DEVID word. The helper records the
+            # numeric identity as unavailable rather than aborting a powered
+            # device over a missing evidence field.
+            words = dict(state["words"])
+            words.pop(str(DEVICE_ID_WORD_ADDR), None)
             content = emit_hex(words)
         elif at(fault, "partialexport", index):
             # A reader that returns only part of program memory. The trim
@@ -437,6 +452,10 @@ def main(argv):
     export_path = None
     image_path = None
     program = False
+    # ipecmd's default is "Do Not Display" for the device ID, so a transcript
+    # carries one only when the caller asked. Modelling that is what makes the
+    # helper's -I a tested requirement rather than a decoration.
+    want_device_id = "-I" in argv
     for arg in argv:
         if arg.startswith("-GF"):
             export_path = arg[3:]
@@ -447,7 +466,7 @@ def main(argv):
 
     state = load_state()
     if export_path is not None:
-        return do_read(export_path, state, fault)
+        return do_read(export_path, state, fault, want_device_id)
     if image_path is not None and program:
         return do_program(image_path, state, fault)
     sys.stderr.write("fake ipecmd: unsupported argument vector: %r\n" % (argv,))

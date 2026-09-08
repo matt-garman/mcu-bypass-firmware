@@ -110,6 +110,10 @@ POWER_FLAG = "-W"
 # little-endian within the word.
 FLASH_WORDS = 0x400
 CAL_WORD_ADDR = 0x3FF
+# DS41190G: DEVID sits in configuration memory, which every full-device export
+# covers. This is where the numeric device identity actually comes from --
+# ipecmd never prints one for this part; see parse_device_report().
+DEVID_WORD_ADDR = 0x2006
 CONFIG_WORD_ADDR = 0x2007
 BG_MASK = 0x3000
 BG_ERASED = 0x3000
@@ -149,10 +153,13 @@ IPE_VERSION_RE = re.compile(r"\bv?(\d+\.\d+)(?:\.\d+)*\b")
 # match. Both spellings are accepted rather than one being swapped for the
 # other, since only the first has been seen on real silicon.
 #
-# The device ID line is NOT printed unless -I is passed; see read_argv. Its
-# exact spelling has still not been observed, so a failure to find it quotes the
-# transcript rather than guessing again -- that guessing is what produced this
-# defect and the version-pin one before it.
+# DEVICE_ID_RE has NEVER matched real output and is kept only as a fallback.
+# ipecmd 6.20 driving a PICkit 3 prints no numeric device ID for this part at
+# all: -I ("Display Device ID") merely repeats the identity block, so a
+# transcript taken with it carries "Target device PIC12F675 found." and
+# "Device Revision ID = b" twice over and no number anywhere. The ID is read
+# out of the export's DEVID word instead, which is device memory rather than
+# tool prose and is the better source regardless.
 DEVICE_ID_RE = re.compile(r"(?im)^\s*device\s+id\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
 DEVICE_REVISION_RE = re.compile(
     r"(?im)^\s*(?:device\s+)?revision(?:\s+id)?\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
@@ -544,32 +551,53 @@ def read_trim(memory, label, require_retlw=True):
     }
 
 
-def parse_device_report(data, label):
-    """Device identity, taken from the tool transcript rather than the export."""
+def parse_device_report(data, label, memory):
+    """Device identity: the part and revision from the transcript, the numeric
+    ID from device memory.
+
+    The split is not a preference, it is what the tool provides. ipecmd names
+    the part and states a revision, and for this part prints no numeric device
+    ID under any option. The DEVID word is in configuration memory, which the
+    full-device export already covers, so it is read from the export -- device
+    memory rather than tool prose, and the same bytes the rest of this
+    transaction reasons about.
+
+    A missing DEVID word is recorded, not refused. The part is identified and
+    the revision required, the two pre-write reads are still compared word for
+    word across the whole device, and refusing here would abort a transaction
+    over an absent evidence field while the device sat powered on the bench.
+    `device_id_source` says which of these actually happened.
+    """
     try:
         text = data.decode("ascii", "replace")
     except Exception as exc:  # pragma: no cover - decode with replace cannot raise
         raise FlashError("%s could not be decoded: %s" % (label, exc)) from exc
     if PART not in text.upper():
         raise FlashError("%s does not identify %s" % (label, PART))
-    id_match = DEVICE_ID_RE.search(text)
     revision_match = DEVICE_REVISION_RE.search(text)
-    if id_match is None or revision_match is None:
-        missing = [name for name, found in
-                   (("Device ID", id_match), ("Device Revision", revision_match))
-                   if found is None]
-        # Quote the candidate lines. This refusal fires when the tool printed
-        # something in a shape this helper does not know, and the only way to
-        # fix that is to see what it printed.
+    if revision_match is None:
+        # Quote the candidate lines. This fires when the tool printed something
+        # in a shape this helper does not know, and the only way to fix that is
+        # to see what it printed.
         candidates = [line.strip() for line in text.splitlines()
                       if re.search(r"(?i)\b(device|revision|id)\b", line)]
         raise FlashError(
-            "%s must report both Device ID and Device Revision; %s not found. "
-            "The transcript's identity lines were: %s"
-            % (label, " and ".join(missing),
-               " | ".join(candidates) or "<none>"))
-    return ("0x" + id_match.group(1).upper(),
-            "0x" + revision_match.group(1).upper())
+            "%s reports no device revision. The transcript's identity lines "
+            "were: %s" % (label, " | ".join(candidates) or "<none>"))
+    revision = "0x" + revision_match.group(1).upper()
+
+    # parse_ihex keys by BYTE address and stores BYTES; word_at() is the
+    # accessor that converts a word address and validates the 14-bit result.
+    # Probe both halves first, because an absent DEVID is recorded rather than
+    # raised, while a malformed one is a bad export and should raise.
+    devid_byte = DEVID_WORD_ADDR * 2
+    if devid_byte in memory and devid_byte + 1 in memory:
+        devid = word_at(memory, DEVID_WORD_ADDR, label, "DEVID word")
+        return ("0x%04X" % devid, revision, "export-devid-word")
+    id_match = DEVICE_ID_RE.search(text)
+    if id_match is not None:
+        return ("0x" + id_match.group(1).upper(), revision, "transcript")
+    return (None, revision, "unavailable")
 
 
 # ---------------------------------------------------------------------------
@@ -1139,13 +1167,16 @@ def read_argv(programmer, export_path):
     """The one full-device read/export command. Contains no erase or program
     option, so this argv can never mutate the device.
 
-    -I asks for the device ID. ipecmd's default is "Do Not Display", so without
-    it the transcript names the part and its revision but never the ID, and the
-    identity this transaction compares across its two pre-write reads is simply
-    absent. It is a display option: it adds nothing that can alter the device.
+    -I is deliberately absent. It is documented as "Display Device ID", and it
+    was added here for exactly that, but on a PICkit 3 driving this part it
+    prints no number: it repeats the identity block, so the transcript carries
+    "Target device PIC12F675 found." and "Device Revision ID = b" twice and no
+    ID anywhere. It buys nothing and costs the device an extra ID read, so this
+    command asks for the export and nothing else. The numeric identity comes
+    from the DEVID word inside that export; see parse_device_report().
     """
     return programmer["prefix"] + [
-        TOOL_FLAG + TOOL, "-P" + PART_ARG, "-I", "-GF" + export_path,
+        TOOL_FLAG + TOOL, "-P" + PART_ARG, "-GF" + export_path,
     ] + power_args(programmer)
 
 
@@ -1605,12 +1636,14 @@ def device_read(programmer, evidence, tag, require_retlw=True):
     export = evidence.read(hex_name, label)
     evidence.protect(hex_name)
     memory = parse_ihex(export, label, strict=False)
-    device_id, revision = parse_device_report(output, "%s transcript" % tag)
+    device_id, revision, id_source = parse_device_report(
+        output, "%s transcript" % tag, memory)
     record.update({
         "hex_sha256": sha256_bytes(export),
         "hex_base64": base64.b64encode(export).decode("ascii"),
         "device_id": device_id,
         "device_revision": revision,
+        "device_id_source": id_source,
     })
     # Trim first, so a device missing its calibration word is diagnosed as that
     # rather than as a short export.
@@ -1913,6 +1946,7 @@ def command_program(args, helper_path):
         "read_argv": read_argv(programmer, "<export>"),
         "write_argv": write_argv(programmer, snapshot_path),
         "baseline_device_id": baseline["device_id"],
+        "baseline_device_id_source": baseline["device_id_source"],
         "baseline_device_revision": baseline["device_revision"],
         "baseline_osccal_word": baseline["osccal_word"],
         "baseline_osccal_value": baseline["osccal_value"],
@@ -1960,6 +1994,7 @@ def command_program(args, helper_path):
             "exit": None, "log_sha256": None, "osccal_word": None,
             "osccal_value": None, "config_word": None, "bg_bits": None,
             "device_id": None, "device_revision": None,
+            "device_id_source": None,
         }
         failures.append("post-program readback failed: %s" % exc)
         if program_exit != 0:
