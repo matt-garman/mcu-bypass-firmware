@@ -1557,6 +1557,9 @@ SHELL_SEPARATORS = {
 # Wrappers that run whatever follows them. `command` is deliberately not one:
 # `command -v make` is a probe for the tool, not a use of it.
 COMMAND_PREFIXES = {"sudo", "env", "time", "exec", "nohup"}
+# A consumed prefix brings its own options, and these take their value as a
+# separate word rather than glued on with '='.
+PREFIX_VALUE_FLAGS = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
 SCRIPT_INTERPRETERS = {"bash", "sh", "python3", "python"}
 # A variable read is not a dispatch, and these two flags are what silences one.
 READ_MAKE_FLAGS = {"-s", "--no-print-directory"}
@@ -1593,11 +1596,24 @@ def command_argvs(text):
             argvs.append(argv)
         for argv in argvs:
             index = 0
-            while index < len(argv) and (
-                re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[index])
-                or argv[index] in COMMAND_PREFIXES
-            ):
-                index += 1
+            prefixed = False
+            while index < len(argv):
+                word = argv[index]
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word):
+                    index += 1
+                elif word in COMMAND_PREFIXES:
+                    prefixed = True
+                    index += 1
+                elif prefixed and word.startswith("-"):
+                    # Without this the scan stops ON the option and reports no
+                    # command at all -- so a prefix listed here as understood
+                    # would exempt what it wraps from every rule that reads a
+                    # command position, which is all of them.
+                    index += 1
+                    if word in PREFIX_VALUE_FLAGS:
+                        index += 1
+                else:
+                    break
             if index < len(argv):
                 yield argv[index:]
 
@@ -1635,6 +1651,26 @@ def direct_test_program(argv):
             and re.search(r"(?:^|/)test/", argv[1])):
         return argv[1]
     return None
+
+
+# --- the scanner must see through a prefix it claims to understand -----------
+# Every rule below reads command positions through command_argvs, so a form it
+# cannot parse is not a rule that fails: it is a rule that reports nothing.
+# `env` is in COMMAND_PREFIXES exactly so the command it wraps is still scanned,
+# and its options are what a naive skip stops on. Both directions matter -- the
+# dispatch that must still be seen, and the bypass that must still be caught.
+for fragment, expected in (
+    ("env -u MAKEFLAGS make ci-verify", ["make", "ci-verify"]),
+    ("env -u MAKEFLAGS -i bash test/test_x.sh", ["bash", "test/test_x.sh"]),
+    ("make ci-verify", ["make", "ci-verify"]),
+):
+    parsed = list(command_argvs(fragment))
+    check(
+        parsed == [expected],
+        f"command_argvs({fragment!r}) reports {parsed!r}, not [{expected!r}]: a "
+        "command position the scanner cannot parse silently exempts the step "
+        "from every rule below",
+    )
 
 
 workflow_job_goals = {}

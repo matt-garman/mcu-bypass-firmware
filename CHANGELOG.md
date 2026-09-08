@@ -441,6 +441,29 @@ historical records and are not retroactively compacted by this policy.
   version, upstream sdist digest, patch-set digest. A venv with no stamp, an
   empty stamp, or one carrying a tab refuses the release.
 
+- **The first execution of the shipped programming path against real silicon is
+  on the record.** `HARDWARE_VALIDATION_LOG.md` carries a dated 2026-09-07 entry
+  under its outstanding-runs section: the part, the programmer, the device pack,
+  the image digest, the helper digest -- marked as deliberately not a released
+  helper's -- and the result digest, plus what was re-derived from the retained
+  exports independently of the helper's own arithmetic. 574 of 574 supplied
+  words programmed exactly, 449 of 449 unsupplied words erased, 1024 of 1024
+  words covered, `OSCCAL` `0x3424` unchanged and still a valid `RETLW`, and
+  `CONFIG` `0x11CC` exactly `(image & ~BG) | factory BG`.
+
+  It is recorded as field use, not as a controlled qualification, and section 2
+  of that file still declares that no controlled hardware-qualification record
+  exists for any part. The file's own definition is what decides that: no
+  written procedure exists to execute, the helper was locally modified so its
+  release checksum binding was bypassed, the part sat on a breadboard with no
+  board or output stage fitted, and nothing was measured with an instrument. A
+  run missing any required field is a field-use report however careful it was.
+
+  Two entries in the outstanding list were not merely unproven but wrong, and
+  are corrected in place rather than quietly dropped: the read and export return
+  no numeric device ID for this part under any option, and `ipecmd` does not
+  accept the image as a sealed-copy descriptor.
+
 ### Changed
 
 - **Design prose can no longer stop a release.** Six of the rules inside the
@@ -468,6 +491,92 @@ historical records and are not retroactively compacted by this policy.
   `v1.2.3`. Both now derive it from `release/README.md` through a new
   `release_current_contract_version`, which `release_validate_development_state`
   also uses in place of its own copy of the parse.
+
+### Fixed
+
+- **The PIC12F675 flashing helper works against a real MPLAB X 6.20 and a
+  powered part.** `scripts/flash-pic12f675.py` ships in every release, and until
+  this bench run no part of it had been executed against an installed `ipecmd`
+  or real silicon. Every lane passed because both fakes were modelled on the
+  helper rather than on the tool. Five defects surfaced, in the order the bench
+  hit them.
+
+  - **The version pin rejected every real `ipecmd` in existence.**
+    `probe_version()` harvested version tokens only from output lines carrying
+    the token `MPLAB`, which real `ipecmd -?` never prints: it identifies itself
+    in a header and a usage line, and states its version exactly once, as a bare
+    `Version v6.20` trailer, before exiting 50. Provenance and version are now
+    two checks instead of one, so a JVM stack trace naming the
+    `com.microchip.mplab.ipecmd` class cannot be read as the tool having run.
+
+  - **A sealed `memfd` is not a pathname a JVM can open.** A JVM canonicalises
+    the pathname it is handed, and a memfd canonicalises to `/memfd:<name>
+    (deleted)`. Handed the jar, that broke startup: real `ipecmd.jar` is a
+    manifest stub whose `Class-Path` names about two hundred sibling jars, and
+    that canonical path has no directory to resolve them against. Handed the
+    image, it cost a write -- the first real attempt erased nothing, programmed
+    nothing, and published a correct FAIL whose entire transcript was `Hex file
+    not found.` Both are now named under a real directory descriptor, the way
+    the three device reads that did succeed always were.
+
+  - **`-P` spelled the part in a form `ipecmd` rejects.** It supplies the family
+    prefix itself, so the argument now spells `12F675` through a separate
+    `PART_ARG`, while `PART` goes on naming the part in full for the evidence
+    record and for transcript matching. `FLASHING.md` already documented the
+    quirk for the PIC10F322; the PIC12F675 route had inherited the command shape
+    without the note.
+
+  - **A board that supplies no Vdd of its own could not be read at all.** The
+    helper constructed no power option and refused `--power` outright, so
+    `ipecmd` aborted on an undetectable target voltage before touching the part.
+    `--power tool` now adds `-W`, fixed for the whole transaction and recorded
+    in the reservation, so a baseline read and a write cannot happen under
+    different electrical arrangements; `external` stays the default and stays
+    the right answer for a populated board. `-W` cannot select a voltage: every
+    VDD/VPP option `ipecmd` 6.20 exposes is marked PM3-only, and a PICkit 3
+    derives that rail from USB.
+
+  - **A transaction that succeeded completely was refused for want of a device
+    ID the tool never prints.** `ipecmd` 6.20 driving a PICkit 3 prints no
+    numeric device ID for this part under any option, `-I` included. The numeric
+    identity now comes out of the full-device export, where `DEVID` sits at word
+    `0x2006` beside the `CONFIG` word the transaction already reads from there
+    -- device memory rather than tool prose, and no third spelling to guess at.
+    An export that omits the word is recorded as such rather than refused.
+
+  `--show-commands` also reported a healthy export path as `<unresolvable>`,
+  because only the descriptor component of a path under a directory descriptor
+  is a symlink. It is resolved on its own now and the remainder re-attached, and
+  the test requires every printed descriptor to resolve rather than merely that
+  an arrow appears.
+
+  One property is given up, and named where it is given up: the image can no
+  longer be made unsubstitutable between its final digest and the erase, because
+  `ipecmd` has to be able to open the file. A substitution still cannot pass --
+  the device is evaluated against the bytes recorded in the durable reservation,
+  never against the file on disk -- so `image_pinning` now reports
+  `evidence-snapshot` rather than claiming a seal the writer never sees.
+
+- **The artifact-commit gates no longer inherit build inputs from whoever
+  started them.** `release-artifact-gates` passes its gates nothing but
+  `STRICT_TOOLS=1`, and that was true of the goal and false of the run: GNU Make
+  re-passes every command-line variable to its sub-makes through `MAKEFLAGS`, so
+  the two policy pins `make-release.sh` puts on its own `make test-long` line
+  reached those gates as command-line origin from three levels up -- the origin
+  that beats the Makefile's own value everywhere.
+  `scripts/verify-release-artifact-commit.sh` now clears the inherited Make
+  environment before it dispatches, which also drops `-j` and `-k`, neither of
+  which a serially-written fail-closed gate set survives. The first real
+  `--dry-run` is what found it, in the gate that exists to check exactly this.
+
+  The fixture that missed it probed two variables by name, so an inherited value
+  was indistinguishable from a passed pin and a pin nobody had thought of was
+  invisible. It reports the *names* of every command-line-origin variable now,
+  through `$(origin)`. `test_workflow_syntax.sh` had the same shape of hole: it
+  lists `env` as a command prefix it sees through and then stopped on `env`'s own
+  options, so `env -u X make ci-verify` matched no rule at all rather than
+  failing one -- as `env -u X bash test/test_x.sh` would have walked past the
+  check on suites reached outside a goal.
 
 ## [0.9.13] - 2026-09-06
 

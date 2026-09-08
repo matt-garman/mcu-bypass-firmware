@@ -34,8 +34,10 @@
 #
 #   Those gates take no independent pins. This script used to hand them
 #   release.yml's three, and not one of the eight reads any of them; what they
-#   did do was reach the gates' own nested Makes as environment origin, which
-#   the release guard treats as unreviewed build input.
+#   did do was reach the gates' own nested Makes as unreviewed build input by
+#   the release guard's own definition. Not passing them is only half of that
+#   guarantee: the Make calls below start from a scrubbed Make environment so a
+#   pin cannot arrive through the CALLER either. See the comment on them.
 #
 # REHEARSING IT BEFORE THE SOAK
 #   --allow-dry-run is how scripts/rehearse-artifact-commit.sh runs this same
@@ -184,6 +186,26 @@ ok "HEAD is a single-parent child of the qualified source and changes only $RELE
 # The list is still read here, for the report below and so that an empty or
 # unreadable inventory is refused BEFORE anything runs, with a diagnostic that
 # names the file to fix rather than a failed sub-make.
+#
+# Both Make calls start from NO inherited Make state, because the goal's promise
+# that it passes no pins is only worth as much as the environment it runs in.
+# GNU Make re-passes every command-line variable to its sub-makes through
+# MAKEFLAGS, and one that arrives that way carries COMMAND-LINE origin in each
+# of them -- the origin that beats the Makefile's own value everywhere, and
+# exactly the unreviewed build input this goal exists not to hand its gates.
+# Nobody has to name one for it to happen. make-release.sh runs `make test-long
+# ... XT_STATIC_RAM_LIMIT=16 PIC12F675_DATA_LIMIT=48`, so every gate in that
+# subtree inherits both, and test-release-artifact-commit is one of those gates
+# -- which is where the leak surfaced, on the first release run after this goal
+# existed.
+# MAKEFLAGS carries the flags too, and a serially-written fail-closed gate set
+# survives neither -- -j reorders it, -k turns a failing gate into a passing run.
+# Scrubbed here rather than trusted to the caller: this is the last gate before
+# a tag exists, and the one place that prints a command to publish one. Cleared
+# from this script's own environment rather than wrapped around each call, so
+# that `make` stays in command position and the parity gate can still read the
+# dispatch it is checking.
+unset MAKEFLAGS MAKEOVERRIDES MFLAGS GNUMAKEFLAGS MAKELEVEL
 gates=$(make CC=: --no-print-directory print-RELEASE_ARTIFACT_GATES) \
 	|| die "cannot read RELEASE_ARTIFACT_GATES from the Makefile"
 [ -n "$gates" ] || die "RELEASE_ARTIFACT_GATES is empty"

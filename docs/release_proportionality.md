@@ -311,13 +311,15 @@ discovered by an operator who set a day aside.
 | # | Increment | Recovers |
 |---|-----------|----------|
 | 1 | current-fact rules split out of the release path (**done**) | a release that cannot be stopped by design prose |
-| 2 | staging rehearsal before the soak | the post-soak failure class, at seconds of cost |
-| 3 | soak attestation and reuse | the redundant soak; a lost release can re-use its own soak |
+| 2 | staging rehearsal before the soak (**done**) | the post-soak failure class, at seconds of cost |
+| 3 | soak attestation and reuse (**done**) | the redundant soak; a lost release can re-use its own soak |
 
-Increment 1 touched one file and removed no assurance. Increment 2 is
-mechanical and pairs with `docs/ci_parity.md` Part 4. Increment 3 is the only
-one carrying a real design decision, and the only one that changes what a
-release attests.
+All three have landed. Increment 1 touched one file and removed no assurance.
+Increment 2 was mechanical, and paired with `docs/ci_parity.md` Part 4, which
+carried the same rehearsal past the staging to the artifact commit the tag
+actually names. Increment 3 carried the only real design decision, and is the
+only one that changed what a release attests: `SOAK_KEY` records what a soak
+result is valid for, and `--reuse-soak` is what that record buys.
 
 ## What this does not do
 

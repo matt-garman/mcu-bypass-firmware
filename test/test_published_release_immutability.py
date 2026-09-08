@@ -150,6 +150,9 @@ IMAGE_CONTINUITY = {
     "v0.9.12": (21, 0, "a documentation, test and release-tooling release: its "
                        "firmware source changes are comments and compile-time "
                        "guards that generate no code, so no image changed"),
+    "v0.9.13": (21, 0, "a release-tooling and documentation release: nothing "
+                       "under src/ changed at all, so all 21 images were "
+                       "republished byte for byte"),
 }
 
 

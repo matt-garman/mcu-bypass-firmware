@@ -98,10 +98,19 @@ release-artifact-gates:
 	$(if $(strip $(RELEASE_ARTIFACT_GATES)),,$(error RELEASE_ARTIFACT_GATES is empty))
 	$(MAKE) $(RELEASE_ARTIFACT_GATES) STRICT_TOOLS=1
 
+# PINS reports the NAMES of every command-line variable that reached the gate
+# other than the one the goal owns. Reporting names rather than the values of
+# two variables chosen in advance is what makes the assertion complete: a pin
+# nobody thought to probe for is still reported, by name, the day it is added.
+# `origin` is the distinction that matters -- a caller's exported build input is
+# ENVIRONMENT origin and no business of this gate, while anything the dispatch
+# put on a command line, directly or re-passed through MAKEFLAGS, is COMMAND
+# LINE and is exactly what must not be here. The -% filter drops make's internal
+# -*-command-variables-*- bookkeeping, which is not a pin anyone passed.
 gate-one gate-two:
-	@printf '%s STRICT_TOOLS=%s PINS=[%s%s]\n' \
-		$@ "$(STRICT_TOOLS)" "$(XT_STATIC_RAM_LIMIT)" \
-		"$(PIC12F675_DATA_LIMIT)" >> $(ARTIFACT_FIXTURE_STATE)/gates.log
+	@printf '%s STRICT_TOOLS=%s PINS=[%s]\n' $@ "$(STRICT_TOOLS)" \
+		"$(strip $(foreach v,$(.VARIABLES),$(if $(filter command line,$(origin $(v))),$(filter-out STRICT_TOOLS -%,$(v)))))" \
+		>> $(ARTIFACT_FIXTURE_STATE)/gates.log
 	@test ! -f $(ARTIFACT_FIXTURE_STATE)/gates.fail
 
 print-%:
@@ -158,9 +167,36 @@ grep -q '^gate-two ' "$state/gates.log" \
 	|| fail "not every gate in RELEASE_ARTIFACT_GATES ran"
 # The empty PINS field is an assertion, not an accident. The script used to hand
 # these gates release.yml's independent pins; none of the eight reads one, and
-# they reached the gates' own nested Makes as environment origin -- unreviewed
-# build input by the release guard's own definition. Passing them again must be
-# a deliberate act that fails here first.
+# they reached the gates' own nested Makes as unreviewed build input by the
+# release guard's own definition. Passing them again must be a deliberate act
+# that fails here first.
+checks=$((checks + 3))
+
+# --- nor may a pin arrive through the CALLER ---------------------------------
+# The goal passing no pins is half the guarantee; the other half is that none
+# arrives through the environment this script was started in. That half was
+# missing. GNU Make re-passes every command-line variable to its sub-makes
+# through MAKEFLAGS, so a release -- which runs `make test-long ...
+# XT_STATIC_RAM_LIMIT=16 PIC12F675_DATA_LIMIT=48` -- handed both to these gates
+# as COMMAND-LINE origin from three levels up, and a release is the one caller
+# that always has them set. The first real `make-release.sh --dry-run` failed on
+# the assertion above for exactly that reason, half an hour into the run.
+#
+# The build inputs are exported here as well, and must NOT be reported: those
+# are ENVIRONMENT origin, which is the gates' own business. Clearing them would
+# be the wrong repair -- it would leave the MAKEFLAGS channel open and make this
+# case pass whether or not the dispatch was scrubbed.
+setup_fixture
+output=$(
+	export XT_STATIC_RAM_LIMIT=16 PIC12F675_DATA_LIMIT=48
+	export MAKEFLAGS=" -- XT_STATIC_RAM_LIMIT=16 PIC12F675_DATA_LIMIT=48"
+	export MAKELEVEL=2
+	run_verify "$version"
+) || fail "a publishable artifact commit was refused under a release's own Make environment: $output"
+grep -q '^gate-one STRICT_TOOLS=1 PINS=\[\]$' "$state/gates.log" \
+	|| fail "an inherited command-line variable reached the gates: $(cat "$state/gates.log")"
+grep -q '^gate-two STRICT_TOOLS=1 PINS=\[\]$' "$state/gates.log" \
+	|| fail "an inherited command-line variable reached the gates: $(cat "$state/gates.log")"
 checks=$((checks + 3))
 
 # --- the tree under test must be the tree the tag would name ----------------
