@@ -8,56 +8,44 @@
 #   order, exactly what .github/workflows/ci.yml runs on a push to main, so a
 #   clean pass here means the CI matrix will be green.
 #
-# CI-JOB MAPPING (.github/workflows/ci.yml)
-#   preflight     -> validate the workflow FILES (an unparseable ci.yml fails
-#                    the whole matrix before any job starts, and no local job
-#                    can show that), then assert EVERY toolchain present: the
-#                    host/AVR tools (unconditional -- no --skip covers them),
-#                    then the PIC and ATtiny202 toolchains. See PREFLIGHT below.
-#                    CI asserts inside each job, but CI's jobs run in PARALLEL;
-#                    a serial local run must not hide a missing toolchain behind
-#                    the jobs that happen to precede it.
-#   pic           -> make ci-pic           (all three parts, five Make graphs:
-#                                            the 10F322 and 10F320 pre-hardware
-#                                            gates and their fail-closed libgpsim
-#                                            target aggregates, then the 12F675
-#                                            pair sharing one retained
-#                                            hash-qualified matrix. The Makefile
-#                                            documents what each covers, next to
-#                                            the commands that run them; this
-#                                            script only chooses which XC8/DFP
-#                                            installation they point at.)
-#   build-matrix  -> make ci-build-classic CI_CLASSIC_PART=<part>, once per part
-#                                           (every variant builds for every
-#                                            release-supported classic AVR; each
-#                                            prints flash/RAM and records it.
-#                                            The part list comes from the
-#                                            Makefile's CI_CLASSIC_PARTS, not
-#                                            from a copy here)
-#   attiny202     -> make ci-attiny202-build
-#                                           (fuses + smoke + build/budget +
-#                                            cppcheck/MISRA + coil-pulse width
-#                                            oracle, then the assertion that
-#                                            every declared image exists; needs
-#                                            the vendored ATtiny_DFP only)
-#                    make ci-attiny202-target
-#                                           (fail-closed yasimavr functional +
-#                                            fault + lock-step aggregate, then
-#                                            the 5-min soak smoke with its
-#                                            per-variant PASS count; needs the
-#                                            patched yasimavr venv)
-#                    The target aggregate validates every component PASS count;
-#                    ci-attiny202-target independently counts the soak results.
-#   verify        -> make test              ) covered together by the local
-#   stress        -> make stress            ) `make test-long` invocation, which
-#                                             combines the fast gates, FULL_*
-#                                             domains, and one mutation run.
-#                    Hosted mutation runs in `pic`; local push mode folds that
-#                    gate into test-long instead of repeating the PIC setup.
+# WHAT RUNS, AND IN WHAT ORDER
+#   The inventory is NOT here. The Makefile's CI_LOCAL_SEQUENCE names the ci-*
+#   goals this script invokes and the order it invokes them in; CI_LOCAL_FOLDED
+#   names the ones a single local `make test-long` covers instead. Make refuses
+#   to parse unless those two lists PARTITION CI_GOALS, so a gate ci.yml runs
+#   cannot exist without a local counterpart -- and this script refuses to start
+#   unless every sequenced goal has a handler below, and every handler is
+#   sequenced. What each goal covers is documented in the Makefile, beside the
+#   commands that run it; a second description here is what used to go stale.
+#
+#   What this script owns is only what a ci-* goal deliberately does not: WHICH
+#   toolchain installation to point a goal at, WHICH independently-pinned policy
+#   values to hand it, and which goals a --skip-* flag suppresses.
+#
+#   Three things run around that sequence:
+#     PREFLIGHT   local-only, and first. Validate the workflow FILES (an
+#                 unparseable ci.yml fails the whole matrix before any job
+#                 starts, and no local job can show that), then assert EVERY
+#                 toolchain present -- host/AVR unconditionally, then PIC and
+#                 ATtiny202. CI asserts inside each job, but CI's jobs run in
+#                 PARALLEL; a SERIAL local run must not hide a missing toolchain
+#                 behind the jobs that happen to precede it.
+#     clean       match CI's fresh checkout (suppressed by --no-clean).
+#     the fold    one `make test-long` after the sequence, covering
+#                 CI_LOCAL_FOLDED -- hosted `verify`, `stress`, and the `pic`
+#                 job's mutation step. Running those three goals separately
+#                 would re-run the shared host suite three times for no added
+#                 evidence. Under --pr it is `make ci-verify` alone.
+#
+#   The sequence ORDER is a purely local concern with no hosted counterpart:
+#   hosted jobs run in parallel, so ci.yml's order carries no meaning. Only one
+#   constraint is real -- the ATtiny202 build half must precede the half that
+#   needs the simulator -- and the rest is the order this script has always run
+#   them in, preserved so a converted mirror is comparable to the one before it.
 #
 #   `stress` and the mutation step are gated OFF pull requests in CI
-#   (push/schedule/dispatch only). Use --pr to mirror a PR run: `make test`
-#   instead of the combined local `make test-long`.
+#   (push/schedule/dispatch only). Use --pr to mirror a PR run: the hosted
+#   verify job's own goal, `make ci-verify`, instead of the combined fold.
 #
 #   The `release` workflow (tag-triggered reproducibility gate) is a SEPARATE
 #   pipeline and is intentionally NOT reproduced here -- use scripts/make-release.sh.
@@ -66,8 +54,8 @@
 #   scripts/ci-local.sh [options]
 #   options:
 #     --pr           mirror a pull-request run: skip exhaustive stress and the
-#                    conditional mutation gate; run `make test` instead of
-#                    `make test-long`
+#                    conditional mutation gate; run `make ci-verify` instead of
+#                    the combined `make test-long` fold
 #     --no-clean     skip the initial `make clean` (faster, but not a true
 #                    clean-checkout reproduction of CI)
 #     --skip-pic     skip the PIC (XC8/gpsim) job -- ALL THREE parts, 10F322,
@@ -405,7 +393,87 @@ assert_host_toolchain() {
 }
 
 # ----------------------------------------------------------------------------
-# The pipeline -- same order CI runs the jobs
+# One handler per goal in the Makefile's CI_LOCAL_SEQUENCE, named goal_<goal>
+# with dashes as underscores. The dispatcher below runs the sequence Make
+# declares and checks the correspondence in BOTH directions before running
+# anything, so neither half can go quiet: a sequenced goal with no handler would
+# be absent from a run that still printed "Safe to push", and a handler for a
+# goal no longer sequenced is a gate nobody calls.
+#
+# A handler supplies exactly what a ci-* goal refuses to assume -- the toolchain
+# installation and the independently pinned policy values -- and applies the
+# --skip-* policy. It never re-states what the goal runs; that lives in the
+# Makefile, next to the commands.
+#
+# Each handler takes its own goal name as $1 so a skip diagnostic can name the
+# gate that did not run rather than the job it belongs to.
+# ----------------------------------------------------------------------------
+
+# Toolchain asserted in PREFLIGHT, which also resolved the four selector paths
+# this goal requires. The same `make ci-pic` the hosted job runs -- one goal, so
+# local and CI cannot drift into running different things under the same name;
+# the Makefile owns the five-process boundary and the strictness, and this
+# script owns only WHICH installation to point them at.
+#
+# Locally there is no independent source of truth for those paths (CI has one:
+# the installer wrote them), so the pins below echo back the environment-or-
+# default this script documents. That satisfies ci-pic's command-line
+# requirement without pretending to cross-check it.
+goal_ci_pic() {
+	if [ "$SKIP_PIC" -eq 1 ]; then
+		warn "--skip-pic: NOT running $1 (any of the three parts); this does not mirror CI."
+		return 0
+	fi
+	run_step "pic job: make ci-pic" make ci-pic \
+		PIC_CC="$PIN_PIC_CC" PIC_DFP="$PIN_PIC_DFP" \
+		PIC10F320_CC="$PIN_PIC10F320_CC" \
+		PIC10F320_DFP="$PIN_PIC10F320_DFP" \
+		PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
+}
+
+# One row per part, exactly as the hosted matrix runs them -- and the parts come
+# from the Makefile rather than from a list here, so a new classic AVR part is
+# covered locally the moment it is declared. `make print-...` is issued between
+# steps: a complete Make invocation holds the worktree lock, so a query made
+# while another make is in flight would block rather than answer.
+goal_ci_build_classic() {
+	local parts part
+	parts=$(make -s --no-print-directory print-CI_CLASSIC_PARTS) \
+		|| die "could not read CI_CLASSIC_PARTS from the Makefile"
+	[ -n "$parts" ] || die "CI_CLASSIC_PARTS is empty; the build matrix would cover nothing"
+	for part in $parts; do
+		run_step "build-matrix: make ci-build-classic ($part)" \
+			make ci-build-classic CI_CLASSIC_PART="$part"
+	done
+}
+
+# The DFP half. Sequenced before the target half, matching the hosted job, so a
+# broken image is found before anything that needs the simulator.
+goal_ci_attiny202_build() {
+	if [ "$SKIP_ATTINY202" -eq 1 ]; then
+		warn "--skip-attiny202: NOT running $1; this does not mirror CI."
+		return 0
+	fi
+	run_step "attiny202 job: make ci-attiny202-build" make ci-attiny202-build \
+		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
+		XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
+}
+
+# The yasimavr half. The soak's per-variant PASS count used to be counted here
+# by a local helper; it now lives in ci-attiny202-target, which is the point --
+# the count is a decision about what the gate proves, and a local copy of it
+# could disagree with the hosted one while both stayed green.
+goal_ci_attiny202_target() {
+	if [ "$SKIP_ATTINY202" -eq 1 ]; then
+		warn "--skip-attiny202: NOT running $1; this does not mirror CI."
+		return 0
+	fi
+	run_step "attiny202 job: make ci-attiny202-target" make ci-attiny202-target \
+		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
+}
+
+# ----------------------------------------------------------------------------
+# The pipeline -- preflight, then the sequence Make declares, then the fold
 # ----------------------------------------------------------------------------
 if [ "$PR_MODE" -eq 1 ]; then
 	section "ci-local: PULL-REQUEST mode (skips the exhaustive/mutation stress job)"
@@ -419,6 +487,51 @@ fi
 # checks the PIC side up front; this extends the same guarantee to the host/AVR
 # gates (cppcheck, cbmc, python3, ...) so a local green truly means "all ran".
 export STRICT_TOOLS=1
+
+# ----------------------------------------------------------------------------
+# PLAN -- settle what this run will do before it does any of it.
+#
+# Both of the checks below are about the run being COHERENT, not about the
+# toolchain, so they come before even the preflight: a sequence naming a goal
+# with no handler, or a fold that would duplicate a sequenced goal, is a defect
+# in the mirror itself, and finding it after an hour of gates helps nobody.
+# ----------------------------------------------------------------------------
+# Reading the sequence rather than restating it means a ci-* goal that ci.yml
+# gained is either invoked by this run or explicitly folded into test-long --
+# the Makefile refuses to parse if it is neither, so this query cannot even
+# answer while that claim is false.
+sequence=$(make -s --no-print-directory print-CI_LOCAL_SEQUENCE) \
+	|| die "could not read CI_LOCAL_SEQUENCE from the Makefile"
+[ -n "$sequence" ] || die "CI_LOCAL_SEQUENCE is empty; this run would mirror no CI job at all"
+
+# Both directions, before anything runs. Checking only that each sequenced goal
+# has a handler would let a handler outlive the goal it serves; checking only
+# the reverse would let a newly sequenced goal be skipped in silence.
+sequenced_fns=""
+for goal in $sequence; do
+	fn="goal_${goal//-/_}"
+	declare -F "$fn" >/dev/null \
+		|| die "CI_LOCAL_SEQUENCE names $goal but this script defines no $fn: the local mirror would not run a gate CI runs, while still reporting success."
+	sequenced_fns="$sequenced_fns $fn"
+done
+while read -r fn; do
+	case " $sequenced_fns " in
+		*" $fn "*) ;;
+		*) die "$fn is defined here but CI_LOCAL_SEQUENCE does not name its goal: a handler nothing calls runs no gate." ;;
+	esac
+done < <(declare -F | sed -n 's/^declare -f \(goal_[A-Za-z0-9_]*\)$/\1/p')
+
+# The fold: the goals CI_LOCAL_FOLDED names are covered by ONE local
+# invocation, not invoked one at a time. `ci-verify` is spelled out at the tail
+# of this script because PR mode runs only that one, so assert it is on the
+# folded side -- were it moved into CI_LOCAL_SEQUENCE it would run twice per
+# run, and the second time would be the one nobody noticed.
+folded=$(make -s --no-print-directory print-CI_LOCAL_FOLDED) \
+	|| die "could not read CI_LOCAL_FOLDED from the Makefile"
+case " $folded " in
+	*" ci-verify "*) ;;
+	*) die "ci-verify is not in CI_LOCAL_FOLDED ($folded); the fold below would duplicate a sequenced goal." ;;
+esac
 
 # ----------------------------------------------------------------------------
 # PREFLIGHT -- assert every toolchain BEFORE any job runs.
@@ -456,56 +569,10 @@ fi
 
 [ "$DO_CLEAN" -eq 1 ] && run_step "make clean (match CI fresh checkout)" make clean
 
-if [ "$SKIP_PIC" -eq 1 ]; then
-	warn "--skip-pic: NOT running the PIC job (any of the three parts); this does not mirror CI."
-else
-	# Toolchain asserted in PREFLIGHT above, which also resolved the four
-	# selector paths this goal requires. The same `make ci-pic` the hosted job
-	# runs -- one goal, so local and CI cannot drift into running different
-	# things under the same name; the Makefile owns the five-process boundary
-	# and the strictness, and this script owns only WHICH installation to
-	# point them at.
-	#
-	# Locally there is no independent source of truth for those paths (CI has
-	# one: the installer wrote them), so the pins below echo back the
-	# environment-or-default this script documents. That satisfies ci-pic's
-	# command-line requirement without pretending to cross-check it.
-	run_step "pic job: make ci-pic" make ci-pic \
-		PIC_CC="$PIN_PIC_CC" PIC_DFP="$PIN_PIC_DFP" \
-		PIC10F320_CC="$PIN_PIC10F320_CC" \
-		PIC10F320_DFP="$PIN_PIC10F320_DFP" \
-		PIC12F675_DATA_LIMIT="$CI_PIC12F675_DATA_LIMIT"
-fi
-
-# One row per part, exactly as the hosted matrix runs them -- and the parts
-# come from the Makefile rather than from a list here, so a new classic AVR
-# part is covered locally the moment it is declared. `make print-...` is issued
-# between steps: a complete Make invocation holds the worktree lock, so a query
-# made while another make is in flight would block rather than answer.
-CLASSIC_PARTS=$(make -s --no-print-directory print-CI_CLASSIC_PARTS)
-[ -n "$CLASSIC_PARTS" ] || die "CI_CLASSIC_PARTS is empty; the build matrix would cover nothing"
-for part in $CLASSIC_PARTS; do
-	run_step "build-matrix: make ci-build-classic ($part)" \
-		make ci-build-classic CI_CLASSIC_PART="$part"
+# The sequence, validated before anything ran (see PLAN, above).
+for goal in $sequence; do
+	"goal_${goal//-/_}" "$goal"
 done
-
-if [ "$SKIP_ATTINY202" -eq 1 ]; then
-	warn "--skip-attiny202: NOT running the ATtiny202 job; this does not mirror CI."
-else
-	# Toolchain asserted in PREFLIGHT above. The same two goals the hosted job
-	# runs, in the same order: the DFP half first, so a broken image is found
-	# before anything that needs the simulator, then the venv half.
-	#
-	# The soak's per-variant PASS count used to be counted here by a local
-	# helper. It now lives in ci-attiny202-target, which is the point: the
-	# count is a decision about what the gate proves, and a local copy of it
-	# could disagree with the hosted one while both stayed green.
-	run_step "attiny202 job: make ci-attiny202-build" make ci-attiny202-build \
-		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT" \
-		XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
-	run_step "attiny202 job: make ci-attiny202-target" make ci-attiny202-target \
-		XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
-fi
 
 if [ "$PR_MODE" -eq 1 ]; then
 	run_step "verify job: make ci-verify" make ci-verify

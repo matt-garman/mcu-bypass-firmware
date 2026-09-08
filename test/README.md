@@ -504,8 +504,8 @@ rather than a built image. They need no toolchain and are members of `make test`
 | `test-variant-selector-guard` | Every lane rejects a bad single-variant selector instead of reporting a missing tool. |
 | `test-analyze-variant-guard` | The `analyze-*` targets reject a bad `VARIANTS=` request instead of silently analyzing less. |
 | `test-clean-contract` | `clean` and `clean-tests` remove everything the Makefile knows how to build. |
-| `test-workflow-syntax` | The GitHub workflow YAML parses, and its job map and per-part PIC lanes agree with `ci-local`. |
-| `test-ci-local-routing` | Local CI routes each skip option to the commands it claims to run. |
+| `test-workflow-syntax` | The GitHub workflow YAML parses, every gate step invokes a declared Make goal, and those goals have local counterparts. |
+| `test-ci-local-routing` | Local CI executes the Make-declared goal sequence, and routes each skip option to the commands it claims to run. |
 | `test-build-serialization` | Independent top-level Make and release invocations sharing one worktree cannot enter the shared critical section concurrently. |
 | `test-strict-tools` | The skip-versus-strict policy holds for the host lanes and all three PIC parts, so `STRICT_TOOLS=1` really converts every clean skip into a failure. |
 | `test-avr-program-order` | Every AVR `*-program` goal builds and validates its image before the first programmer invocation, then writes fuses before flash. |

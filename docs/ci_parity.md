@@ -69,6 +69,25 @@ Whatever reads that inventory must pass `--no-print-directory`: a sub-make's
 variable query. `scripts/verify-release-artifact-commit.sh` already reads
 `RELEASE_ARTIFACT_GATES` that way.
 
+That landed with one variable more than planned, and one refusal. A local push
+does not invoke every CI goal: it covers `verify`, `stress` and the mutation
+gate with a single `make test-long`, because those three re-aggregate one
+shared host suite. So the sequence has a complement, `CI_LOCAL_FOLDED`, and the
+two must PARTITION `CI_GOALS`. Deriving the folded half as "whatever is left
+over" would have been the wrong default -- it silently assumes a NEW goal is
+already covered, which is the drift being removed -- so both lists are declared
+and the Makefile refuses to PARSE when they disagree with `CI_GOALS`. A refusal
+rather than a check, because the script reads those lists through
+`make print-...`: it cannot run, or even ask, while the claim is false.
+
+The script then owns one thing per goal, a handler supplying the toolchain
+paths and pins Make deliberately does not own, and checks the correspondence in
+both directions before any gate runs. Both directions are load-bearing and were
+confirmed by deletion: without the forward check a sequence naming an unhandled
+goal runs every other gate first and dies an hour later on `command not found`;
+without the reverse check a handler outlives the goal it served and nothing
+notices.
+
 **The pattern, established on `verify` and `stress`.** Converting a job is
 three edits that must land together:
 
@@ -211,9 +230,12 @@ with a duplicate-key-safe loader and already knows that `ci-local.sh` mirrors
 3. Every variable name passed on a `ci-*` invocation is in that goal's declared
    allowlist, and every pin the goal requires is passed.
 4. Every goal in `$(CI_GOALS)` appears in some workflow step or is declared
-   local-only (`ci-preflight`).
+   local-only (`ci-preflight`). *(Done in increment 2: the set of goals `ci.yml`
+   invokes is required to equal `CI_GOALS` exactly, in both directions.)*
 5. `ci-local.sh` runs every `ci-*` goal `ci.yml` uses; the release recipe runs
-   every one `release.yml` uses.
+   every one `release.yml` uses. *(The `ci-local.sh` half is done in increment
+   2, by the partition refusal plus the handler correspondence, so what remains
+   here is the release recipe.)*
 
 Tool policy follows the existing file: PyYAML absent skips cleanly, and fails
 under `STRICT_TOOLS=1`, which `ci-local.sh` sets.
@@ -309,7 +331,7 @@ shape.
 | 1 | `CI_GOALS` + `ci-*` goals as exact wrappers of today's commands (**done**) | nothing yet -- pure restructure |
 | 1b | every `ci.yml` job's step pointed at its goal, with `test_workflow_syntax.sh`'s detection moved in the same change (**done**) | a build matrix that no longer covers the parts Make declares |
 | 1c | `release.yml` likewise, sharing `ci-pic` and adding `RELEASE_GOALS` for the work release does differently (**done**) | a release rebuild that skips the clean, or stops re-running CI's own PIC gate |
-| 2 | `ci-local.sh` reads the sequence from Make | drift between the local mirror and its own header |
+| 2 | `ci-local.sh` reads the sequence from Make (**done**) | a CI goal with no local counterpart; a local handler for a gate CI retired |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |
 | 5 | `--dry-run` builds the artifact-commit shape | the same, before the soak rather than after |

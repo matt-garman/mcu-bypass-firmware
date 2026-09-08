@@ -3342,6 +3342,51 @@ CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny20
 RELEASE_GOALS = release-rebuild release-test-long release-attiny202
 WORKFLOW_GOALS = $(CI_GOALS) $(RELEASE_GOALS)
 
+# --- what the LOCAL mirror does with those goals -----------------------------
+# scripts/ci-local.sh runs the CI goals in THIS order. Declaring the order here
+# rather than in that script's comment header is the whole of this increment:
+# the script EXECUTES this list -- a goal with no handler, or a handler naming a
+# goal this list does not carry, aborts the run -- so the local mirror can no
+# longer describe an inventory it does not run.
+#
+# The order is NOT CI_GOALS' order, and cannot be derived from it. Hosted jobs
+# run in PARALLEL, so the order they are declared in means nothing. Exactly one
+# ordering constraint is real: a serial local run must put the ATtiny202 build
+# half before the half that needs the simulator. The rest is the order
+# scripts/ci-local.sh has always run them in, preserved deliberately so that
+# moving the list here changed where it lives and not what it says.
+CI_LOCAL_SEQUENCE = ci-pic ci-build-classic ci-attiny202-build ci-attiny202-target
+
+# The goals a local push covers through ONE `make test-long` rather than
+# invoking directly: that target already combines the fast gates, the FULL_*
+# domains and a mutation run, so invoking the three separately would re-run the
+# shared host suite three times for no added evidence.
+#
+# Declared, not derived as "whatever is left over". Leftovers-are-covered is
+# exactly the drift this increment removes: a NEW ci-* goal must be placed by
+# someone who decided where it belongs, and until then nothing here runs at all.
+CI_LOCAL_FOLDED = ci-verify ci-stress ci-mutation
+
+# Hard refusal, at parse time, on every make: the two lists above must PARTITION
+# CI_GOALS. A goal in neither has no local counterpart, which is the exact claim
+# "a clean local pass means CI will be green" depends on; a goal in both is
+# ambiguous; a name in neither direction's CI_GOALS is a typo that would leave a
+# gate unrun. Refusing here rather than warning inside the script means the
+# mirror cannot be run -- or even QUERIED, since it reads these through
+# `make print-...` -- while the claim is false.
+_CI_LOCAL_UNPLACED := $(filter-out $(CI_LOCAL_SEQUENCE) $(CI_LOCAL_FOLDED),$(CI_GOALS))
+_CI_LOCAL_UNKNOWN := $(filter-out $(CI_GOALS),$(CI_LOCAL_SEQUENCE) $(CI_LOCAL_FOLDED))
+_CI_LOCAL_AMBIGUOUS := $(filter $(CI_LOCAL_SEQUENCE),$(CI_LOCAL_FOLDED))
+ifneq ($(strip $(_CI_LOCAL_UNPLACED)),)
+$(error CI goal(s) with no local counterpart: $(_CI_LOCAL_UNPLACED); add each to CI_LOCAL_SEQUENCE (scripts/ci-local.sh invokes it, and needs a handler for it) or to CI_LOCAL_FOLDED (one local `make test-long` already covers it))
+endif
+ifneq ($(strip $(_CI_LOCAL_UNKNOWN)),)
+$(error CI_LOCAL_SEQUENCE/CI_LOCAL_FOLDED name(s) that CI_GOALS does not declare: $(_CI_LOCAL_UNKNOWN))
+endif
+ifneq ($(strip $(_CI_LOCAL_AMBIGUOUS)),)
+$(error CI goal(s) listed as both locally invoked and folded into test-long: $(_CI_LOCAL_AMBIGUOUS))
+endif
+
 # Non-emptiness is NOT the test. Every pin below has a default in this file, so
 # a goal that only checked for a value would pass on the default -- which is the
 # exact failure the two-value scheme exists to catch. $(origin) is what

@@ -664,7 +664,27 @@ COMPUTED_KEYS = {
     # `for v in $CLASSIC_VARIANTS_SUPPORTED; do ... print-macro_"$v"; done`
     "macro_": "CLASSIC_VARIANTS_SUPPORTED",
 }
-COMPUTED_TAIL = ('"', "'", "$", "{")
+COMPUTED_TAIL = ("$", "{")
+COMPUTED_QUOTE = ('"', "'")
+
+
+def is_computed_tail(line, end):
+    """True if the harvested name runs straight into a shell expansion.
+
+    `$` and `{` follow the name directly (`mkv part_$n`). A quote is ambiguous
+    on its own: in shell it OPENS the expansion (`mkv part_"$n"`), but in Python
+    it CLOSES a string literal (`"print-CI_GOALS", override`) -- and treating
+    the second as computed reports a perfectly literal query as a name this
+    harvester cannot expand, which is a hard failure demanding a COMPUTED_KEYS
+    entry for a prefix that does not exist. So a quote counts only when the
+    expansion it was supposed to introduce actually follows it.
+    """
+    tail = line[end:end + 1]
+    if tail in COMPUTED_TAIL:
+        return True
+    if tail in COMPUTED_QUOTE:
+        return line[end + 1:end + 2] in COMPUTED_TAIL
+    return False
 
 # Documents whose job is to record what names USED to be. A changelog naming a
 # removed variable is the changelog working correctly.
@@ -718,7 +738,7 @@ def harvest_reads():
                 for m in pattern.finditer(line):
                     where = f"{rel}:{lineno}"
                     per_spelling[spelling] += 1
-                    if line[m.end():m.end() + 1] in COMPUTED_TAIL:
+                    if is_computed_tail(line, m.end()):
                         computed.setdefault(m.group(1), []).append(where)
                     else:
                         found.setdefault(m.group(1), []).append(where)
@@ -863,9 +883,20 @@ def check_axis_a():
                  "as a literal name")
     line = 'AVRDUDE_PART_X5[$n]=$(mkv part_"$n")'
     m = MKV_QUERY.search(line)
-    if not m or line[m.end():m.end() + 1] not in COMPUTED_TAIL:
+    if not m or not is_computed_tail(line, m.end()):
         sys.exit("FAIL: negative case -- `mkv part_\"$n\"` is not detected as a "
                  "computed name")
+    checks += 1
+
+    # (e) the mirror image: a quote that CLOSES a literal is not an expansion.
+    # test_workflow_syntax.sh builds `make print-CI_GOALS <override>` argv lists
+    # exactly this way, and calling those computed would demand a COMPUTED_KEYS
+    # entry for a prefix that is really a complete, checkable variable name.
+    line = '["make", "-s", "print-CI_GOALS", override]'
+    m = PRINT_QUERY.search(line)
+    if not m or is_computed_tail(line, m.end()):
+        sys.exit("FAIL: negative case -- a quote closing a string literal is "
+                 "treated as a computed name")
     checks += 1
 
     return checks, len(found)

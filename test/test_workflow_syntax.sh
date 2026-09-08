@@ -18,10 +18,10 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 # WHY THIS EXISTS
 #   Nothing else in the repo ever PARSES .github/workflows/*.yml. The release
 #   regressions grep release.yml for fixed strings, which succeeds happily on a
-#   file GitHub cannot load at all, and ci-local.sh re-implements the job order
-#   in bash from a comment header rather than reading ci.yml. So a workflow
-#   could be syntactically invalid -- the whole matrix refusing to start with
-#   "Invalid workflow file" -- while every local gate reported green. That is
+#   file GitHub cannot load at all, and ci-local.sh reproduces the jobs in bash
+#   without ever reading ci.yml. So a workflow could be syntactically invalid --
+#   the whole matrix refusing to start with "Invalid workflow file" -- while
+#   every local gate reported green. That is
 #   exactly what happened: an unquoted job `name:` containing ": " parsed as a
 #   nested mapping and took the entire CI run down, after a full clean
 #   ci-local.sh pass.
@@ -64,11 +64,6 @@ wf_dir = os.path.join(root, ".github", "workflows")
 # globbed: a glob turns a renamed or deleted workflow into "zero files, all
 # valid", which is the same fail-open shape this test exists to close.
 REQUIRED = ("ci.yml", "release.yml")
-
-# ci-local.sh mirrors ci.yml's jobs, plus its own local-only steps. Anything
-# here is allowed to appear in the mapping without a matching CI job; anything
-# else in the mapping must name a real job.
-CI_LOCAL_ONLY = {"preflight"}
 
 checks = 0
 failures = []
@@ -1029,50 +1024,23 @@ for command in ("make", "git", "gpg", "PyYAML"):
         f"release.yml: release verification does not assert {command} before first use",
     )
 
-# --- ci-local.sh must stay in step with ci.yml's job list --------------------
-# ci-local.sh reproduces CI by hand, so its CI-JOB MAPPING header is the only
-# link between the two. A job added to ci.yml that nobody mirrors locally, or a
-# mapping entry naming a job that no longer exists, both mean "a clean local run
-# no longer implies a green CI run" -- the script's entire premise.
+# --- the local mirror EXECUTES the inventory ---------------------------------
+# ci-local.sh used to carry a prose CI-JOB MAPPING header, and this gate checked
+# that its entries named the same jobs ci.yml declares. That proved someone had
+# typed each job's name into a comment; it never proved anything ran. The
+# Makefile now declares CI_LOCAL_SEQUENCE (the goals the script invokes, in
+# order) and CI_LOCAL_FOLDED (the goals one local `make test-long` covers),
+# refuses to PARSE unless those two partition CI_GOALS, and the script refuses
+# to start unless every sequenced goal has a handler. The checks further down
+# close the two links that structure cannot carry on its own: that CI_GOALS is
+# exactly the set ci.yml invokes, and that the folded claim is true of Make's
+# graph. Only the file itself is needed here; the later PIC-routing and
+# resource-pin checks read these lines.
 ci_local = os.path.join(root, "scripts", "ci-local.sh")
-if check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing"):
+ci_local_present = check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing")
+if ci_local_present:
     with open(ci_local, encoding="utf-8") as fh:
         lines = fh.read().splitlines()
-
-    mapped, in_block = set(), False
-    for line in lines:
-        if line.startswith("# CI-JOB MAPPING"):
-            in_block = True
-            continue
-        if in_block:
-            # The block ends at the next header comment or the first non-comment.
-            if not line.startswith("#"):
-                break
-            if re.match(r"^# [A-Z]", line):
-                break
-            m = re.match(r"^#\s{2,}(\S+)\s+->", line)
-            if m:
-                mapped.add(m.group(1))
-
-    check(bool(mapped), "scripts/ci-local.sh: CI-JOB MAPPING block parsed as empty")
-
-    # Only meaningful once ci.yml actually loaded. Without this guard an
-    # unparseable ci.yml yields an empty job set, and every mapping entry is
-    # then reported as naming a job that does not exist -- burying the one real
-    # failure under a pile that points at the wrong file.
-    ci_doc = docs.get("ci.yml")
-    if isinstance(ci_doc, dict) and isinstance(ci_doc.get("jobs"), dict):
-        ci_jobs = set(ci_doc["jobs"])
-        for job_id in sorted(ci_jobs):
-            check(
-                job_id in mapped,
-                f"ci.yml job '{job_id}' is not in ci-local.sh's CI-JOB MAPPING",
-            )
-        for entry in sorted(mapped - CI_LOCAL_ONLY):
-            check(
-                entry in ci_jobs,
-                f"ci-local.sh maps '{entry}', which is not a job in ci.yml",
-            )
 
 # --- pin the complete PIC CI contract independently of ci-local.sh ------------
 # Set equality is not enough here: both files could lose one part together, and
@@ -1489,6 +1457,24 @@ def make_variable(name):
     return result.stdout.split() if result.returncode == 0 else []
 
 
+def reachable_set(target):
+    """Every target reachable from `target`, itself included.
+
+    Set inclusion is how the CI_LOCAL_FOLDED claim is checked: `test-long` does
+    not depend on `test`, it re-aggregates the same gates with the exhaustive
+    domains, so the question is whether it covers them, not whether it reaches
+    them.
+    """
+    pending, seen = [target], set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(make_edges.get(current, ()))
+    return seen
+
+
 def target_reaches(target, wanted):
     pending = [target]
     seen = set()
@@ -1501,6 +1487,136 @@ def target_reaches(target, wanted):
         seen.add(current)
         pending.extend(make_edges.get(current, ()))
     return False
+
+
+# --- the local mirror runs what ci.yml runs, by construction ------------------
+# Three links, none of which a comment can carry:
+#
+#   ci.yml -> CI_GOALS       every gate step invokes a declared goal, and every
+#                            declared goal is invoked by some job (below);
+#   CI_GOALS -> local        CI_LOCAL_SEQUENCE + CI_LOCAL_FOLDED partition it,
+#                            refused at Make PARSE time (proved below, by
+#                            breaking it);
+#   local -> executed        every sequenced goal has a handler in ci-local.sh
+#                            (below, and again at run time in the script).
+#
+# Chained, those make "a clean local pass means CI will be green" a property of
+# the files rather than a claim in a header.
+CI_LOCAL_SEQUENCE = makefile_goal_list("CI_LOCAL_SEQUENCE")
+CI_LOCAL_FOLDED = makefile_goal_list("CI_LOCAL_FOLDED")
+check(
+    CI_LOCAL_SEQUENCE == (
+        "ci-pic", "ci-build-classic",
+        "ci-attiny202-build", "ci-attiny202-target",
+    ),
+    f"Makefile: CI_LOCAL_SEQUENCE is {CI_LOCAL_SEQUENCE!r}, expected the "
+    "reviewed four, in the order a serial run needs them",
+)
+check(
+    CI_LOCAL_FOLDED == ("ci-verify", "ci-stress", "ci-mutation"),
+    f"Makefile: CI_LOCAL_FOLDED is {CI_LOCAL_FOLDED!r}, expected the reviewed three",
+)
+
+# The partition is enforced by a parse-time $(error), so it cannot be checked by
+# reading a value -- a broken partition produces no value at all. Break it on
+# the command line and require the refusal. Grepping the Makefile for the guard
+# would pass on a guard someone had commented out.
+def make_refuses(override):
+    result = subprocess.run(
+        ["make", "-s", "--no-print-directory", "print-CI_GOALS", override,
+         f"_MAKE_SERIAL_LOCK_HELD={worktree_id}"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    return result.returncode != 0, result.stderr
+
+
+for override, wanted in (
+    # a CI goal in neither list: the local mirror would not run it
+    ("CI_LOCAL_SEQUENCE=ci-pic", "no local counterpart"),
+    # a name in neither direction's CI_GOALS: a typo leaves a gate unrun
+    ("CI_LOCAL_FOLDED=ci-verify ci-stress ci-mutation ci-nonexistent",
+     "CI_GOALS does not declare"),
+    # both invoked and folded: the goal would run twice, or not at all
+    ("CI_LOCAL_FOLDED=ci-verify ci-stress ci-mutation ci-pic",
+     "both locally invoked and folded"),
+):
+    refused, stderr = make_refuses(override)
+    check(
+        refused and wanted in stderr,
+        f"Makefile: `make {override}` was not refused at parse time "
+        f"(expected {wanted!r}); the CI_GOALS partition is not enforced",
+    )
+
+# Every gate step in ci.yml invokes a declared CI goal, and between them the
+# jobs invoke ALL of them. Either direction failing is a hole: a job running a
+# gate directly bypasses the local mirror entirely, and a declared goal no job
+# invokes is a local run spending time on work CI does not do.
+if isinstance(ci_jobs, dict):
+    ci_yml_goals = set()
+    for job_id, job in sorted(ci_jobs.items()):
+        job_goals = set()
+        for step in (job.get("steps") or []) if isinstance(job, dict) else []:
+            if not isinstance(step, dict) or not isinstance(step.get("run"), str):
+                continue
+            for tokens in shell_tokens(step["run"]):
+                parsed = make_command(tokens)
+                if parsed is not None:
+                    job_goals.update(parsed[0])
+        check(
+            job_goals and job_goals <= set(CI_GOALS),
+            f"ci.yml job '{job_id}' invokes {sorted(job_goals)!r}, which is not "
+            "a non-empty subset of CI_GOALS: a gate reached outside a declared "
+            "goal has no local counterpart",
+        )
+        ci_yml_goals |= job_goals
+    check(
+        ci_yml_goals == set(CI_GOALS),
+        f"ci.yml invokes {sorted(ci_yml_goals)!r} but CI_GOALS declares "
+        f"{sorted(CI_GOALS)!r}",
+    )
+
+# "One `make test-long` covers these" is a claim about Make's graph. Ask it.
+# Not `test-long reaches ci-verify's target` -- it does not, and must not: `test`
+# and `test-long` are sibling aggregates over overlapping gate sets, not one
+# built on the other. The claim that matters is COVERAGE: everything a folded
+# goal's target pulls in is also pulled in by test-long. A gate that `test`
+# runs and `test-long` does not would be a gate CI runs and a local push
+# silently never does.
+test_long_covers = reachable_set("test-long")
+for goal in CI_LOCAL_FOLDED:
+    for goals, _, _ in ci_goal_commands(goal):
+        for invoked in goals:
+            uncovered = sorted(reachable_set(invoked) - test_long_covers - {invoked})
+            # Name a handful, not all of them: dropping one shared list from
+            # test-long uncovers dozens at once, and a 70-item line buries the
+            # one fact that matters -- which goal stopped being covered.
+            shown = ", ".join(uncovered[:5])
+            if len(uncovered) > 5:
+                shown += f", and {len(uncovered) - 5} more"
+            check(
+                not uncovered,
+                f"Makefile: {goal} runs '{invoked}', which pulls in {shown} "
+                "that test-long does not; CI_LOCAL_FOLDED claims one local "
+                "test-long covers it",
+            )
+
+# ci-local.sh defines exactly one handler per sequenced goal, and no others. The
+# script checks this too, at run time; here it fails in `make test`, before
+# anyone waits an hour to discover a gate was quietly absent.
+if ci_local_present:
+    handlers = set(re.findall(r"(?m)^goal_([A-Za-z0-9_]+)\(\) \{$", "\n".join(lines)))
+    expected_handlers = {goal.replace("-", "_") for goal in CI_LOCAL_SEQUENCE}
+    check(
+        handlers == expected_handlers,
+        f"scripts/ci-local.sh defines handlers {sorted(handlers)!r}, expected "
+        f"{sorted(expected_handlers)!r} -- one per goal in CI_LOCAL_SEQUENCE",
+    )
+    # The dispatcher must READ the sequence rather than restate it; a literal
+    # loop over the goal names would pass every check above while drifting.
+    check(
+        "print-CI_LOCAL_SEQUENCE" in "\n".join(lines),
+        "scripts/ci-local.sh does not read CI_LOCAL_SEQUENCE from the Makefile",
+    )
 
 
 def prior_job_steps(job_id, step_index):

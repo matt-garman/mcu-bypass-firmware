@@ -186,6 +186,57 @@ historical records and are not retroactively compacted by this policy.
   `CI_CLASSIC_PARTS` declares rather than a list of its own. Both were verified
   by deletion.
 
+  **The local mirror now executes the inventory instead of describing it.** The
+  last hand-kept copy was `scripts/ci-local.sh`'s CI-JOB MAPPING header: a prose
+  block naming each `ci.yml` job, which this gate checked for set-equality with
+  the workflow's job ids. That proved someone had typed each job's name into a
+  comment. It never proved anything ran, and the script's actual sequence was a
+  hardcoded list of steps beside it.
+
+  The Makefile now declares `CI_LOCAL_SEQUENCE` -- the goals the script invokes,
+  in the order a serial run needs them -- and the script reads it and dispatches
+  each entry to a handler. A local push does not invoke every CI goal: it covers
+  `verify`, `stress` and the mutation gate with one `make test-long`, since
+  those three re-aggregate one shared host suite. So the sequence has a declared
+  complement, `CI_LOCAL_FOLDED`, and the two must PARTITION `CI_GOALS`. Deriving
+  the folded half as "whatever is left over" would have been the wrong default:
+  it silently assumes a NEW goal is already covered, which is the drift being
+  removed. The Makefile refuses to PARSE when the partition fails -- a refusal
+  rather than a check, because the script reads both lists through
+  `make print-...`, so it cannot run, or even ask, while the claim is false.
+
+  The `make test-long` fold is no longer a comment either. Each folded goal's
+  target must be *covered* by `test-long` -- not reachable from it, which it is
+  not and must not be, since `test` and `test-long` are sibling aggregates over
+  overlapping gate sets rather than one built on the other. The check asks
+  whether everything the folded target pulls in is also pulled in by
+  `test-long`; a gate `test` runs and `test-long` does not would be a gate CI
+  runs and a local push silently never does.
+
+  Both directions of the handler correspondence are load-bearing, and both were
+  confirmed by deletion. Without the forward check, a sequence naming a goal
+  with no handler runs every other gate first and dies an hour later on a bare
+  `command not found`; without the reverse, a handler outlives the goal it
+  served and nothing calls it. Both run before the toolchain preflight, for the
+  same reason the preflight was hoisted ahead of the jobs: a mirror that is
+  incoherent about what it will do should say so in the first second.
+
+  Five prose-mapping checks retired. What replaced them is a chain that is
+  strictly stronger: every `ci.yml` job must invoke a non-empty subset of
+  `CI_GOALS` (so a job reaching a gate directly is caught), the goals `ci.yml`
+  invokes must equal `CI_GOALS` exactly, that must partition into the two local
+  lists, and every sequenced goal must have a handler. A job added to `ci.yml`
+  can no longer exist without a local counterpart, where before it only had to
+  be mentioned in a comment.
+
+  One harvester defect surfaced on the way. `test-makefile-name-contract` treats
+  a quote directly after a `print-<VAR>` query as the start of a shell expansion
+  -- correct for `mkv part_"$n"`, wrong for a Python argv list like
+  `"print-CI_GOALS", override`, which it reported as a name it could not expand.
+  A quote now counts only when the expansion it was supposed to introduce
+  actually follows, so those two queries are checked as the literal names they
+  are, and a negative case pins the distinction from both sides.
+
 - **Soak transcripts are sealed by payload digest, like every other retained
   log.** The `soak` evidence role never carried one: a log was bound by its
   `evidence/INDEX` row -- terminal record and byte size -- so a substituted body

@@ -78,6 +78,26 @@ set -euo pipefail
 # OUT of the log, so the counts below keep asserting exactly which JOBS ran.
 # Scan every argument, not just $1: the query arrives as `make -s print-CC
 # print-HOSTCC ...`, so $1 is the -s flag.
+#
+# The two exceptions are CI_LOCAL_SEQUENCE and CI_LOCAL_FOLDED. The Makefile
+# refuses to PARSE unless those two partition CI_GOALS, so a doctored value
+# cannot be delivered through make at all -- and the interesting cases are
+# exactly the ones the partition forbids. Answer them here instead, which is
+# also the only way to reach the script's own handler-correspondence checks.
+for arg in "$@"; do
+	case "$arg" in
+	print-CI_LOCAL_SEQUENCE)
+		if [ -n "${FAKE_CI_LOCAL_SEQUENCE+set}" ]; then
+			printf '%s\n' "$FAKE_CI_LOCAL_SEQUENCE"; exit 0
+		fi
+		;;
+	print-CI_LOCAL_FOLDED)
+		if [ -n "${FAKE_CI_LOCAL_FOLDED+set}" ]; then
+			printf '%s\n' "$FAKE_CI_LOCAL_FOLDED"; exit 0
+		fi
+		;;
+	esac
+done
 for arg in "$@"; do
 	case "$arg" in
 	print-*) exec "${REAL_MAKE:?}" -s --no-print-directory -C "${FAKE_REPO_ROOT:?}" "$@" ;;
@@ -350,6 +370,58 @@ resolved=$("$REAL_MAKE" -s --no-print-directory -C "$ROOT" \
 	_test-mutation-policy-probe STRICT_TOOLS=1 2>/dev/null)
 [ "$resolved" = 0 ] \
 	|| fail "strict mutation policy did not default to fail-closed: $resolved"
+checks=$((checks + 1))
+
+# --- the script EXECUTES the Make-declared sequence, and refuses if it cannot -
+# The sequence used to be a hardcoded list of run_step calls described by a
+# prose header. It is now read from CI_LOCAL_SEQUENCE, so the failure worth
+# covering is the new one: a goal the mirror was told to run and has no handler
+# for. That must ABORT, and abort before any gate runs -- a mirror that skipped
+# a job and still printed "Safe to push" is the exact defect this file exists
+# to catch. The reverse (a handler no longer sequenced) must abort too: it is a
+# gate nobody calls.
+#
+# Each case asserts an EMPTY command log as well as the diagnostic. Failing
+# after the PIC job would still be a failure, but it would have cost an hour
+# first, and the plan checks are placed ahead of the preflight for that reason.
+# The full sequence PLUS one unhandled goal, not a short list containing one:
+# a short list also orphans the handlers it dropped, so the orphan check below
+# would catch it and this one could be deleted without a test going red.
+if output=$(FAKE_CI_LOCAL_SEQUENCE="$(
+		"$REAL_MAKE" -s --no-print-directory -C "$ROOT" print-CI_LOCAL_SEQUENCE
+	) ci-brand-new" run_ci 2>&1); then
+	fail "a sequenced goal with no handler did not abort the run"
+fi
+mapfile -t calls < "$log"
+[[ ${#calls[@]} -eq 0 && $output == *"defines no goal_ci_brand_new"* ]] \
+	|| fail "unhandled sequenced goal produced the wrong failure: $output"
+checks=$((checks + 1))
+
+if output=$(FAKE_CI_LOCAL_SEQUENCE="ci-pic" run_ci 2>&1); then
+	fail "a handler with no sequence entry did not abort the run"
+fi
+mapfile -t calls < "$log"
+[[ ${#calls[@]} -eq 0 && $output == *"CI_LOCAL_SEQUENCE does not name its goal"* ]] \
+	|| fail "orphaned handler produced the wrong failure: $output"
+checks=$((checks + 1))
+
+if output=$(FAKE_CI_LOCAL_SEQUENCE="" run_ci 2>&1); then
+	fail "an empty CI_LOCAL_SEQUENCE did not abort the run"
+fi
+mapfile -t calls < "$log"
+[[ ${#calls[@]} -eq 0 && $output == *"would mirror no CI job at all"* ]] \
+	|| fail "empty sequence produced the wrong failure: $output"
+checks=$((checks + 1))
+
+# The tail invokes ci-verify by name, so it must be on the FOLDED side. Were it
+# sequenced instead, every push would run it twice and only the first would be
+# reported as a job.
+if output=$(FAKE_CI_LOCAL_FOLDED="ci-stress ci-mutation" run_ci 2>&1); then
+	fail "ci-verify absent from CI_LOCAL_FOLDED did not abort the run"
+fi
+mapfile -t calls < "$log"
+[[ ${#calls[@]} -eq 0 && $output == *"ci-verify is not in CI_LOCAL_FOLDED"* ]] \
+	|| fail "unfolded ci-verify produced the wrong failure: $output"
 checks=$((checks + 1))
 
 printf 'ci-local routing validation: %d checks, 0 failures\n' "$checks"

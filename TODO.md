@@ -43,18 +43,17 @@ a known firmware defect.
 
 ### T2-ci-parity - Make local and remote CI parity structural
 
-`scripts/ci-local.sh` reconstructs `ci.yml`'s jobs from a prose comment header,
-`release.yml` keeps its own list of gate re-runs, and `test/README.md` a third.
-Nothing machine-checks that the local path covers the remote one, so "a clean
-pass here means the CI matrix will be green" is an assertion in a comment.
+`scripts/ci-local.sh` reconstructed `ci.yml`'s jobs from a prose comment header,
+`release.yml` kept its own list of gate re-runs, and `test/README.md` a third.
+Nothing machine-checked that the local path covered the remote one, so "a clean
+pass here means the CI matrix will be green" was an assertion in a comment.
 [`docs/ci_parity.md`](docs/ci_parity.md) is the design: name every gate a
 workflow runs as a Make goal, have each workflow step invoke exactly one of
 them, run the same goals locally, and check that shape rather than compare two
 hand-maintained inventories. The publishability gate that document's Part 3
-describes is done, and every step in BOTH workflows now invokes a declared
-goal, as does `scripts/ci-local.sh`; what remains is having `ci-local.sh`
-execute the goal inventory rather than describe it in a prose header, the
-parity gate itself, and Part 4.
+describes is done; every step in BOTH workflows now invokes a declared goal;
+and `scripts/ci-local.sh` now EXECUTES the inventory rather than describing it.
+What remains is the rest of the parity gate and Part 4.
 
 The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
@@ -86,6 +85,25 @@ than red when that step is folded away. Those seeded edges then let the
 mutation gate's "exactly one normal-CI path runs mutants" check become a
 reachability question rather than a literal-name match, which also catches a
 second wrapper.
+
+The local mirror closed differently than the design expected. A local push does
+not invoke every CI goal -- it covers `verify`, `stress` and the mutation gate
+with one `make test-long`, since those three re-aggregate one shared host suite
+-- so the sequence needed a declared complement rather than a derived one:
+`CI_LOCAL_SEQUENCE` and `CI_LOCAL_FOLDED` must PARTITION `CI_GOALS`, and the
+Makefile refuses to parse when they do not. A refusal rather than a check,
+because the script reads both lists through `make print-...`: it cannot run, or
+even ask, while the claim is false. Treating the folded half as "whatever is
+left over" would have been the wrong default -- that silently assumes a NEW
+goal is covered, which is the drift the item exists to remove. Both directions
+of the handler correspondence are load-bearing, and both were confirmed by
+deletion: without the forward check a sequence naming an unhandled goal runs
+every other gate first and dies an hour later on `command not found`; without
+the reverse a handler outlives the goal it served. The five prose-mapping
+checks that retired were replaced by a chain that is strictly stronger --
+`ci.yml`'s invoked goals must equal `CI_GOALS`, that must partition into the
+local lists, and every sequenced goal must have a handler -- where the old one
+proved only that someone had typed a job name into a comment.
 
 Acceptance: every `run:` step in both
 workflows invokes exactly one declared goal, with its required pins, and
