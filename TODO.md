@@ -574,13 +574,25 @@ statements below are now the definition rather than a summary of one:
   `make pic12f675-program` enforces the build-side half -- the toolchain must
   leave the field erased -- and now requires a `pic12f675-preflight` baseline,
   an immediate matching pre-write read, and a retained matching post-write
-  result. The programmer's own erase behavior still needs measuring on silicon.
+  result. **Measured once on silicon, 2026-09-07**: a PICkit 3 / MPLAB X 6.20
+  erase-and-program left `BG<1:0>` at its factory `0x1000`, and CONFIG read back
+  `0x11CC`, exactly `(image 0x31CC & ~BG) | (factory BG)`. That is one device,
+  one program, through a locally modified helper; see the bench-run record in
+  `HARDWARE_VALIDATION_LOG.md`. What remains is the same measurement on a
+  released helper, and on a repeat program of an already-programmed part.
 - **2 - factory oscillator trim (flash word 0x3FF) preserved on program.**
   Losing it yields an untrimmed clock: wrong tick cadence, wrong coil-pulse
   widths, and a device that still appears to work. The guarded workflow now
-  compares the complete word before/after and fails on a change; run it with a
-  real PICkit, retain the generated JSON, then add the controlled result to
-  `HARDWARE_VALIDATION_LOG.md`.
+  compares the complete word before/after and fails on a change. **Measured
+  once on silicon, 2026-09-07**: OSCCAL at 0x3FF read `0x3424` (`RETLW 0x24`)
+  before and after a PICkit 3 / MPLAB X 6.20 erase-and-program, still a valid
+  `RETLW`, with the transcript recording `Device Erased...` first -- so the trim
+  survived a real bulk erase. The JSON is retained and the run is recorded in
+  `HARDWARE_VALIDATION_LOG.md`. It is not yet the controlled result that section
+  2 of that file requires: no written procedure exists to execute
+  (`T3-hw-procedure`), and the helper was modified to bypass its release
+  checksum binding, so the run attests to the path and not to a shipped
+  artifact.
 - **8 - `ipecmd` actually runs against the part.** The pinned device pack lists
   the PIC12F675 with the same MPLAB hardware-tool set as the PIC10F322, but
   neither programmer binary is installed on any machine this repository is
@@ -609,6 +621,19 @@ statements below are now the definition rather than a summary of one:
   no successful `-GF` export or program transcript from real `ipecmd` has been
   retained, so the export shape and the device-id/revision parsing remain
   modelled rather than observed.
+  **Closed 2026-09-07**, at the cost of four more corrections, all of the same
+  kind: the identity parsing wanted a numeric Device ID that `ipecmd` prints for
+  this part under no option at all (`-I` merely repeats the identity block), so
+  the ID now comes from the export's DEVID word -- which this part does not
+  export either, making it legitimately unavailable; the revision arrives as
+  `Device Revision ID = b`, not the `Revision =` the stub invented; and the
+  image was handed over as a sealed `memfd`, which `ipecmd` answers with `Hex
+  file not found.` for exactly the reason the jar could not start. A full
+  transaction then completed `status=PASS` with every claim re-derived
+  independently from the retained exports. The command shape is now observed
+  rather than inherited. What is still unobserved: a repeat program of an
+  already-programmed part, a read/finalize of an interrupted PENDING
+  transaction, and any execution of the programmed firmware.
 - **9 - GP2's readback margin.** The port-follows-shadow guard re-reads `GPIO`
   against the SRAM shadow every tick, and GP2 is the one output whose input
   buffer is a Schmitt Trigger (VIH min 0.8*VDD) rather than TTL. On

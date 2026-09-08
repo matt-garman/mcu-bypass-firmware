@@ -117,28 +117,44 @@ damage. It cannot prevent it, and nothing in this repository yet establishes
 that a real PICkit 3 with MPLAB X 6.20 preserves that trim across an erase.
 
 Until a controlled run recorded above proves the following, treat a helper PASS
-as "no damage was observed on this device", not as a validated programming path:
+as "no damage was observed on this device", not as a validated programming path.
+The bench run of 2026-09-07 below is not that run, but it did settle several of
+these, and disproved two outright; each is marked with what it now rests on.
 
-- the read/export command returns complete program, CONFIG, Device ID, revision,
-  OSCCAL and BG data in the form the helper parses;
-- the write command with calibration-memory programming disabled preserves both
-  OSCCAL and BG, on an initial program and on a repeat program of the same part;
-- `ipecmd` accepts the image argument in the descriptor-addressed form the
-  helper issues (`-F/proc/self/fd/<n>`). That descriptor names a private sealed
-  copy of the validated image bytes, not the retained evidence inode. If the
-  tool infers the image format from a file extension this is where that shows
-  up, and it shows up as a refusal to write rather than as a bad write;
+- **CORRECTED.** The read/export command returns complete program, CONFIG,
+  OSCCAL and BG data in the form the helper parses, and a revision -- but NO
+  numeric Device ID. `ipecmd` prints none for this part under any option, `-I`
+  included, and the export carries no DEVID word at 0x2006 either. The helper
+  records `device_id_source: unavailable` and proceeds on the part name, the
+  revision and a full word-for-word comparison of the two pre-write reads.
+  *Observed 2026-09-07.*
+- The write command with calibration-memory programming disabled preserves both
+  OSCCAL and BG. *Initial program on a blank part: observed 2026-09-07. Repeat
+  program of the same part: still outstanding, and it is the more interesting
+  half.*
+- **CORRECTED.** `ipecmd` does NOT accept the image argument as a sealed-copy
+  descriptor. `-F/proc/self/fd/<n>` naming a memfd fails with `Hex file not
+  found.` and programs nothing: a JVM canonicalises the pathname it is given,
+  and a memfd canonicalises to `/memfd:<name> (deleted)`, which does not exist.
+  The helper now hands the writer the retained `image.hex` under the evidence
+  directory's descriptor, which the same run proved `ipecmd` does accept. This
+  showed up as a refusal to write rather than a bad write, as predicted.
+  *Observed 2026-09-07.*
 - `ipecmd` accepts device-export arguments through the retained evidence
   directory (`-GF/proc/self/fd/<n>/<name>.hex`), so an evidence-parent rename
-  cannot redirect a readback into another directory;
+  cannot redirect a readback into another directory. *Observed 2026-09-07.*
 - programmed code and the non-BG CONFIG bits read back exactly as expected, and
   every program word the image does NOT supply reads back erased -- the helper
   now compares the whole device, so a writer whose `-M` leaves stale words
-  outside the image publishes a FAIL;
+  outside the image publishes a FAIL. *Observed 2026-09-07, but on a part that
+  was already blank, so the erased-word half of this cannot distinguish "the
+  erase worked" from "there was nothing to erase". A second program of the same
+  part, now carrying 574 words, is what would.*
 - the documented externally powered arrangement and the release-from-reset
-  behaviour are correct; and
+  behaviour are correct; *external power observed 2026-09-07. Release-from-reset
+  is NOT covered: nothing in that run executed the programmed firmware.* and
 - an interrupted PENDING transaction can be finalized read-only without a second
-  write.
+  write. *Still outstanding.*
 
 If MPLAB X 6.20 cannot enforce or report calibration-memory protection through
 the supported CLI path, or either trim value changes, the helper does not become
@@ -146,18 +162,61 @@ a supported path by assertion and no automatic repair is to be added quietly: a
 per-device trim-aware image or an explicit restoration transaction would be a new
 design needing its own review, fail-closed binding and hardware validation.
 
-The programmer-powered arrangement stays out of scope for the same reason. The
-helper refuses `--power` values other than `external` because no voltage and
-interface setup for a programmer-supplied supply has been retained here.
+The programmer-powered arrangement is now constructible but still unqualified.
+`--power tool` adds `-W` so the PICkit 3 supplies Vdd, because a bare part on a
+breadboard cannot be read without it; `external` remains the default and the
+only arrangement any run here has exercised. No voltage or interface setup for a
+programmer-supplied supply has been retained, and the tool cannot choose a
+voltage in any case -- every VDD/VPP option `ipecmd` 6.20 exposes is marked
+*Applicable only for PM3*, so `-W` requests nominal Vdd and nothing else.
 
-One further thing this repository cannot establish about the tool itself: the
-pinned device pack registers the PIC12F675 with the same MPLAB hardware-tool
-set as the PIC10F322 this project already programs — an identical `hwtools`
-file list in the pack's `.pdsc`, and both parts named in every `sdm*.xml` that
-names either. That is evidence the part is still listed, not that `ipecmd` runs
-correctly against it: neither `pk2cmd` nor `ipecmd` is installed on any machine
-this repository is tested on, so the command shape is inherited from the
-working PIC10F322 target and has never been executed for this part.
+The inherited command shape has now been executed, and it was wrong in four
+places. The pinned device pack registers the PIC12F675 with the same MPLAB
+hardware-tool set as the PIC10F322 this project already programs — an identical
+`hwtools` file list in the pack's `.pdsc`, and both parts named in every
+`sdm*.xml` that names either — and that was the whole basis for the command
+shape, because no programmer is installed on any machine this repository's test
+suite runs on. Pack registration turned out to be evidence that the part is
+listed and nothing more: the version pin, the `-P` spelling, the target-power
+option and the image argument each had to be corrected against a real tool
+before a single word was written. What that shape is worth is now a matter of
+record rather than inference.
+
+### PIC12F675 bench run, 2026-09-07
+
+Not a controlled qualification, and it must not be read as one: no written
+procedure exists to execute (`T3-hw-procedure`), the helper was locally modified
+so its release checksum binding was bypassed, the part sat on a breadboard with
+no board or output stage fitted, and nothing was measured with an instrument.
+What it is, is the first execution of the shipped programming path against real
+silicon, with the evidence retained.
+
+- **Date** — 2026-09-07 (transaction `created_utc` 2026-09-08T02:57:44Z).
+- **Part** — PIC12F675, breadboard, externally powered. Device revision `0xB`;
+  no numeric device ID is obtainable, see above.
+- **Programmer** — PICkit 3, firmware suite 01.56.09, driven by MPLAB X 6.20
+  `ipecmd.jar`, device pack `PIC10-12Fxxx_DFP,1.9.189`.
+- **Image** — `bypass-pic12f675-cd4053_with_mute.hex`, SHA-256
+  `655fd28fe8075389ab571218393c0cececf215d4a4a8aac5fa85452863e16c45`.
+- **Helper** — SHA-256 `328258b14aafc65c43817e51d286f91b6470a22a299389ab9dc0c08c77f28301`,
+  locally modified; this is deliberately NOT a released helper's digest.
+- **Result** — helper `status=PASS`, `failures=[]`, `result.json` SHA-256
+  `e1d5b2789f40e4384359f55bfe9e1de6bbca2431a2d1b0515cfd1e55c8afee8d`.
+
+Re-derived from the retained exports independently of the helper's own
+arithmetic: all 574 program words the image supplies were programmed exactly;
+all 449 words it does not supply read back erased; the readback covered
+1024/1024 words; OSCCAL at 0x3FF was `0x3424` (`RETLW 0x24`) before and after and
+is still a valid `RETLW`; and CONFIG read back `0x11CC`, which is exactly
+`(image 0x31CC & ~BG) | (factory BG 0x1000)`. The transcript records
+`Device Erased...` before `Programming/Verify complete`, so the trim survived a
+real bulk erase.
+
+What it does not establish: anything about a released helper (this one was
+modified), anything about a repeat program of an already-programmed part,
+anything about the erase on a part that had something to erase, and anything at
+all about the programmed firmware running — no output stage was fitted and
+nothing was powered up afterwards.
 
 ### PIC12F675 GP2 readback margin
 
