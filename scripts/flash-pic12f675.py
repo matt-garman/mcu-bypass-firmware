@@ -143,9 +143,19 @@ IPE_IDENTITY_RE = re.compile(
     r"(?im)^[ \t]*(?:usage:[ \t]*ipecmd\b.*|.*IPECMD COMMAND LINE HELP.*)$")
 IPE_BANNER_RE = re.compile(r"(?im)^[ \t]*version\b.*$")
 IPE_VERSION_RE = re.compile(r"\bv?(\d+\.\d+)(?:\.\d+)*\b")
+# Observed on a PICkit 3 under MPLAB X 6.20: the revision arrives as
+# "Device Revision ID = b" -- the word ID sits between "Revision" and the "=",
+# which an earlier pattern modelled on the stub's "Revision = 0x000A" could not
+# match. Both spellings are accepted rather than one being swapped for the
+# other, since only the first has been seen on real silicon.
+#
+# The device ID line is NOT printed unless -I is passed; see read_argv. Its
+# exact spelling has still not been observed, so a failure to find it quotes the
+# transcript rather than guessing again -- that guessing is what produced this
+# defect and the version-pin one before it.
 DEVICE_ID_RE = re.compile(r"(?im)^\s*device\s+id\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
 DEVICE_REVISION_RE = re.compile(
-    r"(?im)^\s*(?:device\s+)?revision\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
+    r"(?im)^\s*(?:device\s+)?revision(?:\s+id)?\s*(?:=|:)\s*(?:0x)?([0-9a-f]+)\b")
 
 MAX_FILE_BYTES = 1024 * 1024
 MAX_TOOL_BYTES = 256 * 1024 * 1024
@@ -545,8 +555,19 @@ def parse_device_report(data, label):
     id_match = DEVICE_ID_RE.search(text)
     revision_match = DEVICE_REVISION_RE.search(text)
     if id_match is None or revision_match is None:
-        raise FlashError("%s must report both Device ID and Device Revision"
-                         % label)
+        missing = [name for name, found in
+                   (("Device ID", id_match), ("Device Revision", revision_match))
+                   if found is None]
+        # Quote the candidate lines. This refusal fires when the tool printed
+        # something in a shape this helper does not know, and the only way to
+        # fix that is to see what it printed.
+        candidates = [line.strip() for line in text.splitlines()
+                      if re.search(r"(?i)\b(device|revision|id)\b", line)]
+        raise FlashError(
+            "%s must report both Device ID and Device Revision; %s not found. "
+            "The transcript's identity lines were: %s"
+            % (label, " and ".join(missing),
+               " | ".join(candidates) or "<none>"))
     return ("0x" + id_match.group(1).upper(),
             "0x" + revision_match.group(1).upper())
 
@@ -1116,9 +1137,15 @@ def power_args(programmer):
 
 def read_argv(programmer, export_path):
     """The one full-device read/export command. Contains no erase or program
-    option, so this argv can never mutate the device."""
+    option, so this argv can never mutate the device.
+
+    -I asks for the device ID. ipecmd's default is "Do Not Display", so without
+    it the transcript names the part and its revision but never the ID, and the
+    identity this transaction compares across its two pre-write reads is simply
+    absent. It is a display option: it adds nothing that can alter the device.
+    """
     return programmer["prefix"] + [
-        TOOL_FLAG + TOOL, "-P" + PART_ARG, "-GF" + export_path,
+        TOOL_FLAG + TOOL, "-P" + PART_ARG, "-I", "-GF" + export_path,
     ] + power_args(programmer)
 
 

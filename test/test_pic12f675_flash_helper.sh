@@ -823,6 +823,20 @@ check "--show-commands resolves a path under a directory descriptor" \
 check "the echo stays on stderr, out of the result lines" \
 	"$(grep -q '^+ ' "$CASE_DIR/stdout.txt" && echo 0 || echo 1)"
 
+# The device ID is withheld unless asked for: ipecmd defaults to "Do Not
+# Display", so without -I the transcript names the part and its revision but
+# never the ID the two pre-write reads are compared on.
+new_case
+program_run ''
+check "every device read asks for the device ID" \
+	"$([ "$(grep -c -- $'\t-I\t' "$ARGVLOG")" = 3 ] && echo 1 || echo 0)"
+check "the baseline records the device ID the read asked for" \
+	"$([ "$(reservation_field baseline_device_id)" = 0x0FC0 ] && echo 1 || echo 0)"
+# Real 6.20 prints "Device Revision ID = b" -- the word ID between "Revision"
+# and the "=", which the shape modelled on the stub could not match at all.
+check "the revision is parsed from the spelling real silicon prints" \
+	"$([ "$(reservation_field baseline_device_revision)" = 0xB ] && echo 1 || echo 0)"
+
 # ---------------------------------------------------------------------------
 # 4b. the supported java -jar form -- the same matrix through a second binary
 # ---------------------------------------------------------------------------
@@ -1537,6 +1551,14 @@ assert_rejects "a baseline export that is not Intel HEX" "does not start with"
 new_case
 program_run 'noid:0'
 assert_rejects "a baseline transcript with no device identity" "Device ID and Device Revision"
+# The refusal has to carry the transcript, not just the complaint. This is the
+# one failure mode that fires precisely because the tool printed a shape this
+# helper does not know, and the lines it printed are the whole diagnosis.
+check "the identity refusal names which field was missing" \
+	"$([[ "$OUT" == *"Device ID and Device Revision not found"* ]] && echo 1 || echo 0)"
+check "the identity refusal quotes the transcript's identity lines" \
+	"$([[ "$OUT" == *"The transcript's identity lines were:"* ]] \
+		&& [[ "$OUT" == *"Target device PIC12F675 found."* ]] && echo 1 || echo 0)"
 
 new_case
 program_run 'noosccal:0'
