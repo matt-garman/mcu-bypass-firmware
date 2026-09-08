@@ -407,7 +407,7 @@ check "result verifies every program word below the calibration word" \
 		&& [ "$(result_field required_program_words)" = 1023 ] \
 		&& [ "$(result_field verified_config_word)" = True ] && echo 1 || echo 0)"
 check "the reservation records how the image was pinned for the writer" \
-	"$([ "$(reservation_field image_pinning)" = sealed ] && echo 1 || echo 0)"
+	"$([ "$(reservation_field image_pinning)" = evidence-snapshot ] && echo 1 || echo 0)"
 check "the reservation records the direct programmer's immutable consumption" \
 	"$([ "$(reservation_field programmer_pinning)" = sealed ] \
 		&& [ "$(reservation_field programmer_java_pinning)" = None ] && echo 1 || echo 0)"
@@ -1050,7 +1050,7 @@ check "the libc memfd fallback completes the guarded transaction" \
 	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
 check "the libc fallback still records sealed tool and image consumption" \
 	"$([ "$(reservation_field programmer_pinning)" = sealed ] \
-		&& [ "$(reservation_field image_pinning)" = sealed ] && echo 1 || echo 0)"
+		&& [ "$(reservation_field image_pinning)" = evidence-snapshot ] && echo 1 || echo 0)"
 
 # No ordinary-descriptor fallback is permitted. This is placed before the
 # version probe and therefore before any tool invocation, not merely before -M.
@@ -1152,12 +1152,19 @@ calibration_sha=$(sha256_of "$CASE_DIR/calibration.hex")
 swap_after_final_check "[[\"$CASE_DIR/calibration.hex\", \"$EVIDENCE/image.hex\"]]"
 program_run ''
 hook_reset
-check "an image swapped over the retained snapshot never reaches the writer" \
-	"$([ "$(device_field image_sha256)" = "$(sha256_of "$IMAGE")" ] && echo 1 || echo 0)"
 check "the swapped image really did replace the retained file" \
 	"$([ "$(sha256_of "$EVIDENCE/image.hex")" = "$calibration_sha" ] && echo 1 || echo 0)"
-check "the pre-write image guards are not bypassed by the race" \
-	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
+# The retained snapshot is what ipecmd opens -- a sealed memfd canonicalises to
+# a path that does not exist and the writer answers "Hex file not found." -- so
+# a swap over it DOES reach the writer. That is a window this transaction cannot
+# close; what it can do is refuse to call the result a success.
+check "an image swapped over the retained snapshot reaches the writer" \
+	"$([ "$(device_field image_sha256)" = "$calibration_sha" ] && echo 1 || echo 0)"
+check "the swapped write is published as a FAIL, never a PASS" \
+	"$([ "$RC" -ne 0 ] && [[ "$OUT" == *"status=FAIL"* ]] \
+		&& [[ "$OUT" != *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the FAIL is measured against the reserved image, not the swapped file" \
+	"$([[ "$OUT" == *"the release image programs"* ]] && echo 1 || echo 0)"
 check "the device's factory calibration word is untouched" \
 	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] && echo 1 || echo 0)"
 
@@ -1251,6 +1258,24 @@ check "the sealed image keeps the transaction safe and complete" \
 check "the same-inode image race cannot alter factory calibration" \
 	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] && echo 1 || echo 0)"
 
+# The writer opens the retained snapshot, because a sealed memfd canonicalises
+# to a path that does not exist and ipecmd answers "Hex file not found." That
+# reopens exactly one window this transaction cannot close: the snapshot can be
+# rewritten after its final digest. It must not be closeable by pretending --
+# what has to hold is that the swapped bytes cannot be called a success.
+new_case
+make_calibration_image "$CASE_DIR/calibration.hex"
+rewrite_after_final_check "[[\"$CASE_DIR/calibration.hex\", \"$EVIDENCE/image.hex\"]]"
+program_run ''
+hook_reset
+check "an image swapped inside the final window cannot publish a PASS" \
+	"$([ "$RC" -ne 0 ] && [[ "$OUT" == *"status=FAIL"* ]] \
+		&& [[ "$OUT" != *"status=PASS"* ]] && echo 1 || echo 0)"
+check "the FAIL names the words that differ from the reserved image" \
+	"$([[ "$OUT" == *"the release image programs"* ]] && echo 1 || echo 0)"
+check "the swap cannot touch the factory calibration word" \
+	"$([ "$(result_field post_osccal_word)" = "$(result_field baseline_osccal_word)" ] && echo 1 || echo 0)"
+
 # Independent negative controls restore the old ordinary descriptor for exactly
 # one object. Each same-inode fixture must then expose the race it just proved
 # the production sealed-copy path closes.
@@ -1295,16 +1320,28 @@ check "negative control: an ordinary Java descriptor runs rewritten bytes" \
 check "negative control: the rewritten Java runtime performed no guarded write" \
 	"$([ "$(writes)" = 0 ] && echo 1 || echo 0)"
 
+# This was a negative control for the image's sealed copy: degrade it to an
+# ordinary descriptor and the rewritten SOURCE reached the writer. The writer no
+# longer opens the source under any configuration -- it opens the retained
+# snapshot -- so that control can no longer distinguish anything. What is
+# asserted instead is the property that took its place: the snapshot is taken
+# before the reads and is what insulates the write from a source rewritten
+# afterwards, sealed reference or not.
 new_case
 make_calibration_image "$CASE_DIR/calibration.hex"
+original_sha=$(sha256_of "$IMAGE")
 calibration_sha=$(sha256_of "$CASE_DIR/calibration.hex")
 rewrite_after_final_check "[[\"$CASE_DIR/calibration.hex\", \"$IMAGE\"]]"
 export FLASH_HOOK_UNSEALED=image FLASH_HOOK_UNSEALED_PATH="$IMAGE"
 program_run ''
 hook_reset
-check "negative control: an ordinary image descriptor reaches the writer rewritten" \
+check "the source really was rewritten under the transaction" \
+	"$([ "$(sha256_of "$IMAGE")" = "$calibration_sha" ] && echo 1 || echo 0)"
+check "a rewritten source cannot reach the writer even with an unsealed copy" \
 	"$([ "$(writes)" = 1 ] \
-		&& [ "$(device_field image_sha256)" = "$calibration_sha" ] && echo 1 || echo 0)"
+		&& [ "$(device_field image_sha256)" = "$original_sha" ] && echo 1 || echo 0)"
+check "that transaction still completes as a PASS" \
+	"$([ "$RC" -eq 0 ] && [[ "$OUT" == *"status=PASS"* ]] && echo 1 || echo 0)"
 
 # Replace the evidence parent after Evidence.create() has opened it but before
 # mkdir. The production path must create, attach, flush and export under held

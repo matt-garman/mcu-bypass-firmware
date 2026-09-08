@@ -1186,9 +1186,12 @@ def write_argv(programmer, image_path):
     -M programs the whole device, -Y verifies, -OL releases from reset. -W is
     present only under --power tool, and both power arrangements are still
     awaiting controlled hardware evidence. Nothing here is caller-supplied
-    except that one recorded choice: `image_path` is descriptor_path() of the
-    sealed image copy, which is the one argument of this command that changed
-    source bytes could otherwise turn into a different write.
+    except that one recorded choice: `image_path` names the retained snapshot
+    under the evidence directory's own descriptor, which is the one argument of
+    this command that changed source bytes could otherwise turn into a different
+    write. It is re-proved against the sealed copy immediately before this
+    command is built; command_program() explains why it cannot be the sealed
+    copy itself.
 
     The read and the write must agree about power. A device read under tool
     power and then written under board power is two different electrical
@@ -1878,12 +1881,28 @@ def command_program(args, helper_path):
     # From here on the SNAPSHOT is the image: the file the operator named may
     # change or vanish, and every later comparison must be against the exact
     # bytes that were validated above. image.hex is the retained EVIDENCE of
-    # those bytes; the descriptor below is what the writer is actually given, so
-    # that no name -- not the operator's, not this directory's, not image.hex's
-    # -- is resolved again between validation and the erase.
+    # those bytes, AND what the writer is handed.
+    #
+    # It cannot be the sealed copy. ipecmd is a Java program, and a JVM
+    # canonicalises the pathname it is given: /proc/self/fd/<n> of a memfd
+    # canonicalises to "/memfd:image.hex (deleted)", which does not exist, so
+    # ipecmd answers "Hex file not found." and programs nothing. That is the
+    # same defect that made a sealed ipecmd.jar unable to start, in the one
+    # place it costs a write. A name UNDER this directory's descriptor does
+    # resolve -- it is what the three device reads already use -- so the writer
+    # is given the snapshot that way.
+    #
+    # What that gives up is making the image unsubstitutable between validation
+    # and the erase. What it keeps is that a substitution cannot pass:
+    # evaluate() compares the device against the bytes recorded in the durable
+    # reservation, never against this file, so an image swapped here produces a
+    # FAIL naming every word that differs. Detected rather than prevented --
+    # the same bargain the jar makes, in the place it matters most, which is why
+    # the snapshot is re-proved against the sealed copy immediately before the
+    # command is built.
     evidence.publish(IMAGE_SNAPSHOT_NAME, bundle["image_data"],
                      "retained release image")
-    snapshot_path = descriptor_path(image_fd)
+    snapshot_path = "%s/%s" % (descriptor_path(evidence.fd), IMAGE_SNAPSHOT_NAME)
 
     baseline, baseline_memory = device_read(programmer, evidence, "baseline")
     prewrite, prewrite_memory = device_read(programmer, evidence, "prewrite")
@@ -1920,7 +1939,10 @@ def command_program(args, helper_path):
         # destroys the manifest Class-Path its own dependencies resolve through;
         # programmer_operator_writable is retained so the record states plainly
         # whether the operator could have altered the tool that ran.
-        "image_pinning": "sealed",
+        # What the WRITER consumes. The sealed copy still exists and is the
+        # reference the snapshot is proved against, but it is not what ipecmd
+        # opens -- it cannot be; see command_program().
+        "image_pinning": "evidence-snapshot",
         "image_sha256": bundle["image_sha256"],
         "image_base64": base64.b64encode(bundle["image_data"]).decode("ascii"),
         "image_program_words": image_facts["program_words"],
@@ -1977,10 +1999,20 @@ def command_program(args, helper_path):
         raise FlashError(
             "the sealed release-image copy no longer holds the bytes this "
             "transaction reserved; no write was attempted")
+    # The writer reads the retained snapshot, so the snapshot is what has to be
+    # proved immediately before the erase. The sealed copy checked above is the
+    # reference it is proved against: it is the one form of these bytes this
+    # operator cannot have altered.
+    if sha256_bytes(evidence.read(IMAGE_SNAPSHOT_NAME,
+                                  "retained release image")) \
+            != bundle["image_sha256"]:
+        raise FlashError(
+            "the retained release image no longer holds the bytes this "
+            "transaction reserved; no write was attempted")
     argv = write_argv(programmer, snapshot_path)
     program_exit, program_output = invoke(
         programmer, argv, DEVICE_TIMEOUT_S, "ipecmd program",
-        pass_fds=(image_fd,))
+        pass_fds=(image_fd, evidence.fd))
     evidence.publish("program.log", program_output, "program transcript")
 
     failures = []

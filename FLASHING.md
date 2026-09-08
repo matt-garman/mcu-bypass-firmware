@@ -193,9 +193,10 @@ Needs Linux, Python 3, the downloaded release bundle, and MPLAB X 6.20
 is not hardware-qualified. Linux is a hard requirement of the guarded
 transaction, not a preference: the helper hands `ipecmd` its own open
 descriptors as `/proc/self/fd/<n>` pathnames. Those descriptors name private
-sealed copies for the validated image and script launchers, not mutable
-ordinary source inodes. Two kinds of object cannot be sealed, because for them
-the pathname is part of how they resolve what they load. Native ELF launchers
+sealed copies for script launchers, not mutable ordinary source inodes. Three
+kinds of object cannot be handed over sealed, because a JVM canonicalises the
+pathname it is given and a sealed anonymous copy canonicalises to
+`/memfd:<name> (deleted)`, which does not exist. Native ELF launchers
 need `$ORIGIN` and `/proc/self/exe` library lookup: they run from the retained
 source descriptor only when the operator neither owns nor can write that inode;
 an operator-mutable native launcher is refused before any command. A JAR needs
@@ -206,7 +207,18 @@ descriptor, but an operator-writable one is **recorded rather than refused**:
 `ipecmd.jar` is a stub whose `Class-Path` reaches roughly two hundred sibling
 jars, and those siblings — the code that actually drives the programmer — cannot
 be pinned by any means, so a refusal would imply a guarantee the JAR route has
-never been able to make. Where the
+never been able to make.
+
+The **image** is the third. `ipecmd` answers `Hex file not found.` for a sealed
+copy and programs nothing, so the writer is handed the retained `image.hex`
+under the evidence directory's own descriptor instead. The image can therefore
+be substituted between its final digest and the erase — a window this
+transaction cannot close. What it does instead is make that substitution
+unable to pass: the post-write readback compares the device against the bytes
+recorded in `reservation.json`, never against the file on disk, so a swapped
+image produces a `FAIL` naming every word that differs. Detected rather than
+prevented. The sealed copy still exists as the reference the snapshot is proved
+against immediately before the write. Where the
 required descriptor paths, immutable source, `memfd_create`, or
 write/grow/shrink/final seals are unavailable, the helper fails closed. Python
 builds that omit `os.memfd_create` use the same kernel facility through libc
@@ -284,13 +296,13 @@ is also pinned by content, and re-checked immediately before every command it is
 given, so a tool replaced or edited part-way through a transaction is diagnosed
 instead of silently accepted. The child consumes only sealed copies whose seal
 sets and post-copy digests were verified, or a native source inode proved
-operator-read-only, or a JAR addressed by its retained source descriptor;
-replacing a pathname or rewriting an operator-owned inode after the last source
-check therefore cannot change what runs or what gets written. `reservation.json`
-records the exact `sealed`, `operator-read-only-source` or `source-descriptor`
-mechanism independently for the image, programmer, and Java runtime when the JAR
-form is used, alongside `programmer_operator_writable`, which states plainly
-whether the operator could have altered the tool that ran.
+operator-read-only, a JAR addressed by its retained source descriptor, or the
+retained image snapshot re-proved against its sealed copy immediately before the
+erase. `reservation.json` records the exact mechanism independently for the
+image (`evidence-snapshot`), programmer (`sealed`, `operator-read-only-source`
+or `source-descriptor`), and Java runtime when the JAR form is used, alongside
+`programmer_operator_writable`, which states plainly whether the operator could
+have altered the tool that ran.
 
 The evidence directory itself is made durable before the device is touched. The
 helper opens its parent once, then creates, attaches, cleans up and flushes the
