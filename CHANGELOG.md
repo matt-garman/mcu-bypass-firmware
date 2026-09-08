@@ -45,6 +45,8 @@ historical records and are not retroactively compacted by this policy.
 
 ## [Unreleased]
 
+## [0.9.14] - 2026-09-08
+
 ### Added
 
 - **A release now records what its soak result is valid for.** Published images
@@ -4643,7 +4645,8 @@ historical records and are not retroactively compacted by this policy.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.13...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.14...HEAD
+[0.9.14]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.10...v0.9.11
