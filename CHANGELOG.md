@@ -229,6 +229,36 @@ historical records and are not retroactively compacted by this policy.
   can no longer exist without a local counterpart, where before it only had to
   be mentioned in a comment.
 
+  **The artifact-commit verifier dispatches through a declared goal.** The last
+  gate composition in the release path that lived in a shell script was
+  `scripts/verify-release-artifact-commit.sh`'s `make $gates STRICT_TOOLS=1
+  <pins>`, assembled at run time and therefore readable by nothing. It is now
+  `release-artifact-gates`: which gates (`RELEASE_ARTIFACT_GATES`, by name, so
+  the two cannot diverge), what policy (`STRICT_TOOLS=1`, the whole of what the
+  goal owns), and a refusal to run at all on an empty inventory rather than
+  proving a release publishable by running nothing.
+
+  It is the one declared goal no workflow invokes, and none can -- the artifact
+  commit does not exist until an operator has committed by hand, after
+  `make-release.sh` has finished -- so it lives in a new `RELEASE_PATH_GOALS`
+  rather than `RELEASE_GOALS`, which keeps meaning "what `release.yml` runs" and
+  stays checkable against that file.
+
+  Moving the composition found what reading it would not have. The script handed
+  those gates `release.yml`'s three independent pins, and not one of the eight
+  reads any of them -- not in its recipe, not in the script it runs. What they
+  did do was arrive at the gates' own nested Makes as *environment* origin,
+  which is unreviewed build input by the release guard's own definition;
+  `test-release-preflight`, a member of the list, scrubs inherited build-input
+  names before its first case for exactly that reason. So the goal takes no
+  pins, the script no longer parses `release.yml` at all, and that emptiness is
+  asserted from both ends: the goal must require no pin, and the script must
+  hand none over. A pin no consumer reads is not strictness -- it is a value to
+  keep in step for nothing. Its behavioural suite drops the three checks that
+  guarded the pin plumbing and gains the assertion that no pin reaches the
+  gates; it also stops skipping when PyYAML is absent, because the parse that
+  needed PyYAML is gone.
+
   One harvester defect surfaced on the way. `test-makefile-name-contract` treats
   a quote directly after a `print-<VAR>` query as the start of a shell expansion
   -- correct for `mkv part_"$n"`, wrong for a Python argv list like

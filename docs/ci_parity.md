@@ -290,6 +290,24 @@ release re-opens the window if it is not added there too. After Part 1 lands,
 this list becomes the body of the release-side `ci-` goal, and the local run
 and the public attestation are the same composition by construction.
 
+That landed as `release-artifact-gates`, and it is deliberately NOT in
+`RELEASE_GOALS`: no workflow invokes it, and none can, because the artifact
+commit does not exist until an operator has committed by hand after
+`make-release.sh` has finished. It sits in `RELEASE_PATH_GOALS` so
+`RELEASE_GOALS` can keep meaning "what `release.yml` runs" and stay checkable
+against that file.
+
+Moving the composition turned up something reading it never would have. The
+script handed those gates `release.yml`'s three independent pins, and **not one
+of the eight reads any of them** -- not in its recipe, not in the script it
+runs. What they did do was arrive at the gates' own nested Makes as
+*environment* origin, which is unreviewed build input by the release guard's own
+definition; `test-release-preflight`, a member of the list, has to scrub
+inherited build-input names before its first case for exactly that reason. So
+the goal takes no pins, the script no longer parses `release.yml` at all, and
+the emptiness of that pin set is now asserted from both ends. A pin no consumer
+reads is not strictness -- it is a value to keep in step for nothing.
+
 **Hard refusal.** The tag and push commands are not printed by
 `make-release.sh` at all. They are printed by this script, on success only, and
 it exits non-zero otherwise. An operator who never runs it never receives a tag
@@ -333,11 +351,11 @@ shape.
 | 1c | `release.yml` likewise, sharing `ci-pic` and adding `RELEASE_GOALS` for the work release does differently (**done**) | a release rebuild that skips the clean, or stops re-running CI's own PIC gate |
 | 2 | `ci-local.sh` reads the sequence from Make (**done**) | a CI goal with no local counterpart; a local handler for a gate CI retired |
 | 3 | `test-ci-parity` in `make test` | a workflow step with no local counterpart; a dropped pin |
-| 4 | `verify-release-artifact-commit.sh` + recipe hard refusal | every post-staging failure, at zero cost |
+| 4 | `verify-release-artifact-commit.sh` + recipe hard refusal (**done**) | every post-staging failure, at zero cost; a gate dispatched outside the declared goal; a pin handed to gates that do not read it |
 | 5 | `--dry-run` builds the artifact-commit shape | the same, before the soak rather than after |
 
-Increment 4 is the highest value per line and does not depend on 1-3. Do it
-first if the restructure has to wait.
+Increment 4 was the highest value per line and did not depend on 1-3, so it
+landed first; its goal-composition half waited for Part 1, as noted above.
 
 ## What this does not do
 

@@ -3342,6 +3342,17 @@ CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny20
 RELEASE_GOALS = release-rebuild release-test-long release-attiny202
 WORKFLOW_GOALS = $(CI_GOALS) $(RELEASE_GOALS)
 
+# A goal no WORKFLOW invokes, and none can: scripts/verify-release-artifact-commit.sh
+# runs it against the artifact commit, a tree that does not exist until an
+# operator has committed by hand, after make-release.sh has finished. It is
+# declared for the same reason the workflow goals are -- so a gate composition
+# and its strictness live beside the gates rather than inside a shell script --
+# and it joins the declared set for .PHONY and for the routing checks. It stays
+# OUT of RELEASE_GOALS, which means "what release.yml runs"; a list that also
+# carried goals no workflow invokes could not be checked against the workflow.
+RELEASE_PATH_GOALS = release-artifact-gates
+DECLARED_GOALS = $(WORKFLOW_GOALS) $(RELEASE_PATH_GOALS)
+
 # --- what the LOCAL mirror does with those goals -----------------------------
 # scripts/ci-local.sh runs the CI goals in THIS order. Declaring the order here
 # rather than in that script's comment header is the whole of this increment:
@@ -3393,7 +3404,7 @@ endif
 # distinguishes a caller's pin from this file's own answer.
 ci_pin = $(if $(filter command line,$(origin $(1))),,$(error $@ requires $(1) to be supplied on the command line; it is pinned by the caller so a mismatch with this Makefile's default fails instead of agreeing with itself))
 
-.PHONY: $(WORKFLOW_GOALS)
+.PHONY: $(DECLARED_GOALS)
 
 # The classic-AVR parts a CI build matrix must cover, DERIVED from the same
 # TINYX5 list that generates their targets rather than restated. A hosted matrix
@@ -3606,6 +3617,29 @@ release-attiny202:
 		XT_STACK_MAX_FRAME="$(XT_STACK_MAX_FRAME)"
 	$(MAKE) attiny202-test-target STRICT_TOOLS=1 \
 		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)"
+
+# Every gate whose verdict the artifact commit can change, run on that commit.
+# The composition used to live in scripts/verify-release-artifact-commit.sh, as
+# a `make $gates STRICT_TOOLS=1 <pins>` assembled in shell -- the last gate
+# composition in the release path that no declared goal owned, and so the last
+# one no check could read.
+#
+# STRICT_TOOLS=1 for the reason CI sets it: a gate that skips for want of a tool
+# must fail the run that decides whether a release is publishable, never pass it
+# quietly. That is the whole of the policy this goal owns.
+#
+# It takes NO pins, deliberately, and that is a change from what the script did.
+# The script passed release.yml's three independent pins to these gates; not one
+# of the eight reads any of them, in its recipe or in the script it runs. What
+# they did do was arrive at the gates' own nested Makes as ENVIRONMENT origin,
+# which is unreviewed build input by the release guard's own definition --
+# test-release-preflight, a member of this list, has to scrub inherited
+# build-input names before its first case for exactly that reason. A pin that no
+# consumer reads is not strictness; it is a value to keep in step for nothing.
+# A gate added here that DOES read one must be given it deliberately.
+release-artifact-gates:
+	$(if $(strip $(RELEASE_ARTIFACT_GATES)),,$(error RELEASE_ARTIFACT_GATES is empty: this goal would prove the artifact commit publishable by running nothing))
+	$(MAKE) $(RELEASE_ARTIFACT_GATES) STRICT_TOOLS=1
 
 # The smoke soak's duration is policy, not a host pin: it says how much soak a
 # CI run is worth, which is the project's decision and the same everywhere.

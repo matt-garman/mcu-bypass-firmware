@@ -324,8 +324,9 @@ separation between the first and the third is enforced rather than conventional.
    `release/vX.Y.Z/` and the registry append. It repeats the two checks tag CI
    makes before it builds anything (the detached checksum signature, and the
    history rule above against `HEAD`), then runs every gate whose verdict this
-   commit can change: `RELEASE_ARTIFACT_GATES` in the `Makefile`, bounded by
-   what step 3 is allowed to contain. It prints the tag and push commands on
+   commit can change -- `make release-artifact-gates`, whose list is
+   `RELEASE_ARTIFACT_GATES` in the `Makefile`, bounded by what step 3 is allowed
+   to contain. It prints the tag and push commands on
    success and nothing on failure, and `scripts/make-release.sh` no longer
    prints them at all -- so a release that has not proved itself yields no
    command to paste. `v0.9.12` was lost to precisely this window: it passed

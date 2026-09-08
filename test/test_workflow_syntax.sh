@@ -1331,6 +1331,19 @@ check(
     f"Makefile: RELEASE_GOALS is {RELEASE_GOALS!r}, expected the reviewed three",
 )
 
+# A goal the release PATH runs and no workflow does: the artifact commit exists
+# only after an operator has committed by hand, which is a tree no workflow can
+# produce. It is declared so that its composition and its strictness are read
+# from a recipe like every other one, and it stays out of RELEASE_GOALS so that
+# list can keep meaning "what release.yml runs" and be checked against the file.
+RELEASE_PATH_GOALS = makefile_goal_list("RELEASE_PATH_GOALS")
+check(
+    RELEASE_PATH_GOALS == ("release-artifact-gates",),
+    f"Makefile: RELEASE_PATH_GOALS is {RELEASE_PATH_GOALS!r}, expected the "
+    "reviewed one",
+)
+DECLARED_GOALS = WORKFLOW_GOALS + RELEASE_PATH_GOALS
+
 
 def check_resource_routes(commands, surface, routes):
     for goal, expected in routes.items():
@@ -1433,7 +1446,7 @@ if check(
 # to the prerequisite database above. Without these edges every reachability
 # question asked through a wrapper would answer "no" and the routing checks
 # below would pass vacuously on a job that still runs the gate.
-for ci_goal in WORKFLOW_GOALS:
+for ci_goal in DECLARED_GOALS:
     for goals, _, _ in ci_goal_commands(ci_goal):
         make_edges.setdefault(ci_goal, set()).update(goals)
 
@@ -2378,6 +2391,102 @@ if check(isinstance(release_job, dict), "release.yml: required job 'release' is 
         check_resource_routes(
             ci_goal_commands(goal), f"Makefile {goal}",
             CI_GOAL_RESOURCE_ROUTES[goal],
+        )
+
+    # --- the artifact-commit verifier's composition -------------------------
+    # The last gate composition in the release path that lived in a shell
+    # script: `make $gates STRICT_TOOLS=1 <pins>`, assembled by
+    # verify-release-artifact-commit.sh and therefore readable by nothing.
+    # It is now a goal, and these are the three properties that made it worth
+    # moving: WHICH gates (the declared list, by name, so the two cannot
+    # diverge), WHAT policy (strictness, the whole of what the goal owns), and
+    # WHAT ELSE (nothing).
+    artifact_recipe = ci_goal_commands("release-artifact-gates")
+    check(
+        artifact_recipe == [
+            (("$(RELEASE_ARTIFACT_GATES)",), {"STRICT_TOOLS": "1"}, False),
+        ],
+        "Makefile: release-artifact-gates no longer runs exactly "
+        "$(RELEASE_ARTIFACT_GATES) under STRICT_TOOLS=1: "
+        + " | ".join(
+            " ".join(goals) + "".join(f" {k}={v}" for k, v in a.items())
+            for goals, a, _ in artifact_recipe
+        ),
+    )
+    # No pins, and that is an assertion. The script used to hand these gates
+    # release.yml's three independent pins; not one of the eight reads any of
+    # them, in its recipe or in the script it runs, and what they did do was
+    # reach the gates' own nested Makes as ENVIRONMENT origin -- unreviewed
+    # build input by the release guard's own definition, which is why
+    # test-release-preflight (a member of this list) scrubs inherited
+    # build-input names before its first case. A gate added here that genuinely
+    # reads a pin must be given it deliberately, and fail this check first.
+    artifact_pins = ci_goal_pins("release-artifact-gates")
+    check(
+        artifact_pins == [],
+        f"Makefile: release-artifact-gates requires pin(s) {artifact_pins!r}; "
+        "no gate it runs reads one",
+    )
+    # An empty inventory must refuse, not run zero gates and report the commit
+    # publishable. The script checks this too, earlier and with a friendlier
+    # diagnostic; the goal is what any other caller gets.
+    check(
+        any("RELEASE_ARTIFACT_GATES" in line and "$(error" in line
+            for line in ci_goal_recipe("release-artifact-gates")),
+        "Makefile: release-artifact-gates does not refuse an empty "
+        "RELEASE_ARTIFACT_GATES, so it would prove a release publishable by "
+        "running nothing",
+    )
+
+    # The script must reach the gates through that goal and no other way -- the
+    # same rule every workflow step is held to. The workflow step parser is not
+    # reusable here: it joins continuations into one logical line, and this
+    # script's `make ... || die "<multi-line message>"` leaves an unbalanced
+    # quote that shlex refuses, so every command would silently drop out and the
+    # check would pass on an empty list. Scan lines instead, skipping comments
+    # and requiring `make` in command position -- at the start of a line or
+    # right after `$(`. Prose is full of the word: the header says
+    # "make-release.sh", and the printed handoff explains that no workflow can
+    # "make two separate GitHub API operations atomic", which a looser scan
+    # reported as a Make goal named "two". print- is a variable read, not
+    # dispatch, and is excluded by name.
+    verifier_path = os.path.join(root, "scripts", "verify-release-artifact-commit.sh")
+    if check(os.path.isfile(verifier_path),
+             "scripts/verify-release-artifact-commit.sh: missing"):
+        with open(verifier_path, encoding="utf-8") as fh:
+            verifier_text = fh.read()
+        verifier_goals = []
+        for raw in verifier_text.splitlines():
+            if raw.lstrip().startswith("#"):
+                continue
+            for match in re.finditer(r"(?:^|\$\()\s*make\s+(.*)$", raw):
+                words = [
+                    word.strip("()\"'")
+                    for word in match.group(1).split()
+                    if word != "\\" and not word.startswith("-")
+                    and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word)
+                ]
+                if words:
+                    verifier_goals.append(words[0])
+        dispatched = [g for g in verifier_goals if not g.startswith("print-")]
+        check(
+            dispatched == ["release-artifact-gates"],
+            "scripts/verify-release-artifact-commit.sh must dispatch the gates "
+            "through release-artifact-gates and nothing else; it runs: "
+            + ", ".join(dispatched or ["(nothing -- did the scan break?)"]),
+        )
+        # The pins are gone from the script, not merely unused by the goal:
+        # re-adding the release.yml parse would restore an environment-origin
+        # leak into every nested Make these gates run. Scoped to the dispatch
+        # section, because the handoff below it legitimately names
+        # RELEASE_SIGNING_FINGERPRINT.
+        dispatch_section = verifier_text.split("# 3. The gates")[-1].split("# 4. Hand off")[0]
+        leaked = sorted(set(re.findall(r"\bRELEASE_[A-Z0-9_]+\b", dispatch_section))
+                        - {"RELEASE_ARTIFACT_GATES"})
+        check(
+            not leaked,
+            "scripts/verify-release-artifact-commit.sh hands the gates "
+            f"{leaked!r} again; no gate it runs consumes one",
         )
 
     # Nothing in release.yml may reach a gate except through a declared goal.

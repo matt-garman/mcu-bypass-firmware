@@ -44,15 +44,10 @@ fail() {
 	exit 1
 }
 
-if ! command -v python3 >/dev/null 2>&1 \
-   || ! python3 -c 'import yaml' >/dev/null 2>&1; then
-	if [ -n "${STRICT_TOOLS:-}" ]; then
-		printf 'ERROR: PyYAML absent and STRICT_TOOLS=1 (apt: python3-yaml)\n' >&2
-		exit 1
-	fi
-	printf 'release artifact commit validation: SKIPPED (PyYAML absent; apt: python3-yaml)\n'
-	exit 0
-fi
+# No optional-tool guard: this suite needs bash, git and make and nothing else.
+# It used to skip without PyYAML, because the script parsed release.yml for the
+# independent pins it handed the gates. It passes no pins now, so a skip here
+# would be a gate declining to run for a reason that has ceased to exist.
 
 # ---------------------------------------------------------------------------
 # Fixture: a repository whose shape is the one the real script reads, with the
@@ -61,7 +56,7 @@ fi
 setup_fixture() {
 	rm -rf "$repo" "$state"
 	mkdir -p "$state"
-	mkdir -p "$repo/scripts" "$repo/.github/workflows" "$repo/release/$version"
+	mkdir -p "$repo/scripts" "$repo/release/$version"
 	cp "$SCRIPT_SOURCE" "$repo/scripts/verify-release-artifact-commit.sh"
 	cp "$POLICY_SOURCE" "$repo/scripts/release-signing-policy.sh"
 	chmod 755 "$repo/scripts/verify-release-artifact-commit.sh"
@@ -83,32 +78,28 @@ setup_fixture() {
 		chmod 755 "$repo/scripts/$stub"
 	done
 
-	cat > "$repo/.github/workflows/release.yml" <<-'YAML'
-	name: Release
-	on:
-	  push:
-	    tags:
-	      - 'v[0-9]+.[0-9]+.[0-9]+'
-	env:
-	  DEBIAN_FRONTEND: noninteractive
-	  RELEASE_XT_STATIC_RAM_LIMIT: "16"
-	  RELEASE_PIC12F675_DATA_LIMIT: "48"
-	jobs:
-	  release:
-	    runs-on: ubuntu-24.04
-	    steps:
-	      - run: "true"
-	YAML
+	# Deliberately NO .github/workflows/release.yml. The script used to read
+	# that file for the pins it handed the gates; a fixture that still shipped
+	# one would let a re-introduced dependency on it pass unnoticed.
 
 	# The stub suite records exactly what it was asked to run, so the positive
 	# case can assert the goals, the strictness flag and the pins actually
 	# reached it rather than that the script exited zero.
+	# release-artifact-gates is spelled here as the real Makefile spells it:
+	# the script now invokes the GOAL, so a fixture that dispatched the gates
+	# some other way would stop testing what the script does. That the real
+	# recipe still reads this way is asserted separately, against the recipe,
+	# in test_workflow_syntax.sh.
 	cat > "$repo/Makefile" <<'MAKEFILE'
 RELEASE_ARTIFACT_GATES = gate-one gate-two
 
-.PHONY: gate-one gate-two
+.PHONY: release-artifact-gates gate-one gate-two
+release-artifact-gates:
+	$(if $(strip $(RELEASE_ARTIFACT_GATES)),,$(error RELEASE_ARTIFACT_GATES is empty))
+	$(MAKE) $(RELEASE_ARTIFACT_GATES) STRICT_TOOLS=1
+
 gate-one gate-two:
-	@printf '%s STRICT_TOOLS=%s XT_STATIC_RAM_LIMIT=%s PIC12F675_DATA_LIMIT=%s\n' \
+	@printf '%s STRICT_TOOLS=%s PINS=[%s%s]\n' \
 		$@ "$(STRICT_TOOLS)" "$(XT_STATIC_RAM_LIMIT)" \
 		"$(PIC12F675_DATA_LIMIT)" >> $(ARTIFACT_FIXTURE_STATE)/gates.log
 	@test ! -f $(ARTIFACT_FIXTURE_STATE)/gates.fail
@@ -158,11 +149,18 @@ output=$(run_verify "$version") || fail "a publishable artifact commit was refus
 checks=$((checks + 3))
 
 [ -f "$state/gates.log" ] || fail "the release-artifact gates never ran"
-grep -q '^gate-one STRICT_TOOLS=1 XT_STATIC_RAM_LIMIT=16 PIC12F675_DATA_LIMIT=48$' \
-	"$state/gates.log" \
-	|| fail "the gates did not receive STRICT_TOOLS=1 and the workflow's pins: $(cat "$state/gates.log")"
+# STRICT_TOOLS=1 is the whole of the policy the goal owns, and it must reach
+# every gate: one that skipped for want of a tool would otherwise help report a
+# release publishable on evidence nobody gathered.
+grep -q '^gate-one STRICT_TOOLS=1 PINS=\[\]$' "$state/gates.log" \
+	|| fail "the gates did not receive STRICT_TOOLS=1, or received a pin: $(cat "$state/gates.log")"
 grep -q '^gate-two ' "$state/gates.log" \
 	|| fail "not every gate in RELEASE_ARTIFACT_GATES ran"
+# The empty PINS field is an assertion, not an accident. The script used to hand
+# these gates release.yml's independent pins; none of the eight reads one, and
+# they reached the gates' own nested Makes as environment origin -- unreviewed
+# build input by the release guard's own definition. Passing them again must be
+# a deliberate act that fails here first.
 checks=$((checks + 3))
 
 # --- the tree under test must be the tree the tag would name ----------------
@@ -230,25 +228,6 @@ printf 'this is not a makefile\n' > "$repo/Makefile"
 git -C "$repo" add -A
 git -C "$repo" -c commit.gpgsign=false commit -qm broken-makefile
 expect_refusal "unreadable gate inventory" "cannot read RELEASE_ARTIFACT_GATES" "$version"
-
-# --- the independent pins ---------------------------------------------------
-# The pins exist to be set apart from Make's production defaults so that a
-# mismatch fails instead of agreeing with itself. A workflow that declares none
-# would silently hand the gates those defaults back.
-setup_fixture
-python3 - "$repo/.github/workflows/release.yml" <<'PY'
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as handle:
-    text = handle.read()
-text = "\n".join(line for line in text.splitlines()
-                 if not line.strip().startswith("RELEASE_"))
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    handle.write(text + "\n")
-PY
-git -C "$repo" add -A
-git -C "$repo" -c commit.gpgsign=false commit -qm unpinned
-expect_refusal "workflow declares no pins" "declares no RELEASE_* pins" "$version"
 
 # --- arguments --------------------------------------------------------------
 setup_fixture

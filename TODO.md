@@ -52,8 +52,10 @@ workflow runs as a Make goal, have each workflow step invoke exactly one of
 them, run the same goals locally, and check that shape rather than compare two
 hand-maintained inventories. The publishability gate that document's Part 3
 describes is done; every step in BOTH workflows now invokes a declared goal;
-and `scripts/ci-local.sh` now EXECUTES the inventory rather than describing it.
-What remains is the rest of the parity gate and Part 4.
+`scripts/ci-local.sh` now EXECUTES the inventory rather than describing it; and
+the artifact-commit verifier dispatches through a declared goal too, which was
+the last gate composition in the release path living in a shell script. What
+remains is the rest of the parity gate and Part 4.
 
 The wiring is not separable from the gate. `test/test_workflow_syntax.sh`
 locates each job's strict-suite step by its literal command and anchors seven
@@ -104,6 +106,17 @@ checks that retired were replaced by a chain that is strictly stronger --
 `ci.yml`'s invoked goals must equal `CI_GOALS`, that must partition into the
 local lists, and every sequenced goal must have a handler -- where the old one
 proved only that someone had typed a job name into a comment.
+
+`release-artifact-gates` is the one declared goal no workflow invokes, and none
+can: the artifact commit does not exist until an operator has committed by hand
+after `make-release.sh` finishes. It lives in `RELEASE_PATH_GOALS` rather than
+`RELEASE_GOALS` so the latter keeps meaning "what `release.yml` runs" and stays
+checkable against that file. Moving the composition found what reading it would
+not have: the verifier handed those gates `release.yml`'s three independent
+pins, and none of the eight gates reads any of them -- while they did reach the
+gates' own nested Makes as environment origin, which `test-release-preflight`
+(a member of the list) already scrubs against. The goal takes no pins, and that
+emptiness is now asserted from both ends.
 
 Acceptance: every `run:` step in both
 workflows invokes exactly one declared goal, with its required pins, and

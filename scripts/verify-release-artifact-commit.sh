@@ -29,7 +29,13 @@
 #   append. A gate that reads neither cannot change its verdict between the
 #   qualified source and this commit, so re-running the whole suite here would
 #   buy nothing for the hours it costs. The gates that DO read them are named
-#   by RELEASE_ARTIFACT_GATES in the Makefile, beside the rule for membership.
+#   by RELEASE_ARTIFACT_GATES in the Makefile, beside the rule for membership,
+#   and composed by the release-artifact-gates goal beside them.
+#
+#   Those gates take no independent pins. This script used to hand them
+#   release.yml's three, and not one of the eight reads any of them; what they
+#   did do was reach the gates' own nested Makes as environment origin, which
+#   the release guard treats as unreviewed build input.
 #
 # THIS SCRIPT CHANGES NOTHING. Like make-release.sh, it commits, tags and
 # pushes nothing; every Git operation below is a read.
@@ -120,38 +126,23 @@ ok "HEAD is a single-parent child of the qualified source and changes only $RELE
 # ----------------------------------------------------------------------------
 # 3. The gates whose verdict this commit can change.
 # ----------------------------------------------------------------------------
-# The pins come out of the release workflow rather than being restated here:
-# they exist to be set independently of Make's production defaults so that a
-# mismatch fails instead of agreeing with itself, and a second copy in this
-# file would be one more thing to drift.
-release_pins_text=$(
-	python3 - "$REPO_ROOT/.github/workflows/release.yml" <<-'PY'
-	import sys
-
-	import yaml
-
-	with open(sys.argv[1], encoding="utf-8") as handle:
-	    workflow = yaml.safe_load(handle)
-	env = workflow.get("env") or {}
-	for name, value in sorted(env.items()):
-	    if name.startswith("RELEASE_"):
-	        print("%s=%s" % (name[len("RELEASE_"):], value))
-	PY
-) || die "cannot read the release workflow's independent pins (PyYAML absent?)"
-[ -n "$release_pins_text" ] \
-	|| die "the release workflow declares no RELEASE_* pins; refusing to run the gates unpinned"
-mapfile -t release_pins <<<"$release_pins_text"
-
+# WHICH gates, and under what policy, is the Makefile's to say: `make
+# release-artifact-gates` runs RELEASE_ARTIFACT_GATES under STRICT_TOOLS=1, and
+# refuses outright if that list is empty. This script used to assemble that
+# command here -- the last gate composition in the release path that no declared
+# goal owned, and so the last one no check could read. Invoking the goal means
+# the composition is checked against its recipe like every other one.
+#
+# The list is still read here, for the report below and so that an empty or
+# unreadable inventory is refused BEFORE anything runs, with a diagnostic that
+# names the file to fix rather than a failed sub-make.
 gates=$(make CC=: --no-print-directory print-RELEASE_ARTIFACT_GATES) \
 	|| die "cannot read RELEASE_ARTIFACT_GATES from the Makefile"
 [ -n "$gates" ] || die "RELEASE_ARTIFACT_GATES is empty"
 
 printf '\nrunning the release-artifact gates on %s:\n  %s\n\n' \
 	"${release_commit:0:12}" "$gates"
-# STRICT_TOOLS=1 for the same reason CI sets it: a gate that skips because a
-# tool is missing must fail this run, not pass it quietly.
-# shellcheck disable=SC2086
-make $gates STRICT_TOOLS=1 "${release_pins[@]}" \
+make release-artifact-gates \
 	|| die "the release-artifact gates failed on HEAD.
 This is the failure tag CI would have reported after the tag was pushed and
 spent. Fix it on a NEW source commit, re-run the release, and tag that."
