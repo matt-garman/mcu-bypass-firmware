@@ -24,7 +24,7 @@
 | A2 | Convert verbatim prose pins to marker blocks + keyword sets | Strictness | ~1 d | **done** |
 | A3 | Move the pinned measurement out of the design document | Strictness | 1 h | **done** |
 | A4 | Reconcile README and design doc with the gates that survive A2 | Strictness | 2 h | **done** |
-| A5 | Write down the enforcement register | Strictness | 2 h | open |
+| A5 | Write down the enforcement register | Strictness | 2 h | **done** |
 | B1 | Restructure README for its two audiences | README | 3-4 h | open |
 | B2 | Create the governance document | README | 2-3 h | open |
 | B3 | Plumb the new document through the gates | README | 1 h | open |
@@ -37,6 +37,13 @@ Ordering: **A1 and A2 first.** Everything else in A and B is easier once the
 release ritual and the prose pins stop fighting ordinary editing. C is the
 round's durable output and can proceed in parallel. D is a holding area — most
 of it belongs in `TODO.md` or in **Considered and declined**, not here.
+
+**Workstream A is complete.** A1 and A3 removed the two verbatim techniques, A2
+converted the prose pins, A4 closed the reconciliation (mostly by the gates
+themselves, at `c8bd782`), and A5 wrote the register describing the result. The
+register currently lives in A5's own section because B2 does not exist yet; **B2
+must move it**, and B3 must plumb its home through the gates. That is the one
+hard dependency this workstream leaves behind.
 
 ---
 
@@ -720,6 +727,114 @@ Produce a table: claim, owning document, technique, the defect that motivated
 it. It lands in the governance document (B2), not in the README.
 
 Size: 2 h. Depends on A2 (the table describes the post-conversion state).
+
+**Landed — the register follows.** It is parked here rather than published
+because its home is B2's governance document, which does not exist yet. That is
+the plan's own sequencing (A5 writes the content, B2 creates the home, B3 plumbs
+it through the gates), and it is also the only placement that trips nothing: a
+new root-level Markdown file fails `release_reject_branch_only_documents` until
+it is added to the durable set, and `docs/` would pre-empt a structure decision
+that belongs to B2. When B2 lands, this section **moves** rather than being
+rewritten.
+
+#### How to read it
+
+Three techniques survive A1–A3, and none costs the author a word:
+
+| # | Technique | What it holds | Author may freely change |
+|---:|---|---|---|
+| 1 | **Fenced claim** — named marker pair plus required term groups | that the claim's load-bearing terms are all still present | every word, order, emphasis, wrapping |
+| 2 | **Form-family ban** — one ERE over flowed text | that a *false* claim is not made in any spelling of its family | anything that is not that claim |
+| 3 | **Structural / derived** — presence, ordering, agreement, or rendering | shape and single-ownership, never phrasing | all prose around it |
+
+A term group is an alternation matched case-insensitively on whole words, over
+the block's text with markup flowed away. A single word is just a keyword, so
+keyword sets and form families share one implementation. The two techniques the
+project used to rely on — requiring a verbatim sentence, and requiring a
+verbatim line — are **retired**: A1 made the derived release lines machine-
+written, A2 converted the prose pins, A3 took the last one.
+
+#### 1. Fenced claims
+
+Deleting a fence is not a shortcut around these: an absent fence and a malformed
+one fail identically, and both name the marker.
+
+| Marker | Owning document(s) | The claim it owns | Defect that motivated it |
+|---|---|---|---|
+| `qualification-status` | `README.md` | controlled hardware qualification is outstanding, and what that term requires | the pre-v0.9.10 conflation of field use with controlled qualification |
+| `controlled-qualification` | `HARDWARE_VALIDATION_LOG.md` | every controlled record carries all eleven required fields | a run missing any field is a field-use report however careful; without the fields a reader can neither reproduce it nor bound what it missed |
+| `field-reports` | `HARDWARE_VALIDATION_LOG.md` | field use is recorded apart from qualification, and **before** it | the ordering is checked, so the two kinds of evidence cannot merge by editing |
+| `pic12f675-helper-required` | `README.md`, `FLASHING.md` | the part needs the release helper because per-device factory calibration must be preserved **and verified** | a raw programmer write destroys the part's only copy of its factory trim — a hardware hazard, not bookkeeping |
+| `pic12f675-helper-status` | `README.md`, `FLASHING.md`, `release/README.md` | the `ipecmd` route is published **and** software-tested **and** not hardware-qualified | `FLASHING.md` published the procedure while `README.md` and `TOOLCHAIN.adoc` denied one existed; a reader believing either was misled about the other |
+| `pic12f675-disposition` | `DESIGN_DOCUMENTATION.adoc` | release-supported from `v0.9.9`, not hardware-qualified, deferred to `T3-pic12f675-bench` | the gate anchored on the opening words *"A third PIC, the PIC12F675,"*; `4d85ad7` rewrote the paragraph and silently emptied the scan |
+| `pic10f320-flash-overrun` | `DESIGN_DOCUMENTATION.adoc` | the modular architecture overruns the 256-word ceiling, measured not assumed | A3 — the passage was byte-pinned, and its provenance clause was itself the mitigation for a measurement sitting in durable prose |
+| `pic10f320-recorded-omission` | `DESIGN_DOCUMENTATION.adoc` | which context check was left out, and that the reason was capacity | the part ships a general defence its 256 words could not hold; without the reason the omission reads as an oversight to fix |
+| `pic10f320-assurance-seam` | `DESIGN_DOCUMENTATION.adoc` | what the assurance package does **not** establish | losing it turns a hand-inlined part's behavioural argument into a byte-identity claim it never made |
+| `image-attestation` | `release/README.md` | what reproducing an image publicly attests | reproduction proves bytes match tested source; it does not qualify firmware, and this block is the only thing between the two claims |
+| `historical-images` | `release/README.md` | why superseded images stay published | retaining a known-unsafe image for reproducibility is not endorsing it |
+| `document-lifecycle` | `README.md` | the lifecycle table and its authority column | the rule was anchored on the literal heading `### Document lifecycle`; capitalizing one letter failed five tests, four of them self-tests using the live README as their control fixture |
+
+#### 2. Form-family bans
+
+Each bans a *false* claim in every spelling of its family, over flowed text so a
+rewrap or an adjective swap does not evade it.
+
+| Ban | Scope | Defect that motivated it |
+|---|---|---|
+| attributive `hardware-qualified <noun>` | every durable document, **while the sentinel stands** | the predicate cannot be banned: every true sentence here *is* its negation. Adjective-plus-noun has no negated spelling, which is what makes it decidable. A floor, not a proof — and it lifts by itself when the sentinel goes |
+| unscoped *"no ipecmd procedure is published"* | durable documents | the B6 contradiction. Deliberately still permits a claim **scoped to a route**, which is true of the Make-based goals and must stay sayable |
+| three retired programming claims | durable documents | *"Needs only a programmer and its CLI"*, *"needs no toolchain at all"* — each false once the helper became required |
+| raw-writer `ipecmd` commands | **command contexts only** — fenced, listing, literal, indented, inline spans | a published raw write destroys factory calibration. Prose *mentioning* a tool is not a published command, so the scan reads contexts, not sentences |
+| current release topology | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | part/image/soak counts with two owners drift; the bounded declaration in `release/README.md` is the single owner |
+| unbound measurements | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | results that change when the source changes have no stable owner in a hand-edited document |
+| dates and source revisions | `DESIGN_DOCUMENTATION.adoc` | A3 — pinning provenance is the mitigation a misplaced measurement asks for, so removing the measurement has to close that door behind it |
+
+#### 3. Structural and derived
+
+| Rule | Property | Defect that motivated it |
+|---|---|---|
+| bounded current-release declaration | exactly one, in `release/README.md`, agreeing with the canonical inventory | a second declaration elsewhere — even one that agrees today |
+| derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | A1 — seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
+| root document allowlist | any root-level `.md` outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed |
+| branch-only banner | declared working documents must be deleted and de-referenced before a release cut | a release is cut from main; none may survive there |
+| GCC floor agreement | `README.md`, `TOOLCHAIN.adoc` and `test/README.md` agree with `MINIMUM_GCC` | the enforced floor and the published floor must not drift |
+| design contract (14 ordered patterns) | safety-relevant numbers keep every figure and every part association | one pin broke when a `.` became a `;`. Negative coverage is generated from the table: delete the span a rule matches and it must stop matching |
+| `T3-pic12f675-bench` enumeration | the four open silicon-only risks stay complete and in one place | the Makefile, CI notes and release documentation cite them by number; dropping one stops tracking a risk while every citation still reads as though it were tracked |
+| lifecycle authorities | every shipped document has exactly one declared kind | a document with no owner is a document nobody has to keep true |
+
+#### 4. Known remaining pins, and why they were left
+
+Two places still hold prose to an exact spelling. Neither is an oversight; both
+are recorded here so they are decided rather than inherited.
+
+1. **`TODO.md`'s six `T3-pic12f675-bench` strings**, including their `**bold**`
+   markup — e.g. ``**1 - bandgap calibration bits (`BG<1:0>`) preserved on
+   program.**``. Half of this genuinely *is* an interface: the Makefile, the CI
+   notes and the release documentation cite these residual risks **by number**,
+   so the enumeration must stay complete and stably numbered. What is **not**
+   an interface is the bold markup and the exact phrasing around each number.
+   The numbering should stay pinned; the prose around it should become a fenced
+   claim per item.
+
+2. **The GCC floor's two accepted spellings**, `GCC <n> or newer` and
+   `Minimum host gcc version: <n>`. Listing acceptable spellings is the same
+   antipattern A2 retired everywhere else: *"GCC 10+"* or *"at least GCC 10"*
+   publishes the identical requirement and fails the gate. The real property is
+   only that *gcc appears near the enforced number*, which one form family
+   states directly.
+
+Both are small, both use machinery that already exists, and neither blocks
+anything. They belong in C3's survey rather than in an unrecorded backlog.
+
+#### 5. The rule this register exists to make sayable
+
+> A gate failure names a **property**, not a preference. Before editing a gate,
+> find the property in this register. If the property is wrong, change it here
+> first and say why. If the property is right, the document is what changes.
+
+That sentence is the whole point of A5. Every pin this branch retired was
+retired because an author hit a gate, could not tell what it was protecting, and
+had no cheaper repair available than editing the rule.
 
 ---
 
