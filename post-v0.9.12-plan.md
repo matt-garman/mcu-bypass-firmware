@@ -25,7 +25,7 @@
 | A3 | Move the pinned measurement out of the design document | Strictness | 1 h | **done** |
 | A4 | Reconcile README and design doc with the gates that survive A2 | Strictness | 2 h | **done** |
 | A5 | Write down the enforcement register | Strictness | 2 h | **done** |
-| B1 | Restructure README for its two audiences | README | 3-4 h | open |
+| B1 | Restructure README for its two audiences | README | 3-4 h | **done** |
 | B2 | Create the governance document | README | 2-3 h | **done** |
 | B3 | Plumb the new document through the gates | README | 1 h | **done** |
 | C1 | Allowlist gate for derivable release numbers | Anti-drift | ~1 d | **done** |
@@ -43,6 +43,15 @@ converted the prose pins, A4 closed the reconciliation (mostly by the gates
 themselves, at `c8bd782`), and A5 wrote the register describing the result. The
 register now lives in `GOVERNANCE.md`, which B2 created and B3 plumbed through
 the gates, so the dependency this workstream left behind is discharged.
+
+**Workstreams B and C are complete, and with them every scheduled item.** B2
+moved the governance prose out of `README.md`, B3 plumbed the new document
+through the gates, and B1 folded what was left into a signpost. C1 closed the
+derivable-number class, C2 wrote the obligations a new gate has to discharge,
+and C3 surveyed the threshold restatements and retired the last two prose pins.
+What remains is **D**, which was never scheduled: it is a holding area, and
+most of it belongs in `TODO.md` or in that file's **Considered and declined**
+section rather than here.
 
 ---
 
@@ -776,6 +785,44 @@ How this project is run     GOVERNANCE.md
 The reasoning, the lifecycle table and the standing rules move to B2.
 
 Size: 3-4 h. Do after A2.
+
+**Landed.** B2 had already taken the ninety lines this item was sized against,
+so what remained was the signpost and the shape of what is left. Both are
+structural; **no sentence in `README.md` was rewritten**, for the same reason
+B2 gave.
+
+- *Documentation Details*, by then a three-line pointer to one document, became
+  **Where to Read Next**: eight destinations, one line each, in the same
+  register as the existing *High-level source overview* directly above it. The
+  pointer's own description survives as the `GOVERNANCE.md` row rather than
+  being compressed to "how this project is run", because it says what the
+  reader will find there.
+- *Quickstart* was two subsections doing unrelated jobs. **Flashing a Released
+  Image** and **Building from Source and Development** are now sections of
+  their own, which is the split between the two audiences: the first reader
+  stops at the end of the first, the second reader starts at the second. The
+  word *quickstart* is gone from the headings and stays true of the document,
+  which is how `GOVERNANCE.md` already describes it.
+
+The eight destinations are the plan's list unchanged. `MISRA_COMPLIANCE.md`,
+`CHANGELOG.md` and `docs/` were considered and left out: the first two are
+already linked from the sections that need them, and a signpost that lists
+everything is not a signpost. The list is navigation, not authority — it
+carries no count, version or measurement, so it restates nothing the map owns.
+
+**What was deliberately not done.** The assurance section still sits ahead of
+the flashing steps, where it reads as an interruption for the first audience.
+It stays because its last two paragraphs are the qualification status and the
+`0.9.x` versioning rule, and a reader about to write an image to a chip should
+meet those before the steps, not after. Splitting the section would put the
+pitch below the steps and the status above them; that is an editorial call
+about the maintainer's own prose, not a structural one.
+
+One gap is left open on purpose. Step 2 of the flashing list tells the reader
+to decide which image they need and does not point back to *Targets* and
+*Circuit-switching Hardware Support*, which are the two sections that answer
+it. Closing that means writing a sentence, and sentences in this document are
+the maintainer's.
 
 ### B2 — Create the governance document
 

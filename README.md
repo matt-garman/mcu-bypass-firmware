@@ -115,9 +115,7 @@ firmwares have been validated on the bench; the `1.x.y` version is
 reserved for that future state.
 
 
-## Quickstart
-
-### Flashing
+## Flashing a Released Image
 
 For flashing only, it is not necessary to clone this repository or
 obtain the complete toolchain.  Only the firmware images, hardware
@@ -161,7 +159,7 @@ requires.
 <!-- pic12f675-helper-status:end -->
 
 
-### Building from Source and Development
+## Building from Source and Development
 
 The number of supported devices results in a rather large
 development toolchain.  Toolchain details are available in
@@ -204,8 +202,13 @@ High-level source overview:
   - `bypass_config.h` - defines `RELEASE_THRESH` and `PRESSED_THRESH`, as well as some (compile-guarded) hardware-specific constants
 
 
-## Documentation Details
+## Where to Read Next
 
-How this project's documentation is owned, edited, retired, and enforced --
-the authority map, the document lifecycle, the standing rules, and what the
-release gates hold to -- is in [GOVERNANCE.md](GOVERNANCE.md).
+  - [DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc) - design and rationale
+  - [FLASHING.md](FLASHING.md) - flashing a released image
+  - [TOOLCHAIN.adoc](TOOLCHAIN.adoc) - building from source
+  - [test/README.md](test/README.md) - what the tests establish
+  - [release/README.md](release/README.md) - releases and the trust model
+  - [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md) - hardware evidence
+  - [TODO.md](TODO.md) - open work
+  - [GOVERNANCE.md](GOVERNANCE.md) - how this project's documentation is owned, edited, retired, and enforced
