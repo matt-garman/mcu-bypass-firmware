@@ -1271,6 +1271,29 @@ is scheduled for this branch.
   problem `T3-programming-guide` identifies for `MANIFEST.md`; fold it into that
   item's scope in `TODO.md`.
 
+  **Done.** `T3-programming-guide` now carries `release/README.md` as its second
+  document. One item, because it is one decision: where the reader who wants to
+  flash a chip lands. The item also records the constraints on the reorder, so
+  they are not rediscovered by whoever picks it up.
+
+  **Two of the plan's figures did not survive checking.** The four opening
+  sections are three errata and a *safety warning*, and that one is not
+  misplaced: the images it names encode a control polarity that fails to
+  ENGAGED rather than to BYPASS, and the file's opening paragraph
+  forward-references it to qualify *ready-to-flash*. Demoting it below the
+  trust material would be a regression rather than a fix. The errata are also
+  the smaller part of the delay they are blamed for -- they run 68 lines, while
+  the trust model and the release sequence between them and *Which image do I
+  want?* run 267. An item that named only the errata would have sent its reader
+  at the wrong target.
+
+  The reorder is not a free move either. Headings in that file are anchors:
+  `CHANGELOG.md` links one erratum's, and a gate requires `TOOLCHAIN.adoc` to
+  link `#flash-a-chip`. Sections may move; they may not be retitled. The
+  estimate went from 3-4 h to 4-5 h in both halves of `TODO.md`, and
+  `release/README.md` itself is untouched -- this schedules the work, it does
+  not do it.
+
 - **D6 — `TODO.md` re-ranking.** 22 of 32 items are Tier 2.5, and nearly all add
   an *Nth independent witness* to a property already proven several ways
   (`T25-stack-cross` is a third stack witness; `T25-klee-path` a third

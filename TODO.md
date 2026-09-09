@@ -712,8 +712,19 @@ output-stage keys of any description table for exact equality with the
 supported sets. Keep the renderer and its rendered-output tests at HEAD; do not
 commit a second mutable copy that can drift from the released one.
 
-Dependencies: none. Effort: about 3-4 hours including gates. Risk: Low; it
-moves already-gated generated content and adds no hardware instruction.
+`release/README.md` has the same shape for the same reader: three errata and a
+safety warning open it, and *Which image do I want?* is halfway down. The errata
+are the smaller part of that delay -- most of it is the trust model and the
+release sequence, which a first-time flasher needs only after choosing an image.
+Decide where that reader lands once and apply it to both documents.
+
+Sections there may move but must not be retitled: `CHANGELOG.md` links one
+erratum's anchor, and a gate requires `TOOLCHAIN.adoc` to link `#flash-a-chip`.
+The safety warning is not an erratum -- the opening paragraph forward-references
+it to qualify "ready-to-flash" -- so it must stay ahead of the trust material.
+
+Dependencies: none. Effort: about 4-5 hours including gates. Risk: Low; it
+moves existing gated content and adds no hardware instruction.
 
 ### T3-release-bundle - Make a downloaded release verifiable on its own
 
@@ -931,7 +942,7 @@ The stable ID in each row matches exactly one open section above.
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |
-| T3-programming-guide | Flash-first release landing page | 3 | 3-4 h | Medium - first-run experience |
+| T3-programming-guide | Flash-first release landing page | 3 | 4-5 h | Medium - first-run experience |
 | T3-release-bundle | Self-verifiable downloaded release | 3 | 4-6 h | Medium |
 | T4-manufacturing-scope | Name manufacturing deliverables as out of scope | 4 | Small | Completeness |
 | T4-spice | Footswitch-network SPICE modeling | 4 | 2 h | High for board design |
