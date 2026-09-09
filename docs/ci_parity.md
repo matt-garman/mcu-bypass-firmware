@@ -3,7 +3,7 @@
 ## The two failures this closes
 
 `v0.9.12` was qualified locally over a 24-hour soak, staged, committed, signed,
-tagged and pushed. Tag CI reproduced all 21 images bit for bit and then failed
+tagged and pushed. Tag CI reproduced every image bit for bit and then failed
 re-running `make test-long`, on a gate that had been green locally an hour
 earlier. The release was a total loss: the tag is spent, the qualification is
 bound to a source commit that must now change, and the soak has to run again.

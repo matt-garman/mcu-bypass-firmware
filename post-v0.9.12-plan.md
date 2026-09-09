@@ -28,7 +28,7 @@
 | B1 | Restructure README for its two audiences | README | 3-4 h | open |
 | B2 | Create the governance document | README | 2-3 h | **done** |
 | B3 | Plumb the new document through the gates | README | 1 h | **done** |
-| C1 | Allowlist gate for derivable release numbers | Anti-drift | ~1 d | open |
+| C1 | Allowlist gate for derivable release numbers | Anti-drift | ~1 d | **done** |
 | C2 | Obligations for a new gate | Anti-drift | 1 h | **done** |
 | C3 | Threshold restatement survey | Anti-drift | 2 h | open |
 | D1-D9 | Noted, not scheduled | — | — | see below |
@@ -901,6 +901,80 @@ register is small and each entry carries a reason.
 
 Size: ~1 d. This is the round's durable output — the thing that makes the
 cleanup stick.
+
+**Landed.** `release_validate_topology_ownership` in
+`scripts/release-documentation.sh`, exercised by `test/test_release_preflight.sh`
+and never by the release path. C1 is the first gate proposed since C2 landed, so
+it is held to C2's list, and the two obligations that changed the shape of the
+work are the two C2 added.
+
+**Removal considered first**, and it settled most of the work. Seven
+restatements sat outside the declaration, and **every one of them was better
+deleted than exempted** — the count was incidental to what the sentence was
+saying in all seven. `MISRA_COMPLIANCE.md` twice and
+`docs/relay_coil_fault_correction.md` twice were naming how many shells consume
+a symbol when the point was *which* translation units do; `docs/ci_parity.md`
+was counting the images CI reproduced when the point was that it reproduced all
+of them; `docs/release_proportionality.md` was counting soak logs an index
+lists. So the gate's first act was to make itself have less to guard, and the
+exemption register came out with **one entry**.
+
+**A retirement condition** does not exist for this one, and that is recorded
+rather than skipped: a release has a topology and a reader needs it, so the
+rule confines the fact to one declaration instead of removing it. It retires
+only if the declaration itself stops being hand-rendered.
+
+**What is derived, and from where.** Nothing in the rule is typed:
+
+- images and soak combinations, from the Makefile's canonical `RELEASE_IMAGES`
+  and `RELEASE_SOAK_NAMES`, asked the same way `release-prepare.sh` asks;
+- parts, from the distinct MCU tag in those same canonical image basenames, so
+  it cannot disagree with the set it is counted from;
+- shell source files, from the shipping shells that include the pure core;
+- modular targets, from the parts minus those built from a self-contained shell.
+
+Every step fails closed. An unreadable Makefile, an unparsable image name, or a
+self-contained shell whose filename does not name a release part stops the run
+rather than yielding a smaller number and a quieter gate. So does the scan
+itself: a walk that reads no documents is indistinguishable from a clean tree,
+which is the failure this whole rule is written against, so finding nothing is
+reported rather than passed.
+
+**The rule has two halves, and the second was the unplanned find.** The
+absence half is what the task asked for. The presence half came from reading
+`release_render_contract_line`, whose own comment says the three topology words
+in it are constants and that deriving them "is worth doing, but it is a separate
+change from removing the hand edit." Without the presence half this gate would
+have banned those words everywhere **except the one place nothing checked them**.
+So the declaration is now required to state every derived count. The renderer's
+literals stay literals, and are held to the build. Adding a part fails here
+instead of shipping a declaration that undercounts, and that cost no change to
+the renderer's arity and nothing on the release path.
+
+**Two exemptions, both structural, neither a hand-written pass.**
+`release/README.md` is the owner and is not scanned: its bounded declaration is
+required, a second bounded block anywhere is already refused by name, and its
+errata state the topology of the past releases they name. `CHANGELOG.md` is not
+scanned because the document lifecycle already classifies its release sections
+as historical accounts — each states the topology of the release it describes
+and is never edited to stay true. The single register entry,
+`docs/release_proportionality.md`, is fenced with a marker rather than named
+alone, so the exemption is visible where it applies, a restatement anywhere else
+in that document still fails, and deleting the fence fails like any other
+deleted fence. That last one is tested.
+
+**Naming the form is allowed, making it is not.** The scan blanks quoted and
+code spans, which is why this plan, `GOVERNANCE.md` and `test/README.md` can say
+what the rule refuses. That escape is deliberate and is the opposite decision
+from the unscoped-`ipecmd` denial, where publishing the form *is* the hazard.
+
+**Verified by mutation, not only by a green run.** Two mutations were applied to
+the shipped validator and the suite was re-run against each. Disabling the
+absence scan fails on the README case; replacing the derived counts with the
+literals this tree happens to have fails on the case that holds the same
+sentence to a count this tree does not have. Both were restored.
+
+Preflight: 294 to 318 checks, 0 failures.
 
 ### C2 — Obligations for a new gate
 

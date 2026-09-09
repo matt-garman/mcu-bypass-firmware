@@ -308,7 +308,7 @@ another translation unit as unused. It can also retain directives from the three
 inactive pin-map branches selected through `bypass_output_common.h`, producing
 findings against maps that are not active in the current target configuration.
 
-`bypass_config.h` has the same split. The shared core and four modular shells
+`bypass_config.h` has the same split. The shared core and the modular shells
 consume the debounce thresholds; the mute and relay drivers consume
 `RELEASE_THRESH` in timing assertions but not `PRESSED_THRESH`. A driver-only
 analysis can therefore report the latter as unused even though other project
@@ -317,7 +317,7 @@ translation units consume it.
 `bypass_output_common.h` is the header that selects one of the four maps, and it
 carries `WDT_PET_TO_PET_MAX_MS()` — the watchdog pet-to-pet budget whose
 per-target terms those maps supply. All three output-driver translation units
-expand it in a `static_assert`; the four modular shells include the header for
+expand it in a `static_assert`; the modular shells include the header for
 its map selection and never expand it, so a shell analysis reports it unused.
 That is the same cross-translation-unit split as the maps it selects.
 

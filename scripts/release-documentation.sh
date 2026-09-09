@@ -958,6 +958,256 @@ release_validate_current_fact_rules() {
 	return "$rc"
 }
 
+# ============================================================================
+# RELEASE TOPOLOGY: ONE OWNER, AND THE NUMBERS ARE NOT TYPED
+# ============================================================================
+#
+# THE DEFECT CLASS. The project states that each fact has exactly one live
+# owner, and release topology -- how many parts, images, soak combinations,
+# modular targets and shell source files a release contains -- is owned by the
+# one bounded declaration in release/README.md. Until this rule, that ownership
+# was enforced by hand-written denylist patterns covering two documents.
+# README.md was not among them, which is how "there are 21 different firmware
+# images" sat in the file a reader arrives at, unchallenged, until an audit
+# found it. A denylist can only refuse the spellings someone thought of; the
+# README's was not one of them.
+#
+# So the numbers are not written here. They are derived from the canonical sets
+# the build itself uses, and the rule is stated over the derived values: the
+# bounded declaration must state each of them, and no other durable document may
+# state any of them as topology. Add a part and every number moves, the patterns
+# move with them, and the sentences that restate the old figures stop matching
+# because they are no longer the figures -- which is the correct outcome for
+# prose that was already historical.
+#
+# THIS IS THE SAME MOVE test_resource_tables.py MADE FOR MEASUREMENTS. That gate
+# kept four documents' restated flash and RAM figures synchronized until the
+# figures were removed instead, and it now measures images rather than reading
+# prose. Here the fact cannot be removed -- a release does have a topology, and
+# a reader needs it -- so it is confined to one declaration rather than deleted.
+#
+# WHAT IT DOES NOT DO. It is lexical, it reads no build output, and it cannot
+# tell a correct restatement from an incorrect one: any restatement outside the
+# declaration fails, because a copy that agrees today is the copy that disagrees
+# next release. It also spells numbers as words only up to twenty, which is
+# where this project's prose stops spelling them out; above that the digit form
+# is the only spelling scanned. That is a stated bound, not an oversight.
+#
+# WHERE IT RUNS. On the tree, on every commit, and NOT from the release path --
+# the same split, for the same reason, as the current-fact rules above. A
+# restated number in a design document is a documentation defect. A release is
+# the most expensive moment available at which to discover one.
+
+# The English spellings this project actually writes. Small counts are spelled
+# out -- "seven release parts", "four shell source files" -- and larger ones are
+# written as digits. Empty above twenty, which the caller reads as "digits only".
+_release_number_word() {
+	[ "$#" -eq 1 ] || return 2
+	local -a spelled=(zero one two three four five six seven eight nine ten \
+		eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen \
+		nineteen twenty)
+	case "$1" in
+		''|*[!0-9]*) return 0 ;;
+	esac
+	[ "$1" -le 20 ] || return 0
+	printf '%s\n' "${spelled[$1]}"
+}
+
+# Reduce a document to the text a topology rule is matched against: quoted and
+# code spans blanked, then flowed to one line. Naming a banned form in backticks
+# is describing it, not restating it -- the same escape the retired hardware
+# idiom allows, and the reason this file, GOVERNANCE.md and test/README.md can
+# say what the rule refuses. It reads stdin so an exempt region can be removed
+# before the blanking happens.
+_release_topology_scan_text() {
+	sed -e 's/`[^`]*`/ /g' -e 's/"[^"]*"/ /g' | tr '\n\t' '  ' | tr -s ' '
+}
+
+# The five numbers, derived. Prints "<parts> <images> <soaks> <modular>
+# <shells>".
+#
+# RELEASE_IMAGES and RELEASE_SOAK_NAMES are the Makefile's canonical sets and
+# are asked for the same way release-prepare.sh asks. The part count is the
+# distinct MCU tag in the canonical image basenames, so it cannot disagree with
+# the set it is counted from. The shell counts come from the shipping source:
+# a shell that includes the pure core is modular, one that does not is
+# self-contained, and a part built from a self-contained shell is not a modular
+# target. Every step fails closed -- an unreadable Makefile, an unparsable image
+# name, or a self-contained shell whose filename does not name a release part
+# stops the run rather than yielding a smaller number.
+release_topology_counts() {
+	[ "$#" -eq 1 ] || return 2
+	local repo_root=$1
+	local make_bin=${PROJECT_MAKE:-make}
+	local raw name tag shell_file
+	local images=0 soaks=0 parts=0 shells=0 self_contained=0 modular=0
+	local -a tags=()
+
+	raw=$("$make_bin" --no-print-directory -s -C "$repo_root" print-RELEASE_IMAGES 2>/dev/null) \
+		|| _release_documentation_error "could not query the Makefile for RELEASE_IMAGES" || return
+	for name in $raw; do
+		images=$((images + 1))
+		tag=${name#bypass-}
+		tag=${tag%%-*}
+		[ "$tag" != "$name" ] && [ -n "$tag" ] \
+			|| _release_documentation_error "canonical image name does not carry an MCU tag: $name" || return
+		printf '%s\n' "${tags[@]}" | grep -Fxq -- "$tag" || tags+=("$tag")
+	done
+	[ "$images" -gt 0 ] \
+		|| _release_documentation_error "the Makefile declares no canonical release images" || return
+	parts=${#tags[@]}
+
+	raw=$("$make_bin" --no-print-directory -s -C "$repo_root" print-RELEASE_SOAK_NAMES 2>/dev/null) \
+		|| _release_documentation_error "could not query the Makefile for RELEASE_SOAK_NAMES" || return
+	for name in $raw; do
+		soaks=$((soaks + 1))
+	done
+	[ "$soaks" -gt 0 ] \
+		|| _release_documentation_error "the Makefile declares no canonical soak combinations" || return
+
+	for shell_file in "$repo_root"/src/bypass_mcu_*.c; do
+		[ -f "$shell_file" ] || continue
+		if grep -Fq -- '#include "bypass_pure.h"' "$shell_file"; then
+			shells=$((shells + 1))
+			continue
+		fi
+		# A self-contained shell removes its part from the modular set, so its
+		# filename has to name a release part or the subtraction is guesswork.
+		tag=${shell_file##*/bypass_mcu_}
+		tag=${tag%.c}
+		printf '%s\n' "${tags[@]}" | grep -Fxq -- "$tag" \
+			|| _release_documentation_error "self-contained shell src/bypass_mcu_$tag.c does not name a release part; the modular target count cannot be derived" || return
+		self_contained=$((self_contained + 1))
+	done
+	[ "$shells" -gt 0 ] \
+		|| _release_documentation_error "no modular MCU shell includes the pure core; the shell source count cannot be derived" || return
+	modular=$((parts - self_contained))
+	[ "$modular" -gt 0 ] \
+		|| _release_documentation_error "every release part is built from a self-contained shell; the modular target count cannot be derived" || return
+
+	printf '%s %s %s %s %s\n' "$parts" "$images" "$soaks" "$modular" "$shells"
+}
+
+# The rule itself. The counts are arguments rather than a query, so a caller can
+# hold the scanner to numbers this tree does not have and prove the patterns
+# follow the input instead of a literal.
+release_validate_topology_ownership() {
+	[ "$#" -eq 6 ] || return 2
+	local scan_root=$1 parts=$2 images=$3 soaks=$4 modular=$5 shells=$6
+	local count entry key value noun description word pattern
+	local document label marker reason exempt text block matched rc=0
+	local scanned=0
+	local -a topology_facts=() offenders=()
+
+	for count in "$parts" "$images" "$soaks" "$modular" "$shells"; do
+		[[ "$count" =~ ^[1-9][0-9]*$ ]] \
+			|| _release_documentation_error "topology counts must be positive integers: $count" || return
+	done
+
+	# <key><TAB><value><TAB><noun alternation><TAB><what the number is>.
+	#
+	# The noun is what makes a digit decidable. "21" is not release topology;
+	# "21 images" is. Every alternative here is a spelling this project's own
+	# prose has used for the thing being counted, and a number that qualifies
+	# none of them is some other number -- an instruction budget, a pin, a
+	# version -- which is why an eight-level stack and a GCC 7 floor pass
+	# through untouched.
+	topology_facts=(
+		$'parts\t'"$parts"$'\trelease parts?|supported parts?|MCU targets?|parts?\trelease part count'
+		$'images\t'"$images"$'\tfirmware images?|release images?|images?\trelease image count'
+		$'soaks\t'"$soaks"$'\tsoak combinations?|soak logs?|soaks?\trelease soak-combination count'
+		$'modular\t'"$modular"$'\tmodular targets?|modular parts?|targets?\tmodular target count'
+		$'shells\t'"$shells"$'\tshell source files?|modular shells?|MCU shells?|shells?\tshell source file count'
+	)
+
+	# <document><TAB><marker><TAB><why that fenced region may state the numbers>.
+	#
+	# An exemption is a fence in the document itself, not a name in this list
+	# alone: the region is visible where it applies, a declared fence that is
+	# absent or malformed fails like any other, and a restatement anywhere else
+	# in the same document still fails.
+	local -a topology_exemptions=(
+		$'docs/release_proportionality.md\trelease-topology-comparison\tthe growth table is measured at two named tags, which its own column headers state, and its image and soak rows are the evidence for the finding that the product did not grow'
+	)
+
+	# <document><TAB><why it is not a second copy>. Only two, and neither is a
+	# live restatement: one is the owner, and one is an archive.
+	local -a topology_not_scanned=(
+		$'CHANGELOG.md\tits release sections are historical accounts by the document lifecycle, each stating the topology of the release it describes and never edited to stay true'
+		$'release/README.md\tthe declared owner: its bounded declaration is required below, a second bounded block anywhere is already refused by name, and its errata state the topology of the past releases they name'
+	)
+
+	# PRESENCE. The declaration must state every derived number. The three
+	# topology words in it are still literals in the renderer above; this is
+	# what holds them to the sets the build uses, so adding a part fails here
+	# rather than shipping a declaration that quietly undercounts.
+	block=$(_release_marker_block current-release "$scan_root/release/README.md") \
+		|| _release_documentation_error "release/README.md has no bounded current-release declaration to hold the topology to" || return
+	text=$(printf '%s\n' "$block" | _release_topology_scan_text) || return
+	for entry in "${topology_facts[@]}"; do
+		IFS=$'\t' read -r key value noun description <<<"$entry"
+		word=$(_release_number_word "$value") || return
+		pattern="($value${word:+|$word})[-[:space:]]([[:alnum:]]+[-[:space:]])?($noun)([^[:alnum:]]|$)"
+		grep -Eqi -- "(^|[^[:alnum:]])$pattern" <<<"$text" \
+			|| _release_documentation_error "the bounded release declaration does not state the $description ($value); re-run release-prepare or correct the renderer" || rc=1
+	done
+
+	# ABSENCE. Nowhere else.
+	while IFS= read -r -d '' document; do
+		label=${document#$scan_root/}
+		_release_is_branch_only_document "$document" "$label" && continue
+		exempt=0
+		for entry in "${topology_not_scanned[@]}"; do
+			IFS=$'\t' read -r name reason <<<"$entry"
+			[ "$label" = "$name" ] && exempt=1
+		done
+		[ "$exempt" -eq 1 ] && continue
+		scanned=$((scanned + 1))
+
+		# Remove any fenced exemption first, and require the fence to be real.
+		text=$(cat -- "$document") || return
+		for entry in "${topology_exemptions[@]}"; do
+			IFS=$'\t' read -r name marker reason <<<"$entry"
+			[ "$label" = "$name" ] || continue
+			_release_marker_block "$marker" "$document" >/dev/null \
+				|| _release_documentation_error "$label declares the exempt region $marker, which is absent or malformed" || { rc=1; continue; }
+			text=$(awk -v marker="$marker" '
+				{ line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line) }
+				line == "<!-- " marker ":start -->" || line == "// " marker ":start" { inside=1; next }
+				line == "<!-- " marker ":end -->" || line == "// " marker ":end" { inside=0; next }
+				inside { next }
+				{ print }
+			' <<<"$text") || _release_documentation_error "could not remove the exempt region $marker from $label" || { rc=1; continue; }
+		done
+		text=$(printf '%s\n' "$text" | _release_topology_scan_text) || return
+
+		for entry in "${topology_facts[@]}"; do
+			IFS=$'\t' read -r key value noun description <<<"$entry"
+			word=$(_release_number_word "$value") || return
+			# Both directions: prose qualifies the noun with the number, and a
+			# table row names the noun and then carries it.
+			pattern="(^|[^[:alnum:]])($value${word:+|$word})[-[:space:]]([[:alnum:]]+[-[:space:]])?($noun)([^[:alnum:]]|$)"
+			pattern="$pattern|($noun)[^[:alnum:]]{1,4}($value${word:+|$word})([^[:alnum:]]|$)"
+			matched=$(grep -Eoi -m1 -- "$pattern" <<<"$text" | head -1) || true
+			[ -n "$matched" ] || continue
+			offenders+=("$label")
+			_release_documentation_error "$label restates the $description ($value), which the bounded declaration in release/README.md owns: \"$(printf '%s' "$matched" | sed -e 's/^[^[:alnum:]]*//' -e 's/[[:space:]]*$//')\". Remove the number, point at the declaration, or fence the region and register the exemption" || rc=1
+		done
+	done < <(find "$scan_root" \
+		\( -name .git -o -name third_party -o -path "$scan_root/release/v[0-9]*" \) -prune -o \
+		-type f \( -name '*.md' -o -name '*.adoc' \) -print0)
+
+	# A walk that reads nothing is the failure mode this whole rule is written
+	# against: it is indistinguishable from a clean tree, and it is what a
+	# pruned-away scan root, an unreadable directory or a mistyped exclusion
+	# each look like. Every tree with a release declaration in it has documents
+	# to scan, so finding none is a broken scan and not a quiet pass.
+	[ "$scanned" -gt 0 ] \
+		|| _release_documentation_error "the topology scan read no documents; the walk found nothing to check" || rc=1
+
+	return "$rc"
+}
+
 release_validate_claim_boundaries() {
 	[ "$#" -eq 1 ] || return 2
 	local repo_root=$1

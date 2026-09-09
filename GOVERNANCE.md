@@ -99,6 +99,11 @@ Three techniques survive A1–A3, and none costs the author a word:
 | 2 | **Form-family ban** — one ERE over flowed text | that a *false* claim is not made in any spelling of its family | anything that is not that claim |
 | 3 | **Structural / derived** — presence, ordering, agreement, or rendering | shape and single-ownership, never phrasing | all prose around it |
 
+One ban's operands are **derived rather than written**: the release-topology
+rule asks the build for the numbers it forbids, so the pattern changes when the
+product does and no author maintains it. Any future rule over a value this tree
+already computes should be built the same way.
+
 A term group is an alternation matched case-insensitively on whole words, over
 the block's text with markup flowed away. A single word is just a keyword, so
 keyword sets and form families share one implementation. The two techniques the
@@ -150,12 +155,14 @@ rewrap or an adjective swap does not evade it.
 | current release topology | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | part/image/soak counts with two owners drift; the bounded declaration in `release/README.md` is the single owner |
 | unbound measurements | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | results that change when the source changes have no stable owner in a hand-edited document |
 | dates and source revisions | `DESIGN_DOCUMENTATION.adoc` | A3 — pinning provenance is the mitigation a misplaced measurement asks for, so removing the measurement has to close that door behind it |
+| release topology stated outside its declaration — the part, image, soak-combination, modular-target and shell-source counts | every durable document except the owner and the changelog | C1 — `README.md` published how many firmware images a release contains and nothing objected. The rule this replaces was a denylist naming two documents, and a denylist only refuses the spellings someone thought of. These numbers are **derived from the canonical build sets rather than typed**, so adding a part moves the patterns with them |
 
 ### 3. Structural and derived
 
 | Rule | Property | Defect that motivated it |
 |---|---|---|
 | bounded current-release declaration | exactly one, in `release/README.md`, agreeing with the canonical inventory | a second declaration elsewhere — even one that agrees today |
+| declared topology agrees with the build | the bounded declaration states every derived count | the declaration's three topology words are still literals inside the renderer that writes it. Nothing compared them to anything until C1, so adding a part would have shipped a declaration that quietly undercounted |
 | derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | A1 — seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
 | root document allowlist | any root-level `.md` outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed |
 | branch-only banner | declared working documents must be deleted and de-referenced before a release cut | a release is cut from main; none may survive there |

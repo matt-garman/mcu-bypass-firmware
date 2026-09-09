@@ -28,7 +28,7 @@ fault model; physical relay convergence additionally requires the hardware
 assumptions under "Relay mechanics and physical convergence."**
 
 This replaces the correct-in-place model that shipped on PIC10F320 in v0.9.8 and
-on the four modular shells in `93f637b`. Nothing is re-driven ahead of a sanity
+on the modular shells in `93f637b`. Nothing is re-driven ahead of a sanity
 gate any more, and the loop-top re-assert is gone. Each forced-reset path now
 clears the relay driver's latch intent before the watchdog spin; AVR-XT and
 PIC12F675 first neutralize MCU-specific pin-control hazards that can prevent a
@@ -97,7 +97,7 @@ a source commit and a pinned toolchain, rather than something to project from
 the deltas here. `make test-resource-tables` measures each built image against
 the reviewed ceiling in `DESIGN_DOCUMENTATION.adoc`'s Resource Utilization
 section, and the production release's strict mode performs and retains the final
-21-image check.
+whole-set image check.
 
 It is nearly free because the escalation **reuses the sanity gate that already
 compares the complete output latch**. Only PIC10F320, which cannot afford that
@@ -182,7 +182,7 @@ What each shell's gate compares, and how much of the coil guarantee that buys
 it, is specified in "Failsafe Mechanisms". Two consequences of those differences
 belong to this policy rather than to the design, and are recorded here.
 
-The four modular shells needed no new detection code: an energized coil is an
+The modular shells needed no new detection code: an energized coil is an
 output-latch mismatch, which `hw_is_sanity_check_failed()` already rejects.
 
 **PIC12F675** gains rather than loses here. Its port-follows-shadow clause is

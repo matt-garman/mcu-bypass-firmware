@@ -16,6 +16,7 @@ and when.
 Release machinery only -- `scripts/`, the release gates under `test/`, and
 `release.yml` -- measured at the `v0.9.9` tag and at `v0.9.13`:
 
+<!-- release-topology-comparison:start -->
 | | v0.9.9 | v0.9.13 | |
 |---|---:|---:|---|
 | Release machinery, lines | ~7,800 | ~21,800 | 2.8x |
@@ -27,6 +28,7 @@ Release machinery only -- `scripts/`, the release gates under `test/`, and
 | Soak combinations | 18 | 18 | 1.0x |
 | Staged files per release | 60 | 64 | 1.07x |
 | `QUALIFICATION` schema | `format=1` | `format=7` | -- |
+<!-- release-topology-comparison:end -->
 
 The product did not grow. The apparatus around it tripled. Of the 279 commits
 in that window, 94 touched release machinery and 26 of those were `fix:`
@@ -176,7 +178,7 @@ divide into two kinds, neither of which a rehearsal can reach. The first are
 soak-bound by definition: that each staged image is the one its soak drove, the
 soak summary table, and staging the soak key. The second are bound to evidence
 this run produces: the retained-evidence copy loop, the per-transcript payload
-seals, and `evidence/INDEX` -- which lists the 18 soak logs, so it cannot be
+seals, and `evidence/INDEX` -- which lists the soak logs, so it cannot be
 built before they exist. The staged-document validator and the final
 qualification verification read the completed directory and belong there too.
 Rehearsing those would mean synthesising soak evidence, and a rehearsal that
