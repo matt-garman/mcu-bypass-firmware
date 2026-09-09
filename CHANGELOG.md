@@ -47,6 +47,45 @@ below it reflects the practice of its time rather than the size of the release.
 
 ## [Unreleased]
 
+### Added
+
+- **`GOVERNANCE.md`**, a new top-level document owning how this project's
+  documentation is authored, owned, retired and enforced. It carries the
+  documentation authority map, the document lifecycle table, the standing rules,
+  the branch-only working-document contract, an enforcement register naming every
+  gated claim and the defect that motivated it, and the proof obligations a
+  proposed gate must discharge in writing before it is written. That material was
+  previously split between `README.md` and comments inside the release validator,
+  where a rule's purpose was not readable by the author who hit it.
+
+### Changed
+
+- **`README.md` addresses its two audiences separately.** Flashing a released
+  image and building from source are peer sections, the governance material has
+  moved out to `GOVERNANCE.md`, and the file closes with a signpost naming every
+  other document and what it is for.
+
+- **Release topology is declared once and derived rather than restated.** How
+  many parts, images, soak combinations, modular targets and shell source files a
+  release contains is stated only in `release/README.md`'s bounded declaration.
+  The gate protecting that ownership now derives those values from the Makefile's
+  canonical sets instead of carrying hand-written copies, so it refuses any
+  spelling of a restatement rather than the ones someone thought to list. Other
+  documents point at the declaration.
+
+- **`CHANGELOG.md` states where its concise-entry policy begins.** `0.9.11` is
+  the first section written under it; earlier sections vary in depth because of
+  the practice of their time rather than the size of the release.
+
+### Fixed
+
+- **A root-level AsciiDoc working document could reach a release unseen.** The
+  branch-only working-document banner was recognized only in Markdown, so an
+  AsciiDoc note at the repository root escaped the root-document allowlist while
+  the live-tree sweeps still held it to the very bans a working document exists
+  to be exempt from. The banner is now read in either documentation markup and in
+  either emphasis spelling.
+
 ## [0.9.14] - 2026-09-08
 
 ### Added
