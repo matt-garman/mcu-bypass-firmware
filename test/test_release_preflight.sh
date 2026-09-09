@@ -1398,11 +1398,11 @@ branch_doc_root="$work/branch-only-doc"
 # human readers are shown, rather than by its name. Both spellings the
 # convention has used declare the same thing.
 write_branch_doc() {
-	local name=$1 spelling=${2:-Branch-only}
+	local name=$1 spelling=${2:-Branch-only} bold=${3:-'**'}
 	{
-		printf '# %s\n\n' "${name%.md}"
-		printf '> **%s working document.** Deleted before the merge to main.\n' \
-			"$spelling"
+		printf '# %s\n\n' "${name%.*}"
+		printf '> %s%s working document.%s Deleted before the merge to main.\n' \
+			"$bold" "$spelling" "$bold"
 	} > "$branch_doc_root/$name"
 }
 
@@ -1424,10 +1424,12 @@ release_reject_branch_only_documents "$branch_doc_root" \
 	|| fail "branch-only-document gate rejected a clean release tree"
 checks=$((checks + 1))
 
-# Every durable root-level document ships, and a root-level file that is not
-# Markdown is not a document this gate governs at all.
+# Every durable root-level document ships, in either markup this project writes
+# documents in, and a root-level file in neither is not a document this gate
+# governs at all.
 for durable_doc in AGENTS.md CHANGELOG.md CLAUDE.md FLASHING.md \
-	HARDWARE_VALIDATION_LOG.md MISRA_COMPLIANCE.md README.md TODO.md; do
+	HARDWARE_VALIDATION_LOG.md MISRA_COMPLIANCE.md README.md TODO.md \
+	DESIGN_DOCUMENTATION.adoc TOOLCHAIN.adoc; do
 	: > "$branch_doc_root/$durable_doc"
 done
 : > "$branch_doc_root/commit_msg.txt"
@@ -1455,6 +1457,37 @@ write_branch_doc post-v1.2.3-bloat-reduction.md Branch-scoped
 assert_branch_doc_gate_rejects 'a declared working document outside both historical name families' \
 	'branch-only working document(s) must be deleted before release: post-v1.2.3-bloat-reduction.md'
 rm -f "$branch_doc_root/post-v1.2.3-bloat-reduction.md"
+
+# ... and so is one written in the project's OTHER documentation markup. This is
+# the same defect one dimension over from the name families above: the walk read
+# `*.md` only, so a root-level AsciiDoc working document reached a release
+# unseen -- while five of the live-tree sweeps, which have always walked both
+# markups, were already reading it as durable prose.
+write_branch_doc port-notes.adoc Branch-only '*'
+assert_branch_doc_gate_rejects 'a declared root-level AsciiDoc working document' \
+	'branch-only working document(s) must be deleted before release: port-notes.adoc'
+rm -f "$branch_doc_root/port-notes.adoc"
+
+# Neither emphasis spelling is selected by extension. `**bold**` is what a
+# Markdown author writes and `*bold*` what an AsciiDoc author writes; both
+# render in either file, so a document is not talked out of its own declaration
+# by the emphasis its author reached for.
+write_branch_doc port-notes.adoc Branch-scoped
+assert_branch_doc_gate_rejects 'an AsciiDoc working document declared in Markdown emphasis' \
+	'branch-only working document(s) must be deleted before release: port-notes.adoc'
+rm -f "$branch_doc_root/port-notes.adoc"
+
+write_branch_doc merge-plan.md Branch-only '*'
+assert_branch_doc_gate_rejects 'a Markdown working document declared in AsciiDoc emphasis' \
+	'branch-only working document(s) must be deleted before release: merge-plan.md'
+rm -f "$branch_doc_root/merge-plan.md"
+
+# An UNDECLARED root-level AsciiDoc document is allowlist drift, exactly as its
+# Markdown twin below is, and refused with the same corrective action.
+: > "$branch_doc_root/stray.adoc"
+assert_branch_doc_gate_rejects 'a root-level AsciiDoc document outside the durable set' \
+	'outside the durable root-document set'
+rm -f "$branch_doc_root/stray.adoc"
 
 # An UNDECLARED root-level document is refused too, as allowlist drift: the
 # declaration never decides acceptance, only which corrective action the release
@@ -1487,6 +1520,20 @@ rm -f "$branch_doc_root/v1.2.3-polish.md"
 assert_branch_doc_gate_rejects 'a declaration below the opening blockquote' \
 	'outside the durable root-document set'
 rm -f "$branch_doc_root/late-banner.md"
+
+# THE BOUND, PINNED DELIBERATELY. A root-level file in neither markup is not a
+# document this gate governs, even carrying the banner. That is why the walk
+# names two extensions instead of reading every root-level file: this tree keeps
+# a lock file and editor backups at its root, and a gate that failed on those
+# would be switched off. The bound moves when the project starts writing
+# documents in a third markup, which someone decides once -- unlike a working
+# document's name, which a branch invents afresh every time.
+printf '> **Branch-only working document.** Not a markup this project writes.\n' \
+	> "$branch_doc_root/scratch.txt"
+release_reject_branch_only_documents "$branch_doc_root" \
+	|| fail "branch-only-document gate governed a root-level file in neither markup"
+checks=$((checks + 1))
+rm -f "$branch_doc_root/scratch.txt"
 
 # A durable file naming such a document -> rejected (the reference would dangle
 # once the document is deleted), for both branch-only families.
@@ -2777,6 +2824,24 @@ combinations.
 EOF
 assert_topology_accepts 'a declared branch-only working document'
 rm -f "$topology_root/topology-notes.md"
+
+# ... and so does its AsciiDoc twin. This is the half of the markup fix the
+# release gate cannot demonstrate: the sweeps walk both markups and always have,
+# so before the detector learned the second one, a root-level AsciiDoc working
+# document was held to the very bans a working document exists to be exempt
+# from -- and could not have quoted the numbers it was written to discuss.
+write_topology_fixture
+cat > "$topology_root/topology-notes.adoc" <<'EOF'
+= Topology notes
+
+> *Branch-only working document.* Deleted before release source
+> finalization.
+
+The declaration this branch is checking reads 21 images and 18 soak
+combinations.
+EOF
+assert_topology_accepts 'a declared branch-only AsciiDoc working document'
+rm -f "$topology_root/topology-notes.adoc"
 
 # AN EXEMPTION IS A FENCE, NOT A NAME. The register names a document and a
 # marker; the marker has to exist in that document. A declared region that has

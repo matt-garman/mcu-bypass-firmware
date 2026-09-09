@@ -64,7 +64,9 @@ publication as a hosted asset is a distribution fact, not a second lifecycle.
 
 Branch-only work plans are not durable authorities. They carry the required
 opening banner, coordinate one branch, and are deleted before release source
-finalization; the release gate refuses any that survives.
+finalization; the release gate refuses any that survives. The banner is read in
+either markup and in either emphasis spelling, so which file type a plan is
+written in never decides whether its declaration counts.
 
 ## Documentation standing rules
 
@@ -164,7 +166,7 @@ rewrap or an adjective swap does not evade it.
 | bounded current-release declaration | exactly one, in `release/README.md`, agreeing with the canonical inventory | a second declaration elsewhere — even one that agrees today |
 | declared topology agrees with the build | the bounded declaration states every derived count | the declaration's three topology words are still literals inside the renderer that writes it. Nothing compared them to anything until C1, so adding a part would have shipped a declaration that quietly undercounted |
 | derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | A1 — seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
-| root document allowlist | any root-level `.md` outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed |
+| root document allowlist | any root-level document, in either markup this project writes documents in, outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed. D1 — restricting the walk to Markdown was that same mistake in a second dimension: an AsciiDoc working document reached a release unseen, while the live-tree sweeps, which have always read both markups, held it to the very bans a working document exists to be exempt from |
 | branch-only banner | declared working documents must be deleted and de-referenced before a release cut | a release is cut from main; none may survive there |
 | GCC floor agreement | each of the three publishing documents states the enforced number beside a host `gcc` mention | the enforced floor and the published floor must not drift. Stated as one form family rather than two accepted sentences: the cross-compiler is excluded because the floor is the host's, and a bumped floor fails rather than matching a version that merely contains it |
 | design contract (14 ordered patterns) | safety-relevant numbers keep every figure and every part association | one pin broke when a `.` became a `;`. Negative coverage is generated from the table: delete the span a rule matches and it must stop matching |

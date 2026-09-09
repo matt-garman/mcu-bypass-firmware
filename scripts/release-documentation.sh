@@ -427,10 +427,28 @@ release_validate_staged_documentation() {
 #   > **Branch-only working document.** ...
 #
 # Required in the opening blockquote (the first 20 lines) of a ROOT-LEVEL
-# Markdown file, on both counts deliberately: a durable document that DESCRIBES
-# the convention -- CHANGELOG.md and test/README.md both do, far below any
-# banner -- is not a document making the declaration, and a working journal kept
-# under docs/ is durable prose that ships until it is deleted.
+# document, on both counts deliberately: a durable document that DESCRIBES the
+# convention -- CHANGELOG.md and test/README.md both do, far below any banner --
+# is not a document making the declaration, and a working journal kept under
+# docs/ is durable prose that ships until it is deleted.
+#
+# BOTH MARKUPS THIS PROJECT WRITES DOCUMENTS IN, and both spellings of the
+# banner's emphasis, in either of them. Restricting the declaration to Markdown
+# was the same mistake in a second dimension as the name patterns above: every
+# other documentation sweep in this file already walks `*.md` and `*.adoc`
+# together, so a root-level AsciiDoc working document was read as durable prose
+# by five of them -- held to every ban it exists to be exempt from -- while the
+# release gate below could not see it at all. `**bold**` is what a Markdown
+# author writes and `*bold*` is what an AsciiDoc author writes; both render in
+# either file, so neither is selected by extension, exactly as
+# `_release_marker_block` accepts both marker spellings anywhere.
+#
+# A third markup would still pass unseen. That bound is real and it is narrow:
+# it moves when the project starts writing documents in a markup its build does
+# not render today, whereas a working document's NAME is invented fresh on every
+# branch. Widening this to every root-level file instead is not the fix -- the
+# tree carries editor backups and a lock file at its root, and a gate that fails
+# on those would be turned off.
 #
 # Classification never decides acceptance. A root-level Markdown document
 # outside the durable set is refused by the release gate either way; the
@@ -443,7 +461,7 @@ _release_is_branch_only_document() {
 	local document=$1 label=$2 opening
 	case "$label" in
 		*/*) return 1 ;;
-		*.md) ;;
+		*.md|*.adoc) ;;
 		*) return 1 ;;
 	esac
 	# Read into a variable rather than piping `head` into `grep`: every caller
@@ -452,7 +470,7 @@ _release_is_branch_only_document() {
 	# an undeclared one. An unreadable document stays undeclared, which is the
 	# fail-closed side.
 	opening=$(head -n 20 -- "$document" 2>/dev/null) || return 1
-	grep -Eqi '^>[[:space:]]*\*\*Branch-(only|scoped)[[:space:]]+working[[:space:]]+document\.\*\*' \
+	grep -Eqi '^>[[:space:]]*\*\*?Branch-(only|scoped)[[:space:]]+working[[:space:]]+document\.\*\*?' \
 		<<<"$opening"
 }
 
@@ -463,7 +481,8 @@ _release_is_branch_only_document() {
 #     document exists ONLY on a branch and must be deleted, and de-referenced,
 #     in the final pre-merge commit; a production release is cut from main, so
 #     none may remain.
-#   * ANY other root-level Markdown document outside the durable set below.
+#   * ANY other root-level document, in either markup, outside the durable set
+#     below.
 #     Adding one name pattern per working document is precisely how this gate
 #     came to miss `pre-v*-fixes.md`, so the root document set is an allowlist
 #     rather than a blocklist: the durable documents ship, and any other
@@ -488,17 +507,22 @@ release_reject_branch_only_documents() {
 	local repo_root=$1 root_doc label durable_doc durable reference_file
 	local find_pid grep_output grep_status
 	local -a present_branch_docs=() undeclared_root_docs=() branch_doc_references=()
-	# Every root-level Markdown document a release is allowed to ship.
+	# Every root-level document a release is allowed to ship, in either markup.
+	# The two AsciiDoc entries are not a widening of what ships: they shipped
+	# before this walk could see them, and naming them here is what lets the
+	# walk see the working documents that ship beside them.
 	local -a durable_root_docs=(
 		AGENTS.md
 		CHANGELOG.md
 		CLAUDE.md
+		DESIGN_DOCUMENTATION.adoc
 		FLASHING.md
 		GOVERNANCE.md
 		HARDWARE_VALIDATION_LOG.md
 		MISRA_COMPLIANCE.md
 		README.md
 		TODO.md
+		TOOLCHAIN.adoc
 	)
 
 	while IFS= read -r -d '' root_doc; do
@@ -520,7 +544,8 @@ release_reject_branch_only_documents() {
 		else
 			undeclared_root_docs+=("$label")
 		fi
-	done < <(find "$repo_root" -maxdepth 1 -type f -name '*.md' -print0)
+	done < <(find "$repo_root" -maxdepth 1 -type f \
+		\( -name '*.md' -o -name '*.adoc' \) -print0)
 	find_pid=$!
 	wait "$find_pid" \
 		|| _release_documentation_error "could not scan for branch-only working documents" || return

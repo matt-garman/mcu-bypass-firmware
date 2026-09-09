@@ -1179,6 +1179,38 @@ is scheduled for this branch.
   `find -maxdepth 1 -name '*.md'`, so a stray root-level `.adoc` working document
   ships silently. Small fix; candidate to fold into A2 or B3.
 
+  **Done.** The hole was **two holes**, and only the first was the one written
+  down. The gate's walk could not see a root-level AsciiDoc document, so it
+  shipped — that is D1 as filed. But `_release_is_branch_only_document` also
+  returned false for any non-Markdown name, and *five* of the live-tree sweeps
+  have always walked `*.md` and `*.adoc` together. So the same document was
+  simultaneously invisible to the gate that should refuse it and read as durable
+  prose by every sweep that should exempt it, which is the opposite error: a
+  working document exists in order to quote a defective form while describing
+  it, and this one could not.
+
+  The walk now takes both markups, the detector accepts both, and the banner is
+  recognized in either emphasis spelling — `**bold**` is what a Markdown author
+  writes, `*bold*` what an AsciiDoc author writes, and both render in either
+  file. That is the rule `_release_marker_block` already applies to its own
+  markers, so the file had the precedent. `DESIGN_DOCUMENTATION.adoc` and
+  `TOOLCHAIN.adoc` join the durable root set; they shipped before the walk could
+  see them, and naming them is what lets the walk see the working documents that
+  ship beside them.
+
+  **Not widened to every root-level file**, though the gate's own argument
+  against name patterns points that way. This tree keeps a lock file and editor
+  backups at its root, and a gate that failed on those would be switched off.
+  The residual bound is a third markup, and it is pinned by a test rather than
+  left implicit: a root-level `.txt` carrying the banner still passes.
+
+  Four mutations, all caught: the walk restricted to Markdown, the detector
+  restricted to Markdown, the banner restricted to `**` emphasis, and the two
+  AsciiDoc documents dropped from the durable set. The sweep half needed its own
+  probe, because `fail()` exits on the first failure and the gate cases come
+  first; with the detector reverted, the topology validator refuses the AsciiDoc
+  working document by name.
+
 - **D2 — No shared test-harness library.** 32 of 51 shell tests define their own
   `fail()`, 40 roll their own `mktemp -d`, 38 maintain their own `checks=`
   counter. Self-contained tests are defensible; the inconsistent *reporting*
