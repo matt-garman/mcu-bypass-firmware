@@ -71,7 +71,7 @@ similar benefits.  See details in the
 The firmware supports multiple schemes for actual circuit switching.
 These schemes are as follows:
 
-  - Panasonic TQ-L2-5v mechanical relay ("true bypass")
+  - Panasonic TQ2-L2-5V mechanical relay ("true bypass")
   - CD4053 or TMUX4053 electrical analog switches, two variants:
     - Simple scheme using only two DPDT switches
     - Fancier scheme using all three DPDT switches with a 5ms mute
@@ -137,9 +137,8 @@ programmer, and software flashing tool are needed.
           - `ipecmd` for PIC devices (generally part of Microchip's MPLAB
             suite, be wary of MPLAB version compatibility with different
             PICkit versions)
-  2. Decide which firmware image you need; there are 21 different
-     firmware images, one for each combination of microcontroller and
-     switching scheme.
+  2. Decide which firmware image you need; there is one for each
+     combination of microcontroller and switching scheme.
   3. Download the latest release firmware for your MCU + switching
      scheme combination
   4. Write the firmware image to the device; see

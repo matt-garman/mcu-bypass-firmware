@@ -53,7 +53,7 @@ PIC10-12Fxxx_DFP device pack.  XC8 is not open source, although Microchip offers
 a limited free version; that free tier restricts the options that are
 available.  PIC10F320's 256-word flash also requires the self-contained
 architecture described in <<pic10f320-architecture>>.  The PIC10F32x ("enhanced
-mid-range") and PIC12F675 ("classic mid-range") parts have different harware
+mid-range") and PIC12F675 ("classic mid-range") parts have different hardware
 cores, so their hardware-specific implementations ("shell") differ. See
 <<pic12f675-architecture>> for design considerations unique to the PIC12F675.
 
