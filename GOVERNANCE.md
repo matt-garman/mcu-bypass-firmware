@@ -250,6 +250,25 @@ the build and release machinery. That spends the effort on the recoverable half
 and widens the gap it was meant to close. It is to size the assurance to the
 consequence, and to say so plainly wherever the result is deliberately uneven.
 
+**Here is that size, written down.** The build and release machinery gets
+contract gates that read the repository rather than a built image, and the
+documentation and release contracts among them draw their negative cases from
+spoiled copies of the live artifacts rather than from fixtures. Where a gate
+guards a transaction instead of a document it is replayed against this
+repository's own history: `test-release-prepare` reproduces the `v0.9.12` cut
+and requires byte identity with the commits that produced those lines by hand.
+A contract, plus a failing case taken from the real thing, is the whole of the
+machinery's adequacy evidence -- and it is meant to be the whole of it.
+
+Two techniques the firmware gets are withheld deliberately. The mutation runner
+mutates `src/` and nothing else, because a surviving-mutant score for the
+Makefile would measure the recoverable half with the irrecoverable half's
+instrument. And nothing under `scripts/`, `test/` or the Makefile is coverage
+instrumented, because a coverage target here is satisfied by exercising paths
+rather than by closing defect classes, which is the distinction this list spends
+its whole length drawing. A proposal to lift either one carries the obligations
+above, and then the asymmetry as well.
+
 **Clearing this list is necessary and not sufficient**, and the list itself is
 held by review rather than by a gate. That is deliberate, and it is the first
 obligation applied to itself: no gate has yet landed that this list would have

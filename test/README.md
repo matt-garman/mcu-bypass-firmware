@@ -578,6 +578,12 @@ loss of the other substrate. The summary counts each substrate's skips
 separately, so a partial run always says which substrate went unexercised rather
 than reporting one anonymous number.
 
+What the runner mutates is `src/` and nothing else. The Makefile, the release
+scripts and these gates are not mutated and are not coverage instrumented, which
+is a sized decision rather than an omission: `GOVERNANCE.md`, under "Proof
+obligations for a new gate", states what the machinery gets instead and why
+raising it would spend the effort on the half that repairs in a commit.
+
 Normal hosted CI runs mutation exactly once on push, schedule and manual
 dispatch: the fully provisioned PIC job invokes `make test-mutation` with
 `STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0`. After it passes, `make stress` runs every

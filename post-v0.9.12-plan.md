@@ -1414,6 +1414,33 @@ is scheduled for this branch.
   adequacy evidence for the machinery. What remains of D7 is the sizing
   decision itself, which is unscheduled.
 
+  **Now finished.** C2 stated the principle and left the size to be inferred
+  from whatever the apparatus happened to have. `GOVERNANCE.md` now states it:
+  the machinery gets contract gates over the repository, with negative cases
+  drawn from spoiled copies of the live artifacts, and a replay against this
+  repository's own history where a gate guards a transaction rather than a
+  document. That pairing is the whole of its adequacy evidence and is meant to
+  be. Two firmware techniques are withheld by name -- mutation adequacy and
+  coverage instrumentation -- each with the reason it is the wrong instrument
+  here rather than merely an expense.
+
+  The size was described rather than invented: every claim in it is what the
+  tree already does. The mutation runner's targets are all under `src/`, there
+  is no `kcov` or `bashcov` anywhere, and `coverage` is `gcov` over
+  `bypass_pure.c` and the golden-model host test.
+
+  One claim was drafted and dropped. A third withheld technique -- checking the
+  machinery by agreeing with a second implementation -- is not in fact withheld:
+  the deliberate-duplication register keeps the pinned release identity spelled
+  in literals precisely so it disagrees with the build variables it checks.
+  Stating it would have contradicted a register row.
+
+  `test/README.md`'s mutation section now names the scope and points at the
+  decision, because that is where a reader asks why the Makefile is not mutated.
+  The figure this item opened with is stale in a way worth noting: the machinery
+  is not ~32,000 lines but about 64,600 across the Makefile, `scripts/` and the
+  top-level gates, against 4,223 lines under `src/`.
+
 - **D8 — `release/` growth.** 3.2 MB, 579 files, 12 releases, ~360 KB per
   release at roughly 1.5 releases per week. **Already governed** —
   `release/README.md:206-228` states *"Git is the retention authority"* and sets
