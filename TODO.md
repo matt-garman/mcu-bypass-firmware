@@ -408,6 +408,43 @@ two ordered invocations or one -- is part of the work.
 Dependencies: none. Effort: about 2-3 hours. Risk: Low; it compares two
 existing surfaces and adds no hardware instruction.
 
+### T25-gate-explain - Make a failing gate explain itself
+
+A gate prints its diagnostic and nothing about why it exists. The explanation
+is usually already written, but split across three homes with nothing linking
+them: the comment above the Make rule, a section of
+[`test/README.md`](test/README.md), and the script's own header. Diagnosis
+therefore costs a round trip through an agent, so the knowledge never comes to
+hand.
+
+Formalize the comment convention that most `make test` gates already follow
+into a structured header block above each rule -- a fixed key set for ID,
+scope, runtime class and prose -- and add an `explain` goal that prints one
+gate's record together with its README section. Metadata adjacent to the rule
+cannot drift away from what it describes. Then a contract test: fail if a gate
+has no record, or a record names no gate.
+[`test/test_workflow_syntax.sh`](test/test_workflow_syntax.sh) already derives
+membership from Make's own prerequisite graph rather than a hand-kept list, and
+is the pattern to copy. Once scope is machine-readable, the same test can hold
+the CI workflow, the release workflow and the documentation to it, which is
+duplicated-inventory drift this repository has actually seen.
+
+Make stays the executor. No run API, no separate YAML, JSON or SQLite
+inventory, and no generation of the gate lists: each is a second source of
+truth for ordering that already works, and the separate file rots the first
+time a rule is edited without it. The honest cost is that the typical-failures
+and gotchas prose is both the highest-value field and the only one nothing can
+validate -- a contract test can force a record to exist, not force it to be
+true.
+
+First step: the query goal alone, over the comments that already exist. It
+needs no new file format, and it turns the gates that carry no comment from an
+invisible problem into a visible backlog.
+
+Dependencies: none. Effort: about 3-4 hours for the comment convention and the
+query goal; the contract test and the scope field are a separate pass. Risk if
+deferred: Low for correctness; every gate failure keeps costing a round trip.
+
 ---
 
 ## Tier 3 - platinum-grade hardening and silicon validation
@@ -843,6 +880,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
 | T25-program-argv | Published commands vs executed programmer argv | 2.5 | 2-3 h | Medium |
+| T25-gate-explain | Make a failing gate explain itself | 2.5 | 3-4 h | Medium - diagnosis |
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
