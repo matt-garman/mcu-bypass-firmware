@@ -790,6 +790,34 @@ one lane at a time and prove fail-closed coverage, rebuild invalidation, release
 identity and security, normalized Make-database semantics, and all affected
 gates.
 
+### Drop the PIC10F320 target
+
+The part is the one exception to the shared-verified-core architecture, and the
+exception is not free. It has no room for the modular firmware, so its shell is
+a second expression of the debounce algorithm written directly into `main()`,
+carrying its own thresholds, its own watchdog terms, its own final-HEX stack
+oracle and its own coverage archive; it is why `SHELLS_WITH_OWN_COPY` exists.
+The Makefile and the test tree each carry a dedicated lane for it, and every
+change to the shared core has to be mirrored into it.
+[The constrained target](DESIGN_DOCUMENTATION.adoc#pic10f320-architecture) is
+the normative account of why the implementation has to be this way; it states
+the seam plainly rather than claiming a parity the project has not earned.
+
+It is kept anyway, and this entry exists so that is a decision rather than an
+omission. The part ships, it has been release-supported since `v0.9.6`, a
+builder has one in the field (see
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md)), and withdrawing a
+released part is a compatibility event for every board already built around it.
+The cost is also bounded rather than open-ended: the equivalence and lock-step
+lanes compare the shell against `src/bypass_pure.c` itself, so a core change it
+does not mirror fails the suite. The sync is enforced, not remembered.
+
+Reconsider if the part goes end-of-life, or if that enforcement stops holding --
+a core change the lanes can no longer bind the shell to would mean the
+duplication has stopped being mechanical, which is the condition under which the
+cost becomes unbounded. Size alone is not a trigger; it is the symptom this
+entry exists to stop re-litigating.
+
 ### Run PIC10F320 firmware on PIC10F322 hardware
 
 The native PIC10F320 image is expected to execute on PIC10F322, but it omits the

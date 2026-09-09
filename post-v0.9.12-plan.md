@@ -1237,6 +1237,33 @@ is scheduled for this branch.
   the same form as the other declined items. ~20 min, and it stops the question
   being re-litigated every round.
 
+  **Done.** *Drop the PIC10F320 target* is now a **Considered and declined**
+  entry, beside the existing one about running its firmware on the other part.
+  The costs the plan lists all check out, within the drift a few weeks buys.
+
+  Two things changed the entry from the plan's sketch. The first is that a
+  decision record already exists for the *implementation* — the design
+  document's constrained-target section is the normative account of why the
+  shell has to be self-contained — so the entry points at it rather than
+  restating it, and confines itself to the question that account does not
+  answer: whether to carry the part at all.
+
+  The second is a claim considered and dropped. The deliberate-duplication
+  register describes the shell as a second implementation whose agreement with
+  the core is "agreement between two texts rather than one text observed twice",
+  which reads like an argument that the part buys an independent second opinion.
+  The design document refuses that framing on the same page: the seam is **the
+  one trust assumption this part carries that no other target does**, mitigated
+  rather than eliminated. Arguing the cost is secretly a benefit would have put
+  `TODO.md` at odds with the authority that owns the question, so the entry
+  argues bounded cost instead — the equivalence and lock-step lanes hold the
+  shell to `src/bypass_pure.c` itself, so the sync is enforced rather than
+  remembered.
+
+  The reconsideration trigger is that enforcement failing, not the part's size.
+  Size is the symptom that starts the argument every round, which is what the
+  entry exists to stop.
+
 - **D5 — `release/README.md`'s errata precede its primary audience.** Titled
   *Prebuilt firmware images*, it opens with four historical errata sections
   (lines 33-100) and reaches *"Which image do I want?"* at line 331 of 702. The
