@@ -87,6 +87,8 @@ The map above says who owns each fact. This says which of those facts are held
 by a gate, how, and what defect motivated it -- because a rule whose purpose is
 unrecorded is a rule the next author edits rather than satisfies.
 
+What it takes to add a row is the last section of this document.
+
 ### How to read it
 
 Three techniques survive A1–A3, and none costs the author a word:
@@ -195,3 +197,50 @@ anything. They belong in C3's survey rather than in an unrecorded backlog.
 That sentence is the whole point of A5. Every pin this branch retired was
 retired because an author hit a gate, could not tell what it was protecting, and
 had no cheaper repair available than editing the rule.
+
+## Proof obligations for a new gate
+
+`test/README.md` states what a change under `src/` must re-establish: the
+property first, then the commands whose evidence discharges it. This is the
+inverse list. A firmware change has to satisfy properties the tree already
+holds; a new gate proposes to add one, and the proposal carries the burden.
+
+Adding a gate is the easiest change in this repository to justify and the
+hardest to undo. It is always defensible in isolation, because it closes
+something. It is never obviously wrong later, because a gate that has never
+fired looks exactly like a gate that is working. The apparatus that establishes
+this firmware is now many times the size of the firmware itself, and it grew
+that way one defensible gate at a time. Each obligation below is discharged in
+writing, before the gate is written -- not by the gate passing.
+
+| Obligation | What the proposal must establish | What discharges it |
+|---|---|---|
+| **The defect class, named** | A specific way this tree can be wrong that the gate makes impossible, or makes loud. Not a preference, not a style, not a class of untidiness. | A sentence fit to stand in the register's *defect that motivated it* column, written first. The strongest name the commit or the release where the defect actually happened. A proposal that can only describe a hypothetical says so plainly, and is held to a higher bar on cost. |
+| **That removal was considered first** | That the fact cannot be deleted, derived, or generated instead of guarded. | The fact's owner, named from the authority map, and the reason a second copy has to exist at all. Where it does not, the change is a deletion and no gate is added. `test/test_resource_tables.py` is the worked example: documents restating measured figures were held synchronized by a gate until the figures were removed instead, and the checker now measures images rather than reading prose. Keeping copies synchronized treats the symptom. |
+| **That no existing gate closes it** | Which existing rule comes closest, and the exact case it lets through. | A named row of the register above, or a named test, plus the input that passes today and should not. "Nothing covers this" is not an answer until the register has been read. |
+| **A technique from the table** | Which of the three surviving techniques it uses, and that the author keeps every word. | The technique named, with its inputs: a marker pair and its term groups for a fenced claim; one expression over flowed text for a ban; the shape, ordering or agreement being held for a structural rule. A proposal that needs a verbatim sentence or a verbatim line is refused. Those two were retired deliberately, and reintroducing one spends the author's voice on a check the other three can make. |
+| **A failing case, not only a passing tree** | That the gate rejects the defect, and rejects it for the stated reason rather than incidentally. | A negative case per rule, exercised against a spoiled copy of the real document or artifact rather than a fixture that has since drifted from it. This is already the practice here -- the documentation contracts run against mutated copies of the live documents, and the design contract generates its negative coverage from its own table. It is what separates a gate from a comment. |
+| **Skip behaviour declared** | Whether the gate can be absent and still let a run report success, and what turns that absence into a failure. | Registration in `test/test_strict_tools.sh` whenever the gate needs a tool, device pack or virtual environment that may not be installed, so `STRICT_TOOLS=1` fails rather than quietly reducing coverage. A gate that can go silent without saying so is worse than no gate, because it reports assurance it is not providing. |
+| **The cost of keeping it** | What it reads, what it needs installed, how long it runs, and who has to edit it when the tree changes for good reasons. | An explicit answer to: *what ordinary, correct change makes this fire?* A gate whose false-positive case is a normal edit will be edited until it stops firing, and that is precisely how a rule becomes something the next author satisfies by weakening it. |
+| **Proportionality to where the defect lands** | That the assurance is sized to the consequence rather than to the ease of checking. | The asymmetry stated below, applied to this gate and written down. |
+| **A register row, and a stated purpose in the file** | That the gate's reason survives the person who added it. | A row added to the enforcement register above in the same change, and a header in the test file itself naming the defect class it closes and what it deliberately does not check. `test/test_deliberate_duplication.py` and `test/test_resource_tables.py` are the model. Many test files already open this way; this obligation is what makes it the rule rather than the habit. |
+| **A retirement condition** | What would make the gate unnecessary, and what happens when that arrives. | A stated condition, enforced where it can be. The attributive qualification ban is the worked example: it is conditional on the sentinel, so it lifts by itself on the commit that records the first controlled run, rather than depending on someone remembering to remove it. |
+
+**Where a defect lands is not symmetric.** A defect in `src/` reaches a part
+someone has already soldered into a pedal, and the repair is a reflash by a
+person who may never learn there was anything to fix. A defect in the Makefile,
+the release scripts or this documentation is caught by the next run or the next
+reader and repaired in a commit. Both are worth catching. They are not worth
+the same assurance -- and the recoverable half is far cheaper to test, which is
+exactly why the apparatus grows there fastest.
+
+The response to that asymmetry is **not** to add matching adequacy evidence for
+the build and release machinery. That spends the effort on the recoverable half
+and widens the gap it was meant to close. It is to size the assurance to the
+consequence, and to say so plainly wherever the result is deliberately uneven.
+
+**Clearing this list is necessary and not sufficient**, and the list itself is
+held by review rather than by a gate. That is deliberate, and it is the first
+obligation applied to itself: no gate has yet landed that this list would have
+refused, so the defect class is unproven and the machinery is unearned. When
+one does land, that is the defect -- and it goes in the register.

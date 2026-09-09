@@ -171,6 +171,11 @@ Clearing the list is necessary and not sufficient.
 for judgement, and nothing here reports a change whose only argument is that it
 is shorter. **A reduced line count is not a reason to change firmware.**
 
+The inverse list -- what a proposed *gate* must establish before it joins the
+one above -- is in `GOVERNANCE.md`, under "Proof obligations for a new gate".
+Adding a lane here is a change to what this project promises, and it is held to
+its own set of obligations.
+
 ## Classic AVR target validation layers
 
 The ATtiny13A/ATtiny85 lanes run the real firmware ELF in simavr and need no

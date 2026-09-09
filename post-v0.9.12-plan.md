@@ -29,7 +29,7 @@
 | B2 | Create the governance document | README | 2-3 h | **done** |
 | B3 | Plumb the new document through the gates | README | 1 h | **done** |
 | C1 | Allowlist gate for derivable release numbers | Anti-drift | ~1 d | open |
-| C2 | Obligations for a new gate | Anti-drift | 1 h | open |
+| C2 | Obligations for a new gate | Anti-drift | 1 h | **done** |
 | C3 | Threshold restatement survey | Anti-drift | 2 h | open |
 | D1-D9 | Noted, not scheduled | — | — | see below |
 
@@ -920,6 +920,50 @@ Lands in `GOVERNANCE.md` (B2), cross-referenced from `test/README.md`.
 
 Size: 1 h.
 
+**Landed.** `GOVERNANCE.md` gains *Proof obligations for a new gate*, written as
+the deliberate inverse of `test/README.md`'s obligations for a firmware change:
+ten obligations in the same three-column shape, each discharged **in writing
+before the gate is written** rather than by the gate passing.
+
+The two that were not in the original sketch are the two that turned out to
+matter most:
+
+- **Removal considered first.** Before choosing a technique, the proposal must
+  show the fact cannot be deleted, derived or generated instead of guarded.
+  `test/test_resource_tables.py` is the worked example and says so in its own
+  header: a gate kept restated measurements synchronized until the measurements
+  were removed, and the checker now measures images rather than reading prose.
+  Keeping copies synchronized treats the symptom. Several rows of the current
+  register would not survive this obligation, which is the point of writing it.
+- **A retirement condition.** What makes the gate unnecessary, enforced where it
+  can be. The attributive qualification ban is the model: conditional on the
+  sentinel, so it lifts on the commit that records the first controlled run
+  instead of waiting for someone to remember it.
+
+Also landed: the technique obligation **refuses** a proposal needing a verbatim
+sentence or a verbatim line. A1-A3 retired both; without this row the next
+author reintroduces one, because it is the easiest thing to write.
+
+**D7's statement half is absorbed here** rather than left for later. The section
+states the asymmetry plainly -- a firmware defect is in the field and its repair
+is a reflash by someone who may never learn there was anything to fix, while a
+release-machinery defect is caught by the next run and repaired in a commit --
+and states the response D7 asked for: **not** matching adequacy evidence for the
+build and release machinery, which spends effort on the recoverable half and
+widens the gap. D7's remaining half, deciding what mutation coverage the
+machinery should actually have, is untouched.
+
+The section closes by applying its own first obligation to itself: the list is
+held by review, not by a gate, because no gate has yet landed that it would have
+refused. The defect class is unproven, so the machinery is unearned. If one
+lands, that is the defect, and it goes in the register.
+
+`test/README.md` carries the forward pointer at the end of its own obligations
+section; the enforcement register carries the back pointer.
+
+Gates: reference contract 21/0 over 18 documents, and the three live-tree
+documentation validators clean.
+
 ### C3 — Threshold restatement survey
 
 `PRESSED_THRESH` and `RELEASE_THRESH` are owned by `src/bypass_config.h`. Their
@@ -1003,6 +1047,11 @@ is scheduled for this branch.
   `test/README.md` or `GOVERNANCE.md`, that a release-machinery defect is
   recoverable while a firmware defect is in the field, and to size the assurance
   accordingly. Related to C2.
+
+  **Partly done by C2.** *Proof obligations for a new gate* in `GOVERNANCE.md`
+  states the asymmetry and states that the response is not to add matching
+  adequacy evidence for the machinery. What remains of D7 is the sizing
+  decision itself, which is unscheduled.
 
 - **D8 — `release/` growth.** 3.2 MB, 579 files, 12 releases, ~360 KB per
   release at roughly 1.5 releases per week. **Already governed** —
