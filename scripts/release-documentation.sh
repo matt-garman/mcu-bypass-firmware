@@ -494,6 +494,7 @@ release_reject_branch_only_documents() {
 		CHANGELOG.md
 		CLAUDE.md
 		FLASHING.md
+		GOVERNANCE.md
 		HARDWARE_VALIDATION_LOG.md
 		MISRA_COMPLIANCE.md
 		README.md

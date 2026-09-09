@@ -46,8 +46,8 @@ cited. Its links are still checked, because a dead hyperlink is dead whatever
 it describes. Branch-only working documents are excluded: they are deleted
 before a release and legitimately quote retired wording.
 
-DOCUMENT LIFECYCLES. README.md claims one lifecycle for every durable authority
-in its documentation map. That table is executable here: every mapped authority
+DOCUMENT LIFECYCLES. GOVERNANCE.md claims one lifecycle for every durable
+authority in its documentation map. That table is executable here: every mapped authority
 must occur in exactly one expected row, and per-release paths must name disjoint
 file roles rather than assigning a whole release directory to multiple labels.
 """
@@ -94,6 +94,7 @@ CODE_SPAN = re.compile(r"`([^`]+)`")
 # README broke this rule and, through the self-tests that use the checked-in
 # table as their control fixture, four more with it. The heading is prose and
 # belongs to whoever writes the README; the marker is the contract.
+LIFECYCLE_DOCUMENT = "GOVERNANCE.md"
 LIFECYCLE_MARKER = "document-lifecycle"
 LIFECYCLE_OPEN = "<!-- %s:start -->" % LIFECYCLE_MARKER
 LIFECYCLE_CLOSE = "<!-- %s:end -->" % LIFECYCLE_MARKER
@@ -110,6 +111,7 @@ LIFECYCLE_AUTHORITIES = {
     "TODO.md": "Open-work register",
     "docs/*.md": "Decision/safety record",
     "AGENTS.md": "Contributor policy",
+    "GOVERNANCE.md": "Contributor policy",
     "CLAUDE.md": "Contributor policy",
     "LICENSE": "Legal terms",
     "release/<version>/QUALIFICATION": "Release result record",
@@ -230,7 +232,7 @@ def link_violations(name, text, anchors):
 
 
 def lifecycle_violations(text):
-    """Return defects in README.md's durable-authority lifecycle table."""
+    """Return defects in the owning document's durable-authority table."""
     lines = [line.strip() for line in text.splitlines()]
     starts = [number for number, line in enumerate(lines)
               if line == LIFECYCLE_OPEN]
@@ -296,16 +298,16 @@ def self_test():
           "negative case -- a broken link in the live release policy was "
           "accepted")
 
-    readme = read_text("README.md") or ""
-    check(lifecycle_violations(readme) == [],
+    owner = read_text(LIFECYCLE_DOCUMENT) or ""
+    check(lifecycle_violations(owner) == [],
           "control case -- the checked-in lifecycle table is malformed")
-    missing = readme.replace("`CHANGELOG.md` |", "`missing-change-record.md` |", 1)
+    missing = owner.replace("`CHANGELOG.md` |", "`missing-change-record.md` |", 1)
     check(any("CHANGELOG.md" in item for item in lifecycle_violations(missing)),
           "negative case -- an omitted durable authority was accepted")
-    duplicate = readme.replace("`TODO.md` |", "`TODO.md`, `CHANGELOG.md` |", 1)
+    duplicate = owner.replace("`TODO.md` |", "`TODO.md`, `CHANGELOG.md` |", 1)
     check(any("CHANGELOG.md" in item for item in lifecycle_violations(duplicate)),
           "negative case -- one authority under two lifecycle labels was accepted")
-    broad = readme.replace(
+    broad = owner.replace(
         "`release/<version>/QUALIFICATION`",
         "`release/<version>/`, `release/<version>/QUALIFICATION`", 1)
     check(any("assigns every retained file" in item
@@ -314,15 +316,15 @@ def self_test():
     # The fence is what makes the table findable, so losing it must fail rather
     # than silently classify nothing. Both halves are checked: a table with no
     # markers at all, and one whose fence is left open.
-    unfenced = readme.replace(LIFECYCLE_OPEN, "").replace(LIFECYCLE_CLOSE, "")
+    unfenced = owner.replace(LIFECYCLE_OPEN, "").replace(LIFECYCLE_CLOSE, "")
     check(any("bounded" in item for item in lifecycle_violations(unfenced)),
           "negative case -- a lifecycle table with no marker block was accepted")
-    unclosed = readme.replace(LIFECYCLE_CLOSE, "")
+    unclosed = owner.replace(LIFECYCLE_CLOSE, "")
     check(any("bounded" in item for item in lifecycle_violations(unclosed)),
           "negative case -- a lifecycle block that is never closed was accepted")
     # And the property the marker exists for: renaming the heading above the
     # table is an editorial act and must stay one.
-    renamed = readme.replace("### Document Lifecycle", "### How documents are kept")
+    renamed = owner.replace("## Document lifecycle", "## How documents are kept")
     check(lifecycle_violations(renamed) == [],
           "control case -- renaming the lifecycle heading was rejected")
 
@@ -354,9 +356,9 @@ def main():
             check(False, "%s:%d links to '%s', which %s"
                   % (name, number, target, reason))
 
-    lifecycle = lifecycle_violations(documents.get("README.md", ""))
-    check(not lifecycle, "README.md lifecycle contract: %s"
-          % "; ".join(lifecycle))
+    lifecycle = lifecycle_violations(documents.get(LIFECYCLE_DOCUMENT, ""))
+    check(not lifecycle, "%s lifecycle contract: %s"
+          % (LIFECYCLE_DOCUMENT, "; ".join(lifecycle)))
 
     check(scanned > 0, "no tracked files were scanned")
     check(len(documents) > 0, "no durable documents were scanned")
