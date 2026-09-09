@@ -318,8 +318,8 @@ All three have landed. Increment 1 touched one file and removed no assurance.
 Increment 2 was mechanical, and paired with `docs/ci_parity.md` Part 4, which
 carried the same rehearsal past the staging to the artifact commit the tag
 actually names. Increment 3 carried the only real design decision, and is the
-only one that changed what a release attests: `SOAK_KEY` records what a soak
-result is valid for, and `--reuse-soak` is what that record buys.
+only one that changed what a release attests: a release now records what its
+soak result is valid for, and `--reuse-soak` is what that record buys.
 
 ## What this does not do
 
