@@ -88,16 +88,165 @@ pic12f675_bench=$(awk '
 	|| fail "TODO.md has no T3-pic12f675-bench section"
 pic12f675_bench_one_line=$(printf '%s\n' "$pic12f675_bench" \
 	| tr '\n' ' ' | tr -s ' ')
-for required in \
-		'**release-supported from `v0.9.9`**' \
-		'no controlled hardware-qualification record' \
-		'**1 - bandgap calibration bits (`BG<1:0>`) preserved on program.**' \
-		'**2 - factory oscillator trim (flash word 0x3FF) preserved on program.**' \
-		'**8 - `ipecmd` actually runs against the part.**' \
-		"**9 - GP2's readback margin.**"; do
-	grep -Fq "$required" <<<"$pic12f675_bench_one_line" \
-		|| fail "TODO.md T3-pic12f675-bench omits release/residual-risk semantics: $required"
-done
+# THE NUMBERS ARE AN INTERFACE; THE PROSE IS NOT.
+#
+# The Makefile, the CI notes and the release documentation cite these residual
+# risks BY NUMBER, so the enumeration must stay complete, stably numbered and in
+# one place: dropping an item is how a risk stops being tracked while every
+# citation still reads as though it were. That half is pinned exactly.
+#
+# The other half used to be pinned too. This gate required four verbatim
+# sentences including their `**bold**` markup, plus two more for the section's
+# own standing -- the last hand-typed prose pins in the tree, and the
+# antipattern A2 retired everywhere else. Rewording an item failed, which
+# teaches an author that the offence is touching the words when the actual
+# offence is emptying the item. Each risk is now held to the terms that make it
+# the risk it is, inside the numbered item that carries its number. The author
+# owns every word; the gate owns the enumeration and the subject.
+#
+# <number><TAB><what the item is about><TAB><term groups>
+pic12f675_risks=(
+	$'1\tbandgap calibration preserved on program\tbandgap|BG calibration|trim|bits preserv(e|ed|es|ing)|retain(s|ed|ing)?|intact|unchanged|survives?|survived'
+	$'2\tfactory oscillator trim preserved on program\toscillator|OSCCAL|clock trim|calibration 0x3FF|3FF preserv(e|ed|es|ing)|retain(s|ed|ing)?|intact|unchanged|survives?|survived'
+	$'8\tipecmd actually running against the part\tipecmd run(s|ning)?|ran|execut(e|ed|es|ing|ion) part|silicon|device'
+	$'9\tGP2 readback margin\tGP2 readback|read-back|re-read(s|ing)? margin|marginal|Schmitt'
+)
+
+# Returns 0 when the section states its standing and all four risks; prints why
+# not and returns 1 otherwise.
+#
+# A function rather than inline checks, so the same rule can be run against
+# SPOILED copies below. An enumeration gate that has only ever seen a passing
+# document is a gate nobody has tested, and this one guards the definition of
+# four risks that no lane in this repository can see.
+pic12f675_risks_stated() {
+	local section=$1
+	local terms numbers entry risk_number risk_subject risk_terms risk_item
+	local risk_text group required
+	local -a risk_groups=()
+
+	terms=$(printf '%s\n' "$section" | _release_claim_terms_text) || return 1
+	for required in \
+			'release-supported|release[[:space:]]supported|supported' \
+			'v0\.9\.9' \
+			'no|not|never' \
+			'controlled' \
+			'hardware-qualification|qualifications?|qualified'; do
+		_release_claim_has_term "$required" "$terms" && continue
+		printf 'the release/qualification standing is gone; nothing says %s\n' \
+			"${required//|/ or }"
+		return 1
+	done
+
+	numbers=$(grep -Eo '^-[[:space:]]+\*{0,2}[0-9]+[[:space:]]*-[[:space:]]' \
+		<<<"$section" | grep -Eo '[0-9]+' | tr '\n' ' ') || true
+	if [ "$numbers" != "1 2 8 9 " ]; then
+		printf 'residual risks must be enumerated 1, 2, 8, 9 exactly once and in order; found: %s\n' \
+			"${numbers:-none}"
+		return 1
+	fi
+
+	for entry in "${pic12f675_risks[@]}"; do
+		IFS=$'\t' read -r risk_number risk_subject risk_terms <<<"$entry"
+		risk_item=$(awk -v want="$risk_number" '
+			/^-[[:space:]]+\*{0,2}[0-9]+[[:space:]]*-[[:space:]]/ {
+				label=$0
+				sub(/^-[[:space:]]+\*{0,2}/, "", label)
+				sub(/[[:space:]]*-.*$/, "", label)
+				inside = (label == want)
+				if (inside) print
+				next
+			}
+			/^-[[:space:]]/ { inside=0 }
+			inside { print }
+		' <<<"$section") || return 1
+		if [ -z "$risk_item" ]; then
+			printf 'item %s (%s) is missing\n' "$risk_number" "$risk_subject"
+			return 1
+		fi
+		# THE DEFINING SENTENCE ONLY, never the whole item. Each of these bodies
+		# runs to dozens of lines and names its own subject over and over, so
+		# terms matched against the whole item stay satisfied by a body that has
+		# outlived a gutted headline -- which is precisely the loss this check
+		# exists to catch. Found by mutating the shipped TODO.md: replacing item
+		# 8's headline with "see the port assessment." passed the whole-item
+		# form of this rule.
+		risk_text=$(printf '%s\n' "$risk_item" | _release_claim_terms_text \
+			| sed -E "s/^-[[:space:]]*$risk_number[[:space:]]*-[[:space:]]*//") \
+			|| return 1
+		risk_text=${risk_text%%. *}
+		read -ra risk_groups <<<"$risk_terms"
+		for group in "${risk_groups[@]}"; do
+			_release_claim_has_term "$group" "$risk_text" && continue
+			printf 'item %s no longer states %s; nothing in it says %s\n' \
+				"$risk_number" "$risk_subject" "${group//|/ or }"
+			return 1
+		done
+	done
+	return 0
+}
+
+risk_report=$work/pic12f675-risks.log
+pic12f675_risks_stated "$pic12f675_bench" >"$risk_report" 2>&1 \
+	|| fail "TODO.md T3-pic12f675-bench: $(<"$risk_report")"
+checks=$((checks + 1))
+
+# THE ACCEPT CASE. The same standing and the same four risks, written in another
+# voice with none of the shipped wording and none of its markup. If this ever
+# starts failing, the gate has quietly gone back to pinning prose and the whole
+# point of the conversion is gone.
+pic12f675_risks_rewritten=$(cat <<'REWORDED'
+The part is supported from `v0.9.9` onward and there is no controlled
+hardware-qualification record for it.
+
+- 1 - the device's BG bandgap trim bits have to survive a program run intact.
+- 2 - the OSCCAL oscillator calibration word at 0x3FF must come through unchanged.
+- 8 - nobody has yet run ipecmd against real silicon.
+- 9 - GP2's Schmitt input leaves the readback margin unmeasured.
+REWORDED
+)
+pic12f675_risks_stated "$pic12f675_risks_rewritten" >"$risk_report" 2>&1 \
+	|| fail "the residual-risk rule rejected the same four risks in another voice: $(<"$risk_report")"
+checks=$((checks + 1))
+
+# THE REJECT CASES, each spoiling the accept fixture in one way. Dropping an
+# item, renumbering one, reordering two and emptying one are the four ways a
+# tracked risk stops being tracked while every citation still reads as though it
+# were.
+assert_risks_rejected() {
+	local description=$1 spoiled=$2 expected=$3
+	if pic12f675_risks_stated "$spoiled" >"$risk_report" 2>&1; then
+		fail "the residual-risk rule accepted $description"
+	fi
+	grep -Fq "$expected" "$risk_report" \
+		|| fail "$description was rejected for the wrong reason: $(<"$risk_report")"
+	checks=$((checks + 1))
+}
+assert_risks_rejected 'a dropped residual risk' \
+	"$(grep -v '^- 8 - ' <<<"$pic12f675_risks_rewritten")" \
+	'found: 1 2 9'
+assert_risks_rejected 'a renumbered residual risk' \
+	"${pic12f675_risks_rewritten/- 9 - /- 10 - }" \
+	'found: 1 2 8 10'
+assert_risks_rejected 'two residual risks reordered' \
+	"$(sed -e '/^- 2 - /{h;d}' -e '/^- 8 - /{G}' <<<"$pic12f675_risks_rewritten")" \
+	'found: 1 8 2 9'
+assert_risks_rejected 'an emptied residual risk' \
+	"${pic12f675_risks_rewritten/the OSCCAL oscillator calibration word at 0x3FF must come through unchanged./see the port assessment.}" \
+	'item 2 no longer states'
+# THE VACUITY THE WHOLE-ITEM FORM ACTUALLY HAD. An item whose headline is gone
+# but whose body still names its subject repeatedly. This was found by mutating
+# the shipped TODO.md rather than by review: replacing item 8's headline with
+# "see the port assessment." left forty lines that still say "ipecmd", "run",
+# "part" and "silicon", and the rule passed. It is why the terms are held
+# against the defining sentence and not the item.
+assert_risks_rejected 'a gutted headline whose body still names the subject' \
+	"${pic12f675_risks_rewritten/nobody has yet run ipecmd against real silicon./see the port assessment. Nobody has run ipecmd against a real device yet.}" \
+	'item 8 no longer states'
+assert_risks_rejected 'a section that no longer states its standing' \
+	"${pic12f675_risks_rewritten/no controlled/a complete}" \
+	'the release/qualification standing is gone'
+
 # The disposition is bounded by an explicit marker rather than anchored on the
 # sentence "A third PIC, the PIC12F675," that used to open it. That anchor was a
 # first line of prose, so rewriting the paragraph's opening -- which is an
@@ -147,11 +296,16 @@ checks=$((checks + 1))
 #
 # Wrapping is normalized first, so AsciiDoc line breaks stay editorial.
 design_contract=$(tr '\n' ' ' < "$DESIGN_DOCUMENTATION" | tr -s ' ')
-while IFS=$'\t' read -r description pattern; do
-	[ -n "$description" ] || continue
-	grep -Eiq -- "$pattern" <<<"$design_contract" \
-		|| fail "design documentation omits PIC12F675 safety/topology semantics: $description"
-done <<'DESIGN_CONTRACT'
+# ONE table, read by both loops below.
+#
+# It was two: the same fourteen rows written out a second time for the negative
+# pass. Nothing compared the copies, so adding a rule to the first and not the
+# second would have left that rule with no negative coverage at all while the
+# suite stayed green and the comment below still claimed the coverage was
+# generated rather than hand-written. That claim is true per row and was not
+# true across the pair. A table restated is a table that drifts, and the fix is
+# to have one.
+design_contract_rules=$(cat <<'DESIGN_CONTRACT'
 PIC12F675's sample cadence is 1.024ms where every other implementation is a nominal 1ms	except PIC12F675.{0,80}nominal 1ms.{0,60}cadence.{0,30}PIC12F675.{0,20}1\.024ms
 the PIC implementations poll their timer flags	PIC implementations poll.{0,30}timer flags
 the per-sample spans: 0.909-1.111ms on the 1ms targets, 0.931-1.138ms on PIC12F675	1ms targets span.{0,20}0\.909-1\.111ms.{0,80}PIC12F675 spans.{0,20}0\.931-1\.138ms
@@ -167,6 +321,19 @@ the implementations span four core generations	implementations span four core ge
 shell ownership in the modular architecture is separated by peripheral family	modular architecture.{0,30}shell ownership separated by peripheral family
 the polled PIC implementations pause sampling during a blocking output actuation	polled PIC implementations pause sampling during a blocking output actuation
 DESIGN_CONTRACT
+) || fail "design-contract rule table could not be read"
+[ "$(grep -c . <<<"$design_contract_rules")" -ge 14 ] \
+	|| fail "design-contract rule table is short; it must not be able to shrink silently"
+checks=$((checks + 1))
+
+# PRESENCE. Each rule names a fact the design document must still state.
+while IFS=$'\t' read -r description pattern; do
+	[ -n "$description" ] || continue
+	grep -Eiq -- "$pattern" <<<"$design_contract" \
+		|| fail "design documentation omits PIC12F675 safety/topology semantics: $description"
+	checks=$((checks + 1))
+done <<<"$design_contract_rules"
+
 # Negative coverage, generated from the table itself rather than hand-written
 # per row: delete the span a rule matches, and that rule must stop matching. A
 # pattern that still matches after its own match is removed was never anchored
@@ -183,22 +350,7 @@ while IFS=$'\t' read -r description pattern; do
 		fail "design-contract rule matches text other than the fact it names: $description"
 	fi
 	checks=$((checks + 1))
-done <<'DESIGN_CONTRACT_NEGATIVE'
-PIC12F675's sample cadence is 1.024ms where every other implementation is a nominal 1ms	except PIC12F675.{0,80}nominal 1ms.{0,60}cadence.{0,30}PIC12F675.{0,20}1\.024ms
-the PIC implementations poll their timer flags	PIC implementations poll.{0,30}timer flags
-the per-sample spans: 0.909-1.111ms on the 1ms targets, 0.931-1.138ms on PIC12F675	1ms targets span.{0,20}0\.909-1\.111ms.{0,80}PIC12F675 spans.{0,20}0\.931-1\.138ms
-the 8-sample worst case on PIC12F675 is 8 * 1.138ms = 9.11ms	8 \* 1\.138ms = 9\.11ms on PIC12F675
-the 7-sample PIC12F675 counterpart is 7 * 0.931ms = 6.52ms	PIC12F675 counterpart is 7 \* 0\.931ms = 6\.52ms
-the blocking-actuation budgets: 33/38/45ms on PIC10F32x, 33.8/38.8/45.8ms on PIC12F675	33ms/38ms/45ms for PIC10F32x.{0,40}33\.8ms/38\.8ms/45\.8ms for PIC12F675
-a latched T0IF supplies only the first of the four required 256us rollover observations	latched .?T0IF.? supplies only the first of four required 256us rollover observations
-PIC12F675 BOD is fixed at the 2.025-2.175v trip range with BOREN=ON	PIC12F675::.{0,60}BOD is enabled.{0,30}BOREN=ON.{0,40}2\.025-2\.175v
-PIC12F675 has no BORV selection	no .?BORV.? selection
-PIC12F675 cannot enforce the >4v peripheral-safe floor	cannot enforce the >4v peripheral-safe floor
-external supply supervision is required	external supply supervision is required
-the implementations span four core generations	implementations span four core generations
-shell ownership in the modular architecture is separated by peripheral family	modular architecture.{0,30}shell ownership separated by peripheral family
-the polled PIC implementations pause sampling during a blocking output actuation	polled PIC implementations pause sampling during a blocking output actuation
-DESIGN_CONTRACT_NEGATIVE
+done <<<"$design_contract_rules"
 
 if grep -Eiq 'All targets use a nominal 1ms timer-derived sample cadence|while both PIC implementations poll|On both PIC parts, the footswitch loop|For both polled PIC implementations|six MCU release targets across three core generations|both polled PIC implementations qualify press timing|PIC12F675[^.]*T0IF[^.]*(next sample|post-block sample)[^.]*immediate|PIC12F675[^.]*immediate[^.]*T0IF' \
 		<<<"$design_contract"; then

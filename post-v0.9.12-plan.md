@@ -30,7 +30,7 @@
 | B3 | Plumb the new document through the gates | README | 1 h | **done** |
 | C1 | Allowlist gate for derivable release numbers | Anti-drift | ~1 d | **done** |
 | C2 | Obligations for a new gate | Anti-drift | 1 h | **done** |
-| C3 | Threshold restatement survey | Anti-drift | 2 h | open |
+| C3 | Threshold restatement survey | Anti-drift | 2 h | **done** |
 | D1-D9 | Noted, not scheduled | — | — | see below |
 
 Ordering: **A1 and A2 first.** Everything else in A and B is easier once the
@@ -1055,6 +1055,69 @@ comments.
 deliberate duplication held by the equivalence lane.
 
 Size: 2 h. Lower priority than C1.
+
+**Landed**, and the survey's result changed what was worth doing.
+
+**Every restatement used as an expectation already has an agreement gate**, and
+most of them derive rather than restate. `sim_attiny202.py`'s two constants are
+compared against the values the model reads from the header through the FFI;
+`pic12f675_soak_timing.py` reads the header directly, so the ticks in
+`test_soak_timing.sh`'s expected records are pinned expectations of a *derived*
+value; `test_model_ffi.py` parses the header as a second opinion against the
+compiled library; and all three mutation registries that `sed` the exact
+`#define` text check the file actually changed and report a stale pattern as an
+error. `test_lockstep_progress.sh`'s copy looks like a restatement and is not —
+it is a synthetic stub whose `RELEASE_THRESH` is deliberately different.
+
+So **there was no cheap derivation left**. Deriving `sim_attiny202.py`'s
+constants from the header would have *removed* a second opinion rather than
+added one: a typed constant checked against an FFI read is two routes to the
+same fact, which is exactly what the duplication register exists to protect.
+
+The rest are comments explaining *why* a threshold has its value. They stay, as
+the task said they should. One documentation copy went: the AVR Classic program
+flow restated both values in a `Define constants` block that already pointed at
+the section carrying the reasoning, and that section states them again with the
+argument attached. Every other appearance in the design document is
+load-bearing — the worst-phase derivations are pinned by the design contract,
+and the SEU argument needs both numbers to make its bit-flip point.
+
+**Two defects the survey found on the way past.**
+
+1. **The design contract's fourteen rules were written out twice** — once for
+   the presence pass, once for the negative pass — and nothing compared the
+   copies. A rule added to the first and not the second would have had no
+   negative coverage while the suite stayed green and the comment above it still
+   claimed the coverage was generated rather than hand-written. That claim was
+   true per row and false across the pair. One table now, read by both loops,
+   and it may not silently shrink. The presence pass also counts its checks,
+   which it did not: fourteen real assertions were running unreported.
+
+2. **The first version of the new residual-risk rule was vacuous, and a
+   mutation found it.** It matched terms against the whole item. Replacing item
+   8's headline with *"see the port assessment."* left forty lines of body still
+   saying ipecmd, run, part and silicon, and the rule passed. Terms are now held
+   against the item's **defining sentence**, and that vacuity is a test case.
+
+**Both inherited pins are retired.** `TODO.md`'s residual-risk items were four
+verbatim sentences plus their `**bold**` markup, and two more for the section's
+standing — the last hand-typed prose pins in the tree. The numbering *is* an
+interface, so it is pinned exactly and now also checks order and rejects extras;
+the prose is not, so each item is held to its terms. The GCC floor's two
+accepted spellings became one form family over the enforced number beside a host
+`gcc` mention, excluding the cross-compiler.
+
+The residual-risk rule carries an accept case restating all four risks in
+another voice, and six reject cases: a dropped item, a renumbered one, two
+reordered, an emptied one, a section that lost its standing, and the
+gutted-headline vacuity. If the accept case ever fails, the gate has gone back
+to pinning prose.
+
+Gates: qualification 243 to 266 checks, preflight 318 to 323, both 0 failures.
+
+**Nothing in the enforcement register pins prose any more.** That is now
+recorded in `GOVERNANCE.md` as a property to keep rather than as a coincidence,
+and the obligations for a new gate refuse a proposal that would spend it.
 
 ---
 

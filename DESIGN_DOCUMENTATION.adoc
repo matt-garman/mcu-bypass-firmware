@@ -2117,9 +2117,10 @@ a family; generalizing it is a decision available later, not a debt.
 
 Define two program states: PRESS_DEBOUNCE_WAIT, RELEASE_DEBOUNCE_WAIT
 Define two effect-circuit states: ENGAGED, BYPASS
-Define constants (see "Asymmetric Debounce Timing" above for rationale)
-    * RELEASE_THRESH = 25
-    * PRESSED_THRESH = 8
+Define constants, owned by `src/bypass_config.h` (see "Asymmetric Debounce
+Timing" above for what the values are and why)
+    * RELEASE_THRESH
+    * PRESSED_THRESH
 
 The core mechanism is a saturating integrator: a counter that
 increments by one per sample when the footswitch reads closed,

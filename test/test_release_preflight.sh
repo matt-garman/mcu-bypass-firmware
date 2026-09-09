@@ -3443,12 +3443,44 @@ minimum_gcc=$(sed -n 's/^MINIMUM_GCC=\([0-9][0-9]*\)$/\1/p' "$host_cc_gate")
 	|| fail "could not read MINIMUM_GCC from test/host_compiler_version.sh"
 # Matched against the document with its line wrapping collapsed: the published
 # floor must survive a reflow of the paragraph that carries it.
+# The property is that each document publishes the ENFORCED NUMBER beside a host
+# gcc mention -- not that it uses one of two accepted sentences. This gate used
+# to require `GCC <n> or newer` or `Minimum host gcc version: <n>` literally,
+# which is the antipattern A2 retired everywhere else: "GCC 10+" and "at least
+# GCC 10" publish the identical requirement and failed, teaching an author that
+# the offence was wording rather than omission. `avr-gcc` is excluded because
+# the floor is the HOST compiler's, and the number carries its own boundaries so
+# a bumped floor fails rather than matching a version that merely contains it.
+floor_gcc='(^|[^-[:alnum:]])(gcc|g\+\+)([^[:alnum:]]|$)'
+floor_num="(^|[^0-9.])$minimum_gcc([^0-9.]|\$)"
+floor_family="$floor_gcc[^0-9]{0,32}$minimum_gcc([^0-9.]|\$)|$floor_num[^0-9]{0,32}$floor_gcc"
 for document in README.md TOOLCHAIN.adoc test/README.md; do
 	tr '\n' ' ' < "$ROOT/$document" | tr -s '[:space:]' ' ' > "$work/floor-prose.txt"
-	grep -Fq "GCC $minimum_gcc or newer" "$work/floor-prose.txt" \
-		|| grep -Fq "Minimum host gcc version: $minimum_gcc" "$work/floor-prose.txt" \
+	grep -Eqi -- "$floor_family" "$work/floor-prose.txt" \
 		|| fail "$document does not publish the enforced host compiler floor (GCC $minimum_gcc)"
+	checks=$((checks + 1))
 done
+
+# What the family must and must not accept, checked against the real prose so a
+# fixture cannot drift away from the documents the rule guards. A bumped floor
+# that nobody republished fails; a rewrite of the same floor passes; and a
+# cross-compiler mention is not a host floor.
+tr '\n' ' ' < "$ROOT/README.md" | tr -s '[:space:]' ' ' > "$work/floor-prose.txt"
+sed -i "s/$minimum_gcc/$((minimum_gcc + 1))/g" "$work/floor-prose.txt"
+if grep -Eqi -- "$floor_family" "$work/floor-prose.txt"; then
+	fail "the host-floor rule accepted prose publishing a floor other than $minimum_gcc"
+fi
+checks=$((checks + 1))
+printf 'Every lane needs a host C compiler (at least GCC %s, or Clang).\n' \
+	"$minimum_gcc" > "$work/floor-prose.txt"
+grep -Eqi -- "$floor_family" "$work/floor-prose.txt" \
+	|| fail "the host-floor rule rejected a reworded publication of the same floor"
+checks=$((checks + 1))
+printf 'The cross build needs avr-gcc %s; the host compiler is unrelated.\n' \
+	"$minimum_gcc" > "$work/floor-prose.txt"
+if grep -Eqi -- "$floor_family" "$work/floor-prose.txt"; then
+	fail "the host-floor rule read a cross-compiler mention as the host floor"
+fi
 checks=$((checks + 1))
 
 # A compiler that rejects the construct is refused with an actionable

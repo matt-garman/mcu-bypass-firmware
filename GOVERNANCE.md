@@ -166,34 +166,36 @@ rewrap or an adjective swap does not evade it.
 | derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | A1 — seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
 | root document allowlist | any root-level `.md` outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed |
 | branch-only banner | declared working documents must be deleted and de-referenced before a release cut | a release is cut from main; none may survive there |
-| GCC floor agreement | `README.md`, `TOOLCHAIN.adoc` and `test/README.md` agree with `MINIMUM_GCC` | the enforced floor and the published floor must not drift |
+| GCC floor agreement | each of the three publishing documents states the enforced number beside a host `gcc` mention | the enforced floor and the published floor must not drift. Stated as one form family rather than two accepted sentences: the cross-compiler is excluded because the floor is the host's, and a bumped floor fails rather than matching a version that merely contains it |
 | design contract (14 ordered patterns) | safety-relevant numbers keep every figure and every part association | one pin broke when a `.` became a `;`. Negative coverage is generated from the table: delete the span a rule matches and it must stop matching |
-| `T3-pic12f675-bench` enumeration | the four open silicon-only risks stay complete and in one place | the Makefile, CI notes and release documentation cite them by number; dropping one stops tracking a risk while every citation still reads as though it were tracked |
+| `T3-pic12f675-bench` enumeration | the open silicon-only risks stay complete, in order, and in one place, and each still states its own subject | the Makefile, CI notes and release documentation cite them by number; dropping one stops tracking a risk while every citation still reads as though it were tracked. The numbering is the interface and is pinned exactly. The prose is not: each item is held to the terms of its **defining sentence**, because an item's body names its own subject many times and a rule reading the whole item stays satisfied by a body that outlived a gutted headline |
 | lifecycle authorities | every shipped document has exactly one declared kind | a document with no owner is a document nobody has to keep true |
+| debounce threshold agreement | a harness that carries the thresholds as its own constants must agree with the values the firmware was built from | `src/bypass_config.h` owns them and they are restated across the tree. Every restatement that is used as an expectation is held to the owner by a gate: the AVR-XT harness against the values read through the model bridge, the PIC soak record against a tool that reads the header, and every mutation registry against a before/after hash that refuses a pattern which no longer matches. What is deliberately **not** gated is a comment explaining why a threshold has the value it has |
 
-### 4. Known remaining pins, and why they were left
+### 4. Nothing here pins prose
 
-Two places still hold prose to an exact spelling. Neither is an oversight; both
-are recorded here so they are decided rather than inherited.
+**No rule in this register requires an exact sentence or an exact line.** That
+is a property of the register, not a coincidence, and it is the one a future
+author must not quietly spend.
 
-1. **`TODO.md`'s six `T3-pic12f675-bench` strings**, including their `**bold**`
-   markup — e.g. ``**1 - bandgap calibration bits (`BG<1:0>`) preserved on
-   program.**``. Half of this genuinely *is* an interface: the Makefile, the CI
-   notes and the release documentation cite these residual risks **by number**,
-   so the enumeration must stay complete and stably numbered. What is **not**
-   an interface is the bold markup and the exact phrasing around each number.
-   The numbering should stay pinned; the prose around it should become a fenced
-   claim per item.
+Two places held out longest, and both are gone:
 
-2. **The GCC floor's two accepted spellings**, `GCC <n> or newer` and
-   `Minimum host gcc version: <n>`. Listing acceptable spellings is the same
-   antipattern A2 retired everywhere else: *"GCC 10+"* or *"at least GCC 10"*
-   publishes the identical requirement and fails the gate. The real property is
-   only that *gcc appears near the enforced number*, which one form family
-   states directly.
+1. **`TODO.md`'s residual-risk items**, which were pinned as verbatim sentences
+   down to their `**bold**` markup. Half of that genuinely is an interface: the
+   Makefile, the CI notes and the release documentation cite these risks **by
+   number**, so the enumeration must stay complete and stably numbered. The
+   other half was never an interface. The numbering is now pinned exactly and
+   each item is held to the terms of its defining sentence.
 
-Both are small, both use machinery that already exists, and neither blocks
-anything. They belong in C3's survey rather than in an unrecorded backlog.
+2. **The GCC floor's two accepted spellings.** Listing acceptable sentences is
+   the same antipattern retired everywhere else: *"GCC 10+"* and *"at least
+   GCC 10"* publish the identical requirement and used to fail. The property is
+   that the enforced number appears beside a host `gcc` mention, which one form
+   family states directly.
+
+When a rule here has to hold prose, it holds the terms and leaves the sentence
+to whoever is writing it. A proposal that needs an exact sentence is refused by
+the obligations at the end of this document.
 
 ### 5. The rule this register exists to make sayable
 
