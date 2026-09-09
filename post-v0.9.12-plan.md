@@ -1217,6 +1217,35 @@ is scheduled for this branch.
   discipline is the real cost, because it makes "did this run measure anything"
   hard to answer. Consider a minimal shared library, not a framework.
 
+  **Considered and declined**, and recorded there so it is not re-proposed. The
+  duplication is real and this note understated it; the cost it was proposed
+  against is not real at all.
+
+  Dividing by 51 counted the flash and stack budget checkers, the XC8 output
+  parser and the mutation accounting helpers as tests. There are 43 test entry
+  points. Of those, 32 define their own `fail()` -- the note's numerator, over
+  the wrong denominator -- and 41 make their own `mktemp -d` and keep their own
+  `checks=` counter, so the duplication is denser than 40 of 51 and 38 of 51
+  suggest. But **all 43 report a check count** at the end of a run, in one
+  format, and all 41 that make a temporary directory remove it in a trap. The
+  inconsistent reporting discipline this item exists to fix is not there.
+
+  **A shared test library already exists, and it sets the bar for adding
+  another.** `test/scratch_tree.sh` is sourced rather than executed, and its
+  header records the defect that earned it: two harnesses learned about new
+  files by different means, so a missing sandbox file made the mutation runner
+  report SKIP where it should have reported FAIL, and 18 mutants went unenforced
+  while the summary called every mutant it did evaluate killed. That is what
+  buys a shared harness here. Identical boilerplate has bought nothing
+  comparable.
+
+  What is genuinely unheld is the convention itself -- nothing requires a test
+  to report a count, and nothing refuses a count of zero. That is a new gate
+  over the recoverable half, and C2's proof obligations refuse it on the
+  defect-class row and again on proportionality. Where the vacuity risk is
+  concrete it is already closed in place: `test/test_pic_build.sh` holds its own
+  check count to an expected value.
+
 - **D3 — `CHANGELOG.md` depth is inconsistent across releases.** 4,043 lines, of
   which `0.9.7` and `0.9.8` are ~1,900 (47%), against ~40-100 lines for
   `0.9.10`-`0.9.12` under the concise policy. The policy explicitly does not

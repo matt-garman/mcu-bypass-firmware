@@ -851,6 +851,38 @@ multi-byte object across an ISR boundary.
 The algorithm's state space is already exhaustively covered by BFS and CBMC.
 Generator/shrinker dependencies would not reach states those proofs miss.
 
+### Consolidate the shell tests behind a shared harness library
+
+The duplication is real, and denser than it looks from a distance: of the 43
+test entry points under `test/`, 32 define their own `fail()`, and 41 make their
+own `mktemp -d` and keep their own `checks=` counter. What is not real is the
+cost this was proposed against. All 43 report a check count at the end of a run,
+and all 41 that make a temporary directory remove it in a trap. The reporting
+discipline is uniform rather than inconsistent, and a looser ratio is reached
+only by counting the flash and stack budget checkers, the XC8 output parser and
+the mutation accounting helpers as tests.
+
+A shared test library already exists, and it sets the bar for adding another.
+`test/scratch_tree.sh` is sourced rather than executed, and its header records
+the defect that earned it: two harnesses learned about new files by different
+means, so a missing sandbox file made the mutation runner report SKIP where it
+should have reported FAIL, and 18 mutants went unenforced while the summary
+called every mutant it did evaluate killed. Identical boilerplate has caused
+nothing comparable.
+
+What is genuinely unheld is the convention itself -- nothing requires a test to
+report a count, and nothing refuses a count of zero. That is a new gate over the
+recoverable half of the tree, and the
+[proof obligations](GOVERNANCE.md#proof-obligations-for-a-new-gate) refuse it
+twice over: no defect class can be named from this tree's history, and the
+stated asymmetry says not to add matching adequacy evidence for the machinery.
+Where the risk is concrete it is closed in place instead, as
+`test/test_pic_build.sh` holds its own check count to an expected value.
+
+Reconsider if the boilerplate diverges in a way that costs a run its meaning: a
+test that stops reporting, or a count that no longer tracks what was measured.
+That is the trigger `test/scratch_tree.sh` was built on; untidiness is not.
+
 ### Stress random ISR timing jitter
 
 The design samples once per compare match, and clean-press phase jitter already
