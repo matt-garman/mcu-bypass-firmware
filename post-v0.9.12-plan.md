@@ -1253,6 +1253,40 @@ is scheduled for this branch.
   that a reader meets the first twelve releases at wildly varying depth. Decide
   deliberately: leave it, or add a one-line note at the policy boundary.
 
+  **Done -- the note is in the file, and it is not what this item is really
+  about.**
+
+  Every figure here needed correcting first. The file is 4,663 lines. The two
+  largest sections are `0.9.8` at 1,493 and `0.9.10` at 1,044; `0.9.7` is 413,
+  so the ~1,900 figure is the pair's sum with the wrong half named. And
+  `0.9.10`-`0.9.12` do not run 40-100 lines: `0.9.11` is 41 and `0.9.12` is 98,
+  but `0.9.10` between them is the second-largest section in the file.
+
+  **The note largely existed already.** The preamble states the policy and its
+  non-retroactive carve-out. What it did not state is where the boundary falls,
+  which is the reader's actual question on meeting `0.9.10` at 1,044 lines and
+  `0.9.11` at 41. One sentence now names it: `0.9.11` is the first section
+  written under the policy. That is checkable rather than asserted -- the
+  `0.9.10` section was written a week before the policy commit and the `0.9.11`
+  section the day after it.
+
+  **The finding this item did not carry is that the policy has already stopped
+  holding.** `0.9.14` runs 535 lines against 41, 98 and 83 for the three
+  released sections written under it, and its content is what the policy names
+  as belonging elsewhere: implementation narrative, the chronology of how each
+  gate came to be wired, and design rationale restated from the documents the
+  same entries cite as owning it.
+
+  That one is fixable rather than historical, because `0.9.14` is not yet a
+  historical record: there is no `v0.9.14` tag and no `release/v0.9.14/`, so the
+  carve-out does not cover it and closes over it at the release cut. Filed as
+  `T2-changelog-0914` with that deadline, and named in the *Start here* block as
+  the one time-boxed item.
+
+  The prose is not compacted here. Rewriting 535 lines of release notes is the
+  owner's voice, on the same reasoning that kept B1 and B2 from rewriting
+  sentences.
+
 - **D4 — The PIC10F320's standing cost has no decision record.** It is the one
   part that breaks the shared-verified-core architecture: ~640 lines of the
   Makefile (7%, for one part), a dedicated 3,476-line test tree, ~2,000

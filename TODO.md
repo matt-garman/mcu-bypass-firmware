@@ -41,6 +41,26 @@ Dependencies: exact AVR vendor datasheets. Effort: about 1 hour with the source
 documents open. Risk if deferred: incomplete reference-grade traceability, not
 a known firmware defect.
 
+### T2-changelog-0914 - Compact the 0.9.14 changelog section before the tag
+
+The concise-entry policy took effect at `0.9.11`, and the released sections
+written under it run 41, 98 and 83 lines. `0.9.14` runs 535. It is also the only
+section still editable: there is no `v0.9.14` tag and no `release/v0.9.14/`, so
+the policy's carve-out for historical records does not cover it yet and will the
+moment the release is cut.
+
+The excess is the material the policy names as belonging elsewhere --
+implementation narrative, the chronology of how each gate came to be wired, and
+design rationale restated from the very documents the same entries cite as
+owning it. Reduce it to what the policy asks for: user-visible behaviour, safety
+and compatibility changes, new targets and release artifacts, important fixed
+defects, material residual limitations, and any migration action a user must
+take. The design and test records keep the rest, which is where the entries
+already point.
+
+Dependencies: none, but it has to land before the `v0.9.14` tag. Effort: about 1
+hour. Risk: Low to do; the record freezes permanently if it is not done.
+
 ---
 
 
@@ -941,11 +961,15 @@ equally distant. Two are out of order that way:
     write-up already carries the design, including the repair that looks obvious
     and is wrong, so what remains is implementation and one confirmation.
 
+One item is also time-boxed rather than merely urgent: `T2-changelog-0914` stops
+being possible when the `v0.9.14` tag freezes the section it edits.
+
 The stable ID in each row matches exactly one open section above.
 
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
+| T2-changelog-0914 | Compact the 0.9.14 changelog section | 2 | 1 h | High - freezes at the tag |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
 | T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |

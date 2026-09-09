@@ -29,7 +29,9 @@ limitations, and any migration action users must take. Keep implementation
 journals, exhaustive test inventories, review chronology, current resource
 measurements, and duplicated design rationale in Git history or their dedicated
 design, test, and release records instead. Existing release sections are
-historical records and are not retroactively compacted by this policy.
+historical records and are not retroactively compacted by this policy. `0.9.11`
+is the first section written under it; the depth of `0.9.10` and everything
+below it reflects the practice of its time rather than the size of the release.
 
 > **On the PIC10F320's version history.** The PIC10F320 target was developed in a
 > separate repository and merged into this one in `v0.9.6` below. That
