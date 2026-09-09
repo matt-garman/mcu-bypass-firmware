@@ -536,9 +536,11 @@ field has to reference. Until it exists, no controlled qualification record can
 be complete for any part, so this item gates section 2 of that file rather than
 only the ATtiny13A.
 
-Dependencies: representative hardware and oscilloscope/logic analyzer. Effort:
-about 2-3 hours. Risk: High verification value; closes a primary-part silicon
-evidence gap.
+Dependencies: none to write it, which is what this item delivers and what
+`HARDWARE_VALIDATION_LOG.md` is waiting on; executing the procedure afterwards
+needs representative hardware and an oscilloscope or logic analyzer. Effort:
+about 2-3 hours to write. Risk: High verification value; closes a primary-part
+silicon evidence gap.
 
 ### T3-pic12f675-bench - Graduate the PIC12F675 on silicon
 
@@ -881,6 +883,20 @@ measurably fail the paste-one-command goal.
 ---
 
 ## Priority summary
+
+**Start here.** The tiers group work by kind rather than by urgency -- Tier 3 is
+where silicon-facing work lives whatever it costs -- so a short item that
+unblocks other work can sit beside a multi-day rig and read as though it were
+equally distant. Two are out of order that way:
+
+  - **`T3-hw-procedure` is the one open item that gates the `1.x.y` line.**
+    `HARDWARE_VALIDATION_LOG.md`'s **Procedure** field cannot be filled for any
+    part until that document exists, so no controlled record can be complete for
+    any part, and `T3-pic12f675-bench` waits on it. Writing it is desk work; the
+    hardware and instruments in its dependency line are what executing it needs.
+  - **`T25-cbmc-proof-count` is the cheapest gate improvement open.** Its
+    write-up already carries the design, including the repair that looks obvious
+    and is wrong, so what remains is implementation and one confirmation.
 
 The stable ID in each row matches exactly one open section above.
 

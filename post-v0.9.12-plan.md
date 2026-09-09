@@ -1283,6 +1283,38 @@ is scheduled for this branch.
   Promote it. Also promote `T25-cbmc-proof-count` (30-45 min, and the write-up
   already contains the correct design).
 
+  **Done, but not by re-tiering, which would have been the wrong mechanism.**
+  The prefix in each ID *is* the tier and a gate enforces the agreement, so
+  moving an item between tiers means renaming it. `T3-hw-procedure` is cited in
+  the Makefile, in three places in `HARDWARE_VALIDATION_LOG.md`, and in
+  `CHANGELOG.md` — whose released sections are historical records that policy
+  forbids editing — so a rename would leave a permanently dangling citation
+  behind. The tiers are also **categories by kind of work** rather than a queue:
+  Tier 3 is where silicon-facing work lives whatever it costs, and a bench
+  procedure filed under Tier 2 would be misfiled rather than promoted.
+
+  What the file actually lacked was any expression of urgency at all. The
+  *Priority summary* was an index sorted by tier, despite its name. It now opens
+  with a **Start here** block naming both items and why each is first, and
+  saying plainly that the tiers group by kind — so the next reader is not left
+  to infer a queue from a taxonomy.
+
+  **The item's own dependency line was the real blocker, and this note
+  contradicted it.** D6 says writing the procedure needs no bench access. The
+  item said *"Dependencies: representative hardware and oscilloscope/logic
+  analyzer"*, which is what **executing** it needs. Anyone triaging by
+  dependency line would have parked a desk task behind equipment it does not
+  need. The line now separates the two, which is what makes the promotion
+  actionable rather than decorative.
+
+  **Two supporting claims did not survive checking.** `T3-hil` does not depend on
+  `T3-hw-procedure`; the procedure item describes itself as the no-rig
+  *fallback* for the HIL rig, so they are alternatives rather than a chain. And
+  the tier concentration is 22 of 33 open items, not 22 of 32. The load-bearing
+  claim did hold: `HARDWARE_VALIDATION_LOG.md` states that no controlled record
+  can be complete for any part until the procedure exists, and
+  `T3-pic12f675-bench` names it as the reason it is blocked.
+
 - **D7 — Mutation adequacy is asymmetric.** Mutation testing covers `src/` and
   `bypass_config.h`. The ~32,000 lines of build and release meta-tests have no
   adequacy evidence. **The recommended response is not to add Makefile mutation
