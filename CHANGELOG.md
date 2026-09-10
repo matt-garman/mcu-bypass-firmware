@@ -848,1047 +848,249 @@ the same release at different lengths.
 
 ## [0.9.10] - 2026-08-26
 
+Building from source now requires GCC 10 or newer, or any Clang. Flashing a
+downloaded release onto a PIC12F675 goes through `flash-pic12f675.py`, shipped in
+every release bundle from this one on, rather than through a raw programmer
+command.
+
 ### Added
 
-- **A release-shipped PIC12F675 flashing helper, and the retirement of the raw
-  command sequence that preceded it.** `FLASHING.md` existed for a real use
-  case: program a downloaded release on a machine that has the programmer but
-  no build toolchain and no checkout. For six of the seven parts that is
-  genuinely a command. For the PIC12F675 it is not, because a bulk erase
-  destroys two per-device factory-trimmed values the image cannot supply -- the
-  `RETLW` oscillator calibration word at `0x3FF` and the `BG<1:0>` bandgap field
-  in CONFIG -- and a device that loses either **still appears to work**, running
-  at the wrong tick cadence, the wrong relay coil-pulse widths, or the wrong
-  brown-out threshold.
+- **`flash-pic12f675.py`, a release-shipped PIC12F675 flashing helper**, listed
+  in the same signed `SHA256SUMS` as the images. This part is the one release
+  target a raw programmer command cannot safely serve: a bulk erase destroys two
+  per-device factory-trimmed values the image cannot supply -- the oscillator
+  calibration word at `0x3FF` and the `BG<1:0>` bandgap field in CONFIG -- and a
+  device that loses either **still appears to work**, running at the wrong tick
+  cadence, the wrong coil-pulse widths, or the wrong brown-out threshold. The
+  helper needs Python 3 and MPLAB X 6.20 `ipecmd` and nothing else, and runs the
+  write as one transaction: validate the image against the signed checksum, read
+  the device twice to prove its trim is stable, reserve durably, write exactly
+  once, read the whole device back, publish one immutable PASS/FAIL result. An
+  interruption is PENDING, never an implicit success, and a read-only
+  finalization resolves it. The factory export is retained whatever happens.
 
-  The block that shipped through `v0.9.9` had the right stages -- archive, note
-  the two values, write, compare -- but parsing and comparison were manual, the
-  write was not mechanically conditional on a valid baseline, no durable record
-  existed before the hardware mutation, and it contradicted `README.md` and
-  `release/README.md`, which prohibited exactly the raw write it published. The
-  suite was green through that contradiction because only the *generated*
-  per-release guidance was contract-tested.
+  **This detects trim damage; it does not prevent it.** Whether a real PICkit 3
+  preserves the trim across an erase is still a bench question, and until that
+  controlled run is on file a PASS means "no damage was observed on this device",
+  not "this writer is known to be safe".
 
-  Every release from `v0.9.10` now also ships `flash-pic12f675.py`, listed in
-  the same signed `SHA256SUMS` as the images and reproduced from its tracked
-  source byte for byte. It needs Python 3 and MPLAB X 6.20 `ipecmd` -- no Make,
-  Git, XC8, device pack, simulator, checkout or rebuild -- and runs the write as
-  a transaction: validate the image against the signed checksum, refuse one that
-  programs `0x3FF` or moves the CONFIG BG field, pin part, tool and MPLAB X
-  version, read the device, read it again to prove nothing moved, publish a
-  durable `reservation.json`, perform exactly one write, then read the whole
-  device back and publish one immutable PASS/FAIL `result.json`. An interruption
-  is PENDING, never an implicit success, and is resolved by a read-only
-  finalization mode that never constructs a writer argument. The complete
-  factory export is retained whatever the outcome, so a first bad attempt does
-  not leave an operator without the only copy of that chip is trim.
+- Single-bit upset detection for the debounce context, because the per-tick
+  sanity gate rejected only out-of-range values: an idle counter whose bit 3 or
+  bit 4 flipped stayed in range and was enough to toggle the effect with nobody
+  touching the footswitch. Persisted context is now a transaction against a
+  complemented XOR-fold check byte, proved by CBMC over the full byte domain.
+  Automatic locals, registers, code and control flow are outside the guarantee.
+  **The PIC10F320 is excluded**: even the cheapest fold overflows its 256 words,
+  so its range-only gate stays. Design: `docs/context_seu_detection.md`.
 
-  `test-pic12f675-flash-helper` proves the ordering against a stateful fake
-  programmer, proves that every refusal happens before an erase argument is
-  constructed, and proves that each way a writer can damage this part produces a
-  published FAIL rather than a PASS. A durable documentation contract now rejects
-  a raw PIC12F675 writer command in any current document -- including one written
-  tomorrow -- a missing helper requirement, the retired universal "only a
-  programmer and its CLI" claim, and a helper no release bundles.
+- A compile-time watchdog-margin assertion on every shell, where only the
+  PIC10F320 had one. The bound is wall-clock rather than the delay constant
+  alone, adding the loop work between a tick and the pet after it and, on the
+  interrupt-driven AVRs, the tick ISR stretching a blocking actuation past the
+  delay body it compiles to. Shipped margins were always wide enough; a future
+  near-bound configuration could have satisfied the old assertion and violated
+  the real one. Classic-AVR simavr measures the built image against the same
+  budget; AVR-XT uses compiled bounds, the pinned simulator's cycle-stepping
+  defect precluding a trusted full-interval measurement.
 
-  What this does not do is make the write safe by assertion. It DETECTS trim
-  damage after the fact; whether a real PICkit 3 preserves the trim across an
-  erase is still a bench question, and until that controlled run is retained in
-  `HARDWARE_VALIDATION_LOG.md` a PASS means "no damage was observed on this
-  device", not "this writer is known to be safe".
+### Changed
+
+- **An unexpectedly energized relay coil is a fault now, not a silent
+  correction.** Earlier `0.9.x` builds re-asserted both coils low at every
+  serviced loop top and continued. That cleared the coil, but the stray pulse it
+  permitted -- roughly one tick -- is only *below* the Panasonic TQ2-L2-5V 4 ms
+  minimum for guaranteed actuation, which is not the same as proven mechanically
+  harmless, so the firmware could not know whether the latching relay had moved.
+  If it had, the audio route was left permanently disagreeing with the effect
+  state and the LED. The coil is now caught by each shell's output-state
+  integrity check and escalated: both coil outputs are commanded idle *before*
+  the watchdog spin, and recovery re-runs `init()`, returning state and LED to
+  BYPASS with a nominal 12 ms RESET pulse. Physical return to BYPASS still
+  depends on the board, driver, supply and relay meeting the documented actuation
+  assumptions, and the blocking actuation sequence stays excluded from every
+  guarantee. PIC10F320 guards the two coil bits rather than the general latch
+  comparison it cannot afford in 256 words. Design:
+  `docs/relay_coil_fault_correction.md`.
+- Host compiler floor of GCC 10, or any Clang, because GCC 9 and older report a
+  false narrowing on the PIC shells' OR-folded integrity checks and every host
+  gate compiles firmware with `-Werror -Wconversion`. Satisfying GCC 9 cost four
+  PIC10F322 words, which the 512-word `cd4053_with_mute` variant cannot spare, so
+  the floor is enforced instead of paid for.
+- A release's date no longer has to equal its source commit's date; the old gate
+  rejected a valid release whenever the two fell on different days.
+- Suffixed tags publish as prereleases. The producer, verifiers and workflow
+  trigger had accepted `vX.Y.Z-suffix` for some time but `gh release create` was
+  never told, so a release candidate would have published as an ordinary release
+  and could have taken latest-release selection from the newest stable version.
+- Release-environment pinning is described factually: `ubuntu-24.04` is a moving
+  runner label and the apt tools carry no version constraint, so the runner and
+  that part of the toolchain are recorded, not pinned. What *is* enforced is
+  stated instead -- every published image rebuilt and compared byte for byte
+  against the signed `SHA256SUMS`, the compilers that define those bytes
+  version-checked before any build, the XC8/DFP cache integrity-verified on every
+  restore.
 
 ### Fixed
 
-- **A writer that skipped its bulk erase could publish `PASS` over half the
-  previous firmware.** The PIC12F675 flashing helper's post-write comparison
-  walked only the addresses the release image supplies, and the current images
-  occupy 495, 521 and 523 of this part's 1023 program words. A writer that
-  never erased, wrote every requested word correctly and preserved both factory
-  trim values would therefore satisfy every check the transaction made, leave
-  hundreds of stale instructions behind in the image's holes -- still reachable
-  by a computed jump or a runaway program counter -- and publish `PASS`. The
-  fake programmer could not reveal this, because its normal write
-  unconditionally erased every program word before overlaying the image.
-
-  The comparison now runs against one complete expected post-write device: the
-  image's value where the image supplies one, and the erased `0x3FFF`
-  everywhere else, for every word from `0x000` through `0x3FE`. Word `0x3FF`
-  remains per-device OSCCAL, compared against the two pre-write reads rather
-  than the image, and CONFIG remains compared outside the factory `BG<1:0>`
-  field. `result.json` now records `verified_program_words` beside the
-  `required_program_words` total it has to equal, so a comparison that covered
-  less than the whole device cannot report a positive count and an empty
-  failure list at the same time. The fake programmer gained a no-erase mode
-  that leaves one stale word at an address the selected image does not supply,
-  and a second corruption at the LAST word the image represents rather than at
-  word zero; the regression proves both are `FAIL` after exactly one write.
-
-- **The pinned `ipecmd` and the pinned image were re-opened by name at the
-  instant they were used.** The helper held descriptors for the tool, any Java
-  runtime and the JAR, and re-hashed them immediately before each command --
-  but then handed `subprocess.run()` a pathname, which the operating system
-  resolves again. The retained image had a longer version of the same window:
-  it was published to `image.hex`, its descriptor closed, and the PATH given to
-  `ipecmd`, so a process running as the operator could unlink and replace that
-  file, or rename the evidence directory and recreate its name over another
-  one, after `reservation.json` appeared and before the erase. Every checksum,
-  Intel HEX, CONFIG, EEPROM and OSCCAL guard would have been bypassed, and the
-  post-write comparison could only have reported the damage afterwards.
-
-  The child is now handed `/proc/self/fd/<n>` for everything it must execute or
-  read: the kernel resolves that through the descriptor this process already
-  holds, to the inode the helper validated, whatever the name refers to by
-  then. The image is pinned harder still -- a sealed anonymous copy of the
-  validated bytes, which has no name to replace and no writable path at all --
-  and the reservation records which pinning was in force. That makes the
-  guarded transaction a Linux procedure: elsewhere it refuses to touch a device
-  rather than run a check it cannot honour, and `FLASHING.md`,
-  `release/README.md` and the generated release guidance say so.
-  `test/pic/flash_hook.py` drives the helper as a module and replaces the
-  executable, the Java runtime, the JAR, the retained image (with one that
-  programs the calibration word) and the evidence directory itself inside the
-  window between the final identity proof and the child, reading back out of
-  the device model what the writer actually ran and opened.
-
-- **Neither the evidence reservation nor the published result was
-  crash-atomic.** `Evidence.create()` created the evidence directory and opened
-  it, but never flushed the PARENT directory that holds the entry naming it, so
-  a crash after the reservation was announced and the write had begun could
-  lose the directory that was supposed to make that reservation durable.
-  `Evidence.publish()` created `result.json` under its final immutable name and
-  then wrote into it, so a power loss, a `SIGKILL`, a short write or an I/O
-  error could leave an empty or truncated final file -- and `finalize` refuses
-  recovery on the existence of that name alone, leaving a transaction that was
-  neither a valid result nor a recoverable PENDING.
-
-  The parent directory is now opened, the evidence directory is created
-  relative to it, and its entry is flushed before any device command; a
-  directory entry that cannot be made durable removes itself and fails the
-  transaction while nothing has been touched. Every evidence file is now
-  written to a private temporary name in the same directory, written in full,
-  flushed, and only then installed under its final name by an atomic
-  no-replace `link()`. An interrupted publication leaves an inert remnant no
-  reader looks for; a completed one leaves a record that still cannot be
-  replaced. The regression fails and then `SIGKILL`s each of the five durable
-  steps and requires every outcome to be either one complete immutable result
-  or a PENDING transaction a read-only finalization still resolves without a
-  second write.
-
-- **The durable documents disagreed about what the PIC12F675 flashing helper
-  is.** `FLASHING.md` published the helper's MPLAB X 6.20 `ipecmd` procedure
-  while `README.md` twice and `TOOLCHAIN.adoc` once said no `ipecmd` procedure
-  was published at all -- a reader who believed either was misled about the
-  other, and only `release/README.md` drew the distinction the repository
-  actually holds. The selected policy is published now, software-tested, not
-  hardware-qualified, and every publisher now says exactly that in one
-  sentence. The Make-based development and release-provenance route keeps its
-  own, separate statement: it offers no operator `ipecmd` procedure, because
-  the pk2cmd reads it would need immediately before and after the IPE write
-  have no validated dual-programmer handoff. Three further claims are
-  corrected with it. The helper's `--power` diagnostic called the externally
-  powered arrangement "validated" while `HARDWARE_VALIDATION_LOG.md` listed
-  that same arrangement among the outstanding controlled checks; it now says
-  supported, and says the validation is still outstanding. `FLASHING.md` said
-  a helper "fetched from somewhere else" is refused, when the implemented
-  binding is released name plus released bytes and is deliberately
-  location-independent -- an edited copy inside the bundle is refused and a
-  byte-identical copy anywhere is accepted. And the signed `MANIFEST.md`,
-  published verbatim as the GitHub Release body, described simulator lanes as
-  "physical-output checks"; it now says modeled-pin output checks, which is
-  what yasimavr and gpsim observe.
-
-  Both halves are gated. Every helper publisher must carry the exact
-  published/software-tested/not-hardware-qualified sentence, and no current
-  `.md` or `.adoc` may carry the blanket denial in any of its forms, while a
-  claim scoped to the Make route -- and the accurate statement that no
-  `ipecmd` hardware procedure is QUALIFIED -- stay sayable. The rendered
-  release evidence is exercised for the modeled-pin wording and rejected for
-  the retired one.
-
-- **A design document said nothing in it was implemented while its own body
-  said otherwise.** `docs/flashing_simplicity.md` is deliberately frozen in
-  the present tense of the branch it was argued on, and two of its proposals
-  then shipped: the AVR build-before-hardware repair and the PIC12F675
-  no-compiler path. Its status banner still opened with "Nothing here is
-  implemented", and the section describing a failed build leaving changed AVR
-  fuses with no matching firmware still read as an open hardware-safety defect
-  after that defect was repaired. The banner now states what shipped and how
-  to read an un-updated section, and both build-before-hardware statements
-  carry their `v0.9.10` acknowledgement. A new preflight contract,
-  `release_validate_flashing_simplicity_status`, keeps the three in agreement:
-  a body that records an implementation update forces the banner to name that
-  version, and deleting either statement fails rather than satisfying it.
-
-- **Two current figures were checked by eye and had drifted.**
-  `DESIGN_DOCUMENTATION.adoc` summarized ATtiny202 occupancy as 47-49% of
-  flash while its own table reached 50.8%, understating the tightest image --
-  the direction that matters when a reader is deciding whether a change fits.
-  The sentence now gives both ranges to one decimal and
-  `test-resource-tables` recomputes each from its own part's table (219 ->
-  222 checks). `test/README.md` called its target-result row authoritative and
-  reported 46 PIC12F675 relay fault checks where the reviewed count table, the
-  Makefile count map, the mutation records and the adapter all use 43;
-  `test-pic-target-result-records` now reads the row's three triples back out
-  of the document and requires them to equal `pic12f675_target_count_table()`
-  (18 -> 24 checks).
-
-- **The PIC12F675 flashing helper binds the tool that runs, not the tool that
-  ships.** A review of the helper found four ways the transaction could still
-  be entered with something other than what it believed it was using, and each
-  was reachable before a device write rather than after it.
-
-  The helper checked its own bytes against the release `SHA256SUMS` only when
-  it was executed from inside the bundle directory. Run from anywhere else it
-  skipped that check entirely, so an EDITED copy could program a correctly
-  signed image -- and the regression that was meant to cover this asserted the
-  skip was intended. The binding is now on bytes rather than location: the
-  running helper's digest must appear in the selected bundle's manifest under
-  its released name, wherever the file sits. A byte-identical copy outside a
-  bundle is still the published tool and still works; an edited copy, a
-  renamed copy and a copy this release never published each get their own
-  refusal. Restoring the old rule lets all three reach a write, which is what
-  the new negative controls measure.
-
-  `ipecmd` was hashed by pathname and then executed by pathname, with the
-  whole transaction in between. The resolved file is now held open: the
-  recorded digest is read through that descriptor, and immediately before
-  every command the pathname in the argv is re-stat'd and required to still
-  name the same inode, whose bytes are re-hashed through the same descriptor.
-  A tool swapped in behind its name, or edited in place, stops the transaction
-  with zero writer invocations. The jar form's Java runtime is pinned,
-  reserved and re-proved the same way, because it is half of what actually
-  runs; `finalize` now requires it to be the reserved one too. The evidence
-  directory is likewise opened once and addressed by descriptor, so replacing
-  the directory behind its name cannot redirect a publication or make a later
-  read observe a different file than the one `ipecmd` produced. Where `dir_fd`
-  is unavailable the pathname discipline stands in and the reservation records
-  which of the two was in force.
-
-  Device exports were parsed leniently enough to hide two ways a reader can
-  lie. A repeated address was folded last-one-wins even when the two records
-  disagreed about its value, and an export that returned only part of program
-  memory was accepted as a trim baseline. Both are now refused before the
-  write, on both pre-write reads: the retained baseline is the only copy of
-  what was on the chip, and an incomplete one is incomplete for exactly the
-  memory the next command erases. After the write the same observations are
-  the result, so they are published as named failures instead of aborting the
-  readback that found them. That the export command returns complete data in
-  the form the helper parses is the first property the outstanding bench run
-  has to establish, and it is now checked rather than assumed.
-
-  The fail-closed matrix grew from 175 to 257 checks, adding the `java -jar`
-  invocation end to end against a fake runtime, malformed trim, unsafe
-  evidence and input paths, the interruption boundaries that were not covered
-  (after the second read, inside the post-write read, and inside a
-  finalization), and the two tool-replacement windows above -- the fake
-  programmer moves its own pathname on cue, which is the only way to reach
-  them at the right instant.
-
-- **The documents disagreed about whether this part has a no-compiler path.**
-  `release/README.md` opened by saying the PIC12F675 guarded workflow needs a
-  clean tagged checkout and the pinned XC8/DFP toolchain, and that no path yet
-  admits a downloaded image to it -- then said the opposite twice further
-  down, where it documents the helper that does exactly that.
-  `docs/flashing_simplicity.md` still argued in the present tense that the
-  part had no qualified direct-from-download path, and its §5.5 sketch of one
-  predicted the first improvement would land at "needs a clone plus common
-  development tools", not "download and run one command". Both are reconciled:
-  the opening states the helper path, and the analysis keeps its reasoning
-  with marked updates saying which of it the helper settled, including that
-  the dependency prediction was wrong in the good direction and that its step
-  2 was deliberately narrowed -- a tool shipped inside a bundle cannot verify
-  that bundle's signature without also shipping the trust root.
-
-  The durable-document detector that should have caught the contradiction was
-  narrower than the commands it was written to forbid. It only looked inside
-  fenced Markdown blocks, only at `.md` files, only recognised a writer as the
-  FIRST word of a line from a list of five names, and only treated a bare `-M`
-  as destructive. It now recognises a writer by the basename of any token --
-  so a full install path, a `sudo` prefix, a `$IPECMD` variable and
-  `ipecmd.sh` are the same command -- treats `-MP` and an erase as
-  destructive, and searches AsciiDoc listing blocks, indented blocks and
-  inline code spans as well as fenced blocks, in `.adoc` as well as `.md`. It
-  requires a writer, this part and a mutating option together, so a read-only
-  `-GF` export, the helper's own invocation, another part's one-liner and
-  prose naming the retired form in order to forbid it all stay publishable. A
-  companion sweep rejects the three superseded sentences about this part in
-  any current document, matched case-insensitively and named exactly, so
-  recording in the past tense how they were retired is not itself a violation.
-  `test-release-preflight` went from 144 to 158 checks.
-
-- **The simulator and toolchain descriptions match what the harness and the
-  fetcher actually do.** Four current documents still described a yasimavr
-  harness that stopped existing when the ATtiny202 output tracer moved to
-  signal hooks. `DESIGN_DOCUMENTATION.adoc` listed "one unpatched
-  cycle-accounting defect that stops the harness measuring busy-delay widths
-  in-simulation" among the AVR-XT trade-offs, and counted it as one of "three
-  local fixes" although it is not a fix and is not local. `TOOLCHAIN.adoc`
-  enumerated what `attiny202-sim` asserts -- ordering, polarity, coil
-  exclusion, complete-pulse presence -- and omitted the width it now also
-  asserts. `TODO.md` carried the caveat's retirement as future work that
-  "disappears when that tracer moves to the signal-hook pattern" -- written
-  in the very commit that moved it. Only `test/README.md`, corrected in that
-  commit and again under D2, was right.
-
-  The distinction all four now draw is the one that makes the claims
-  compatible. The COMPILED width is a property of the image:
-  `attiny202-delay-oracle` reads the `_delay_ms` loop count out of the
-  disassembly, which is simulator-independent, tighter than any trace, and
-  what pins the absolute design width. The DELIVERED width is what the pin
-  held: `attiny202-sim` free-runs in millisecond budgets, timestamps each
-  edge from a pin signal hook, and measures it -- a few percent longer,
-  because the 1 ms tick ISR preempts the busy loop, which a compile-time
-  count structurally cannot show. The unpatched `SimLoop.run(n)` cycle rewind
-  is still real and still unreleased upstream, and it now reaches no timing
-  assertion at all; the one deliberate `run(1)` caller left is the fault
-  driver's non-timing transaction-seam probe. `TODO.md` accordingly describes
-  only what re-pinning still buys: retiring the two vendored patches and the
-  derived-work notice, not closing a measurement gap.
-
-  One place did have to keep a bound from the image, and now says why rather
-  than distrusting the simulator wholesale: the watchdog pet-to-pet interval
-  is measured between consecutive `wdr` executions, which needs cycle-granular
-  instruction stepping -- precisely the mode the rewind corrupts -- so the
-  ATtiny202's ISR term is derived from the built image while the AVR classic
-  parts are measured in simavr.
-
-  Simulator lanes are also no longer called physical evidence. The workflow
-  and release-script comments describing `attiny202-sim` as "physical output
-  timing" and "physical PA2/PA3 output trace", the ATtiny202 row of the
-  relay-correction evidence table -- the only row saying "physical" where the
-  three gpsim rows say "modeled" -- and its mutation-resistance controls now
-  say modeled pin levels. Datasheet uses of "physical" for the pin-versus-latch
-  distinction are unchanged, because there the word names a register semantic
-  that holds on any substrate.
-
-  Finally, `TOOLCHAIN.adoc` promised the yasimavr build was portable "across a
-  stripped-ensurepip host (creates the venv `--without-pip` and bootstraps
-  get-pip)". That path was deliberately deleted for fetching and running an
-  unhashed script, and two tests keep it deleted; the prose outlived it, so a
-  reader provisioning a host would have expected a recovery the script fails
-  closed on. The entry now states the enforced rule -- pip comes from
-  `python3-venv`, there is no download fallback -- and `test-supply-chain`
-  holds the two together: every pip-bootstrap mechanism the yasimavr entry's
-  prose describes must exist in `scripts/fetch_yasimavr.sh`, and both must
-  name `python3-venv` as the pip source. Code spans are blanked before
-  matching, so naming the retired `get-pip.py` fallback in order to say it is
-  gone is not promising it.
-
-- **Current resource documentation is checked continuously, and final resource
-  evidence can no longer pass vacuously.** The flash and RAM numbers for
-  the seven release parts are restated in four current documents --
-  `DESIGN_DOCUMENTATION.adoc`'s four utilization tables and the sentences
-  derived from them, `docs/context_seu_detection.md`'s resource-qualification
-  table, `docs/pic12f675_feasibility.md`'s bounded current-status block, and
-  this file -- and nothing compared them with each other or with a build. They
-  had drifted. The AVR Classic table still carried the pre-F1 ATtiny13a images
-  (834/874/864 against a real 838/878/868), the ATtiny202 table was several
-  changes behind (964/1004/994 against 968/1008/1040), the PIC12F675 tables were
-  two behind (546/572/563 against 548/574/583), the ATtiny45 and ATtiny85 rows
-  were absent altogether, and two derived sentences -- the utilization span and
-  the ATtiny13a's distance from its 90% flash ceiling -- had been computed from
-  the stale numbers. These are the figures a reader uses to decide whether a
-  change fits.
-
-  The working tables were regenerated from the latest fully provisioned
-  candidate build. The
-  ATtiny45 and ATtiny85 rows are published rather than omitted: each of those
-  images is the size of its counterpart on the other part and 26 bytes larger
-  than the corresponding ATtiny13a image, so the family's span now runs from
-  10.5% of an ATtiny85 to 85.7% of an ATtiny13a. PIC12F675's gated XC8
-  Data-space total is stated as 40 of 64 bytes in every variant. Exact
-  whole-program Data-space totals for PIC10F322 and PIC10F320 are no longer
-  published: their release logs do not retain the records needed to support
-  those claims. What remains genuinely unmeasured is named as such: no
-  AVR-XT lane measures a call-chain-plus-interrupt stack high-water mark, so the
-  ATtiny202's peak stack is still an unretained figure rather than one derived
-  from the ATtiny13a's.
-
-  `make test-resource-tables` is the ordinary, tool-independent documentation
-  regression. The four
-  tables must cover exactly the canonical 21 images with every percentage and
-  free-space cell recomputed from its own size and the datasheet capacity; the
-  four documents must agree digit for digit, with each derived sentence
-  recomputed rather than string-matched -- the span, the binding image's 10 free
-  words, the PIC10F320's 14, the ATtiny13a's distance from the 90%-of-1024 limit
-  `test/check_flash_budget.sh` actually enforces, and the 90-word PIC12F675
-  shell premium over the PIC10F322 on the same relay driver; and every
-  documented image present in a build directory is measured and must match. It
-  also pins every current static-RAM/Data-space/stack statement and catches the
-  stale PIC10F320 3/3/4 row that contradicted the current 3/3/3 result. The
-  optional image layer needs no AVR or PIC toolchain: program size is read out of the ELF
-  section headers and the Intel HEX records directly, which reproduces
-  `avr-size`'s `Program:` and XC8's "Program space used" exactly, so it
-  measures whatever the tree has already built and reports how many of the 21 it
-  reached without representing a zero-image run as final evidence.
-
-  Production qualification uses the strict mode after final image regeneration.
-  It requires 21 of 21 regular, non-symlinked images, measures static data in all
-  12 AVR ELFs, and requires the complete Classic-AVR high-water, AVR-XT frame,
-  PIC12F675 Data-space, and PIC return-stack records from that run. Its retained
-  result names the exact source commit and is itself hash-bound into
-  `QUALIFICATION`; missing, partial, substituted, or edited evidence prevents
-  staging or publication.
-
-- **The release date is no longer coupled to the source commit date.** The
-  `0.9.10` heading previously read 2026-08-21 and then 2026-08-27 while
-  candidate commits were still landing, after which the release gate required
-  the selected date to equal Git's date for the qualified source commit. That
-  rejected a valid release whenever its publication date differed from its
-  source commit date. Versioned preflight still accepts an explicit
-  `Unreleased` draft, and production still requires an ISO-dated heading, but
-  the date itself is release metadata rather than commit metadata.
-
-- **Mutation result classification now prefers complete behavioral evidence.**
-  The PIC12F675 atomic-clear mutant produced its exact three-variant failure
-  record but could still be reported as a compile error when unrelated
-  compiler-shaped text appeared elsewhere in the Make log. The exact complete
-  verdict now wins; a real compile failure still cannot produce that record and
-  remains an error, now with its first compiler diagnostic in the summary.
-  Mutation cleanup also reads procfs ownership tokens without
-  trusting permissive mode bits, silently skipping unrelated processes whose
-  `environ` is protected by the host's ptrace policy instead of printing
-  misleading permission-denied diagnostics.
-
-- **Every AVR `*-program` goal now builds and validates its image before it
-  writes a fuse byte.** `attiny13a-program`, `attiny45-program`,
-  `attiny85-program` and `attiny202-program` were each defined as
-  `*-program: *-fuses *-flash`. That reads like "fuses, then flash", and under
-  the repo's forced `-j1` it ran exactly that way -- with the selected firmware
-  image only a prerequisite of the *later* flash goal. A compile, link, size or
-  Intel HEX failure therefore landed **after** the device's clock, watchdog and
-  BOD fuses had already been rewritten, leaving a part configured for firmware
-  that does not exist. On a fresh chip the window is not academic: the fuse
-  write is what moves it off its factory clock, so the failed state is a device
-  no longer running at the speed its previous firmware assumed. The quickstart
-  and flashing documentation recommended these goals.
-
-  Each `*-program` goal is now one ordered transaction. The per-part build --
-  which compiles, reports sizes, and rejects an image that fails Intel HEX
-  validation -- is a real prerequisite of the goal, so a build failure keeps
-  Make out of the recipe and no `avrdude` runs at all; the recipe then confirms
-  the selected image exists and the programmer is usable while the device is
-  still untouched, and only then writes the fuses and flashes, in that order.
-  The two hardware commands are single-sourced per part, so the single-step
-  `*-fuses` and `*-flash` goals cannot drift from what the transaction performs;
-  those keep their single-step meaning and stay ungated, because asking for one
-  of them is asking for exactly one hardware action. The programmer check uses
-  the same `-x` rule as the Intel HEX validator, since dash's `command -v`
-  succeeds on a merely existing file when the value contains a slash.
-
-  `make test-avr-program-order` is the regression: fake compiler, objcopy and
-  `avrdude` write into one shared event log, so the order is read off the real
-  recipe's real execution rather than from `make -n` text. It pins, for all four
-  parts, that the image is built and converted before the first programmer
-  invocation, that there is exactly one fuse write and exactly one flash write,
-  and that the fuse write comes first; and that a failed compile, an image
-  rejected by HEX validation, a build that legitimately produces nothing (the
-  ATtiny202 skip with no device pack), and an unusable programmer path each
-  reach the programmer zero times. Against the previous Makefile it fails 12 of
-  its 19 checks.
-
-- **A production release can no longer be staged under a development
-  override.** `RELEASE_IMAGES` is the canonical statement of what a complete
-  release contains, and `scripts/make-release.sh` enumerates the same set
-  independently and cross-checks the two -- but both are composed from the very
-  variables a caller can move. `make release FW_BASE=other` reached the script
-  through `MAKEOVERRIDES`, so every `print-<VAR>` query answered with the
-  overridden value, both opinions agreed, and a complete, internally consistent,
-  never-reviewed set of images staged and published. An exported
-  `PIC12F675_TAG`, `PIC10F322_CHIP` or `XT_MCU` did the same thing without
-  appearing in any command anyone typed: the per-part MCU tags and die selectors
-  are `?=`, and the environment wins those.
-
-  The Makefile now pins the reviewed identity as literal `override` text --
-  seven parts, 21 images, 18 soak combinations, one basename convention --
-  covering the image basename, the tinyx5 membership, every MCU tag, every die
-  and clock selector, and the variant sets. A `make release` or
-  `make release-preflight` goal fails at parse time against that pin, before the
-  worktree lock; `scripts/make-release.sh` repeats the comparison for its own
-  account, because it is also run directly, and stops before the documentation
-  validators, the scratch directory, and any clean, build, soak or staged byte.
-  The diagnostic names each drifted field, its pinned and selected values, and
-  the Make origin it arrived on. `scripts/verify-release-images.sh` gained the
-  same cross-check, which closes the reproduction leg: it already discarded
-  inherited command-line assignments, but not the environment.
-
-  Build-directory and tool-path overrides are unaffected and stay available:
-  they do not change what an artifact IS, and the release already asserts and
-  records the tool it actually selected. Clock selectors are pinned because the
-  classic-AVR manifest spells "1.2 MHz" and "1.0 MHz" as literals rather than
-  reading `F_CPU`, so a re-clocked image would have shipped under a canonical
-  name and an undisturbed provenance record.
-
-  The production boundary now also rejects non-allowlisted, release-relevant
-  Make overrides, so `CFLAGS`, `XT_CFLAGS`, `CORE_SRC`, their per-target
-  source/flag counterparts, validation controls inherited through ordinary
-  `?=` precedence, assignment-bearing Make flags, `--eval`, alternate/injected
-  makefiles, and dollar-bearing values stop before the recipe, selected
-  toolchain, scratch state, or build. Developer targets retain those override
-  surfaces. Both the selected and pinned image and soak inventories must also
-  contain exactly 21/18 unique members before set equality is considered,
-  preventing sorting from erasing duplicate canonical entries. Relocated
-  `PIC12F675_PYTHON` is now preflight-checked, exported to qualification, and
-  recorded separately in the manifest.
-
-  `test-release-images` (103 -> 233 checks) holds the real Makefile to the
-  pinned identity on both channels -- they are not equivalent, since a command
-  line beats a plain `=` assignment and only the environment reaches a `?=` --
-  and proves the pin itself unreachable from either. `test-release-preflight`
-  (118 -> 160) drives the real step 0 into each refusal and requires it to leave
-  no scratch directory or output path behind.
-
-- **The XC8 cache manifest can no longer be frozen from a partial scan.** The
-  installer records a SHA-256 inventory of every readable file in the
-  just-installed compiler and device pack, and the restored-cache verifier
-  regenerates it and requires an exact match -- that manifest is what stands
-  between a corrupted CI cache restore and a build, because a restore never
-  re-runs the digest-verified installer. Both computed it as one
-  `find | sort | xargs sha256sum` pipeline under `/bin/sh`, which reports only
-  the LAST stage's status: a `find` that emitted part of the tree and then died
-  was masked by the `sha256sum` that succeeded over that fragment. Measured on a
-  synthetic install, the old installer exited 0 having recorded 1 of 9 files.
-
-  The walk, the ordering and the hashing are now three separately
-  status-checked stages in both scripts, NUL-delimited end to end, and neither
-  will record or accept an empty inventory. The dangerous case was never the
-  loud one: a partial record is not caught at restore time if the condition that
-  truncated the install-time walk truncates the verify-time walk the same way,
-  and the two fragments then agree. For the same reason the verifier now reports
-  a scan/order/hash failure by name rather than as a cache mismatch -- they are
-  not the same finding, and only one of them means the cache is bad.
-
-  `test-supply-chain` fails each stage independently, in both scripts, against a
-  `find` stub that emits a genuine readable path before failing exactly as a
-  real one does over an unreadable subtree; installation must leave neither
-  stamp nor manifest behind, and verification must name the stage. Eight fixture
-  files whose names carry spaces, both quote characters, a backslash, shell
-  metacharacters, a leading dash, UTF-8 and an embedded newline are inventoried,
-  compared and caught when tampered with -- the same eight reduce to 2 entries
-  and an error under a newline-delimited pipeline (30 -> 46 checks). Manifest
-  content is unchanged: over the 3603 files of a real XC8 3.10 + PIC10-12Fxxx
-  DFP 1.9.189 install, the staged form reproduces the pipeline's output byte for
-  byte.
-
-- **Suffixed release tags now publish as prereleases.**
-  `scripts/make-release.sh` and every release verifier have accepted
-  `vX.Y.Z-suffix` since the producer and verifier grammars were aligned, and the
-  workflow's `on:` trigger matches that shape -- but `gh release create` was
-  never told, so a `v1.0.0-rc.1` would have been published as an ordinary
-  release and could have taken latest-release selection away from the newest
-  stable version. The publication step now decides the kind from the tag alone:
-  a bare `vX.Y.Z` publishes exactly as before, every accepted suffix adds
-  `--prerelease`, and a shape outside the version grammar aborts before `gh` is
-  reached rather than defaulting to either kind. That last branch is not
-  redundant with the existing gate, it is the alarm on it: malformed tags are
-  already rejected in the locate step before any build, so one arriving at
-  publication means that gate was bypassed.
-
-  Both halves are proved by execution rather than by inspection.
-  `test-release-provenance` runs the workflow's own publication shell against a
-  recording `gh` stub and requires the flag absent for `v0.9.8`, present exactly
-  once for `v0.9.8-rc.1`, and `gh` never reached for six malformed shapes --
-  including the `v0.9.8-` that the trigger globs admit and the grammar does not
-  (86 -> 94 checks). `test-workflow-syntax` extracts both classification
-  patterns from the YAML and requires that together they accept exactly what
-  `scripts/make-release.sh` accepts, that they do not overlap, and that they
-  split that grammar stable-versus-suffixed, so this additional copy of the
-  version grammar cannot drift away from the producer's (375 -> 381 checks).
-
-- **PIC10F320 de-energizes both relay coils in one write.** The
-  space-constrained shell's `set_relay_coils_low()` cleared RESET and then SET
-  through two separate `LATA` read-modify-writes. Both orders settle in the same
-  place; they differ in the transient, and with *both* coil bits high -- the
-  latch upset the sanity gate escalates on -- the per-bit clear left the second
-  coil driven for the whole of the first write, on the one path whose purpose is
-  to stop driving them. This was an instruction-scale exposure, not a
-  watchdog-scale one, but it was weaker than the single masked write the four
-  modular shells reach through `hw_pin_mask_set_low()`, and project-wide parity
-  language did not say so.
-
-  The clear is now one constant-mask `LATA` write. The two per-bit low helpers
-  it replaced had no other caller, so the stronger form is also the cheaper one:
-  the relay image went from 248 to **242** of 256 program words and its
-  worst-case return-stack depth from 4 to **3** of 8. Both CD4053 images are
-  byte-identical to the previous release. The write sequence itself is now
-  asserted rather than assumed, by two oracles that fail on a return to the
-  per-bit form -- the host fault harness (which sees every firmware `LATA`
-  access) and the gpsim resynchronization cases (which step the real image one
-  instruction at a time). Both are load-bearing on the both-coils injection, and
-  that is the whole of what is observable: with a single coil energized, a
-  per-bit clear delays the useful de-energization by one write without passing
-  through a distinct state.
-
-- **The watchdog margin is now asserted against wall-clock execution, not
-  against the delay constant alone.** Every shell used to assert only
-  `TICK_PERIOD_MS + blocking_delay < WDT_MIN_PERIOD_MS`. That sum omits two real
-  costs: the bounded loop work between a tick and the pet that follows it, and
-  -- on the interrupt-driven AVRs -- the tick ISR preempting the busy-wait
-  inside a blocking actuation, which makes the actuation longer in wall time
-  than the delay body it compiles to. Shipped margins were wide enough that
-  neither omission mattered, but a future near-bound configuration could have
-  satisfied the assertion while violating the real pet-to-pet bound.
-
-  Each pin map now declares its own `WDT_LOOP_WORK_MS` and
-  `WDT_ISR_STRETCH_PCT`, and the shared `WDT_PET_TO_PET_MAX_MS()` in
-  `bypass_output_common.h` combines them with the blocking delay and one tick of
-  scheduling latency into a conservative wall-clock upper bound, asserted
-  against the de-rated watchdog floor. The percentage is explicitly wall-time
-  ISR duty: foreground delay work receives only `100-p`, so its additive
-  overhead is `ceil(blocking_ms * p / (100-p))`. Values at or above 100% are
-  rejected, and 32-bit quotient-plus-remainder arithmetic keeps the ceiling
-  valid over every supported delay. The boot path -- `init()` arms the
-  watchdog and then performs the same blocking actuation before `main()` reaches
-  its first pet -- is inside that bound rather than beside it. The simple CD4053
-  variant, which blocks nowhere and previously carried no watchdog assertion at
-  all, is now covered too: the floor has to clear the loop itself, not just a
-  pulse. The self-contained PIC10F320 carries its own copy, as it does for every
-  other shared invariant. The arithmetic is consumed only by compile-time
-  assertions, so no instruction is intended to change; the final-candidate
-  21-image byte comparison remains the release gate for that claim.
-
-  Two gates hold the budget to something real. `test-static-assert-guards`
-  independently calculates the conversion, pins each variant's bound to its
-  exact millisecond, proves the ISR, tick and loop-work terms are load-bearing,
-  and rejects a negative control restoring the old mixed formula. Equality is
-  unsafe: the AVR relay's 18 ms bound fails against an 18 ms watchdog floor and
-  first compiles at 19 ms. The classic-AVR simavr suite then measures the real
-  image, recording the longest interval between `wdr` executions across boot and
-  toggles in both directions and requiring it to fit the same budget the
-  firmware compiled against. Worst measured: 14.002 ms of an 18 ms budget on
-  the ATtiny13A relay build, 15.003 ms of 18 ms on the ATtiny85, against a 100 ms
-  de-rated floor. AVR-XT uses its compiled ISR and delay-body bounds because the
-  pinned simulator's cycle-stepping defect precludes a trusted full-interval
-  measurement.
-
-- **PIC12F675 relay coil clears now commit through one whole-port write.** The
-  shared relay driver clears both coil bits with one masked hardware-interface
-  operation. On PIC12F675, that operation removes both bits from the SRAM output
-  shadow before writing `GPIO` once, so a SET or both-coil shadow upset cannot be
-  replayed as an intermediate physical high while RESET is cleared first. Three
-  shipping-source cases cover RESET, SET, and both shadow bits, preserve the
-  all-port refresh, and kill a mutant restoring the sequential writes. The other
-  modular shells implement the same interface as one masked latch/OUTCLR
-  operation; PIC10F320 remains unchanged because it has no independent shadow
-  replay path.
-
-  Because that write publishes the whole shadow byte, the PIC12F675 relay
-  emergency path also canonicalizes the parked spare output GP4 in the shadow
-  before calling it. Otherwise an upset that set only `gpio_shadow_`'s GP4 bit --
-  inert until something writes the port -- would be published to the pad by the
-  escalation itself and held there for the watchdog period, on a pin the board
-  contract permits only while it is low. It is the same single write, not a
-  second one: two sequential whole-port writes would reintroduce the coil replay
-  the one-write rule prevents. Both the host shipping-source lane and the
-  libgpsim relay fault lane now observe GP4 *before* the watchdog spin (the reset
-  is what ends the unsafe interval), and a mutant that drops only GP4 from the
-  canonicalization is killed there while the reset and coil assertions stay
-  green. Cost: two program words on the PIC12F675 relay image; the CD4053
-  images are byte-identical.
-
-- **An unexpectedly energized relay coil is now a fault, and recovery issues a
-  corrective RESET command.** Earlier `0.9.x` builds re-asserted both coils low
-  at every serviced loop top and let the loop continue. That cleared the coil,
-  but the stray pulse it permitted -- roughly one tick -- is only *below* the
-  Panasonic TQ2-L2-5V 4 ms minimum for guaranteed actuation, which is not the
-  same as proven mechanically harmless. The firmware therefore could not know
-  whether the latching relay had moved, and if it had, the audio route was left
-  permanently disagreeing with the effect state and the LED.
-
-  The loop-top re-assert is gone. An energized coil is now caught by each
-  shell's existing output-state integrity check and escalated:
-  `hw_force_wdt_reset()` commands both coil-control outputs idle *before* it
-  spins, so no fault holds an output active for a watchdog period, and the
-  recovery re-runs `init()`, which sets logical state and LED to BYPASS and
-  commands a nominal 12 ms RESET-coil pulse with SET inactive. Physical return
-  to BYPASS additionally depends on the validated board, driver, supply and
-  relay satisfying the documented actuation assumptions.
-
-  PIC10F322, PIC12F675, AVR classic and AVR-XT needed no new detection code.
-  PIC10F320 cannot afford a general output-latch comparison in 256 words and
-  instead guards exactly the two coil latch bits, giving it full parity on the
-  coil guarantee while keeping its documented gap for other latch upsets. Flash
-  cost is zero on all three PIC parts except three words on PIC10F320, and four
-  bytes on each AVR image. As a side effect PIC12F675's port-follows-shadow
-  clause becomes load-bearing at the settled seam, where the old whole-port
-  refresh used to pre-empt it.
-
-  AVR-XT and PIC12F675 now add shell-specific emergency pin quiescence around
-  the shared latch clear. AVR-XT removes coil pull-ups, disconnects the output
-  drivers, clears `PINnCTRL` inversion and stale `OUT`, and restores direction
-  only after both latches are low. PIC12F675 removes coil pull-ups, makes the
-  pins inputs, disables analog/comparator ownership, clears shadow/GPIO, and
-  then restores output direction. This closes cases where `INVEN` makes a low
-  AVR latch drive high or comparator `COUT` owns PIC GP2 and ignores GPIO
-  writes.
-
-  Fault tests on all six substrates now assert the two halves separately --
-  de-energization before the spin, and a measured full-width recovery pulse
-  where the simulator models the reset. Directional coil-output faults cover
-  both settled-state hazards: BYPASS with an unintended SET and ENGAGED with an
-  unintended RESET. The blocking actuation sequence remains excluded from every guarantee:
-  shipping-source tests characterize active-coil-low and inactive-coil-high
-  faults at actual recorded offsets of 1, 6, and 11 ms inside both SET and RESET
-  delays, but do not cover every instruction boundary and prove modeled
-  persistence and final low output state, not that an external output accepts
-  the command or that mechanical behavior is safe. The CD4053 variants retain an
-  explicit no-op. Design:
-  `docs/relay_coil_fault_correction.md`.
-
-  The AVR-XT relay fault matrix observes modeled PA2/PA3 pin levels, not only
-  `OUT`, under inversion, pull-up, direction, combined stale-register, and
-  ordinary latch faults. The PIC12F675 matrix enumerates all comparator modes
-  one bit from off and directly measures modeled GP1/GP2 voltage for both
-  `COUT` states in the reachable GP2-output mode. Latch-only negative controls fail on both targets.
-  These simulator checks are electrical pin-model evidence, not hardware or
-  relay-mechanical evidence.
-
-  Resource gates now cover the two affected shells explicitly. ATtiny202 builds
-  require one exact `Program:` and `Data:` record, enforce 2048 bytes of flash
-  and at most 16 of 128 bytes of static RAM, and compile the AVR-XT shell under
-  all three production selectors with a 32-byte per-frame `-fstack-usage` limit.
-  PIC12F675 builds require one internally consistent XC8 Data-space summary per
-  variant and enforce an inclusive 48-of-64-byte limit. Toolchain-free
-  regressions reject missing, duplicate, malformed, stale, dynamic,
-  inconsistent, and over-limit evidence before release qualification can rely
-  on either gate.
-
-- **A single-bit upset of the debounce context is now detected while it is still
-  in range.** The per-tick sanity gate previously rejected only out-of-range
-  context, so an in-range flip passed unnoticed: with `PRESSED_THRESH = 8` and
-  `RELEASE_THRESH = 25`, an idle `debounce_counter` whose bit 3 or bit 4 flips
-  becomes 8 or 16 — both inside the accepted range, and both enough to make the
-  next `debounce_step()` toggle the effect. That is a phantom bypass or engage
-  with nobody touching the footswitch. Each enabled shell now treats persisted
-  context use as a transaction: snapshot `ctx_`, validate the snapshot against
-  a complemented XOR-fold shadow byte, compute only from that local value, then
-  publish the successor and its check. A single-bit flip confined to persisted
-  `ctx_` or `ctx_check_` therefore forces recovery, is safely overwritten by a
-  previously validated transaction, or remains a mismatch for the next check;
-  it cannot be consumed and then legitimized by folding the live corrupt value.
-  This guarantee deliberately excludes automatic locals, registers, code and
-  control flow. The fold is the pure
-  function `debounce_ctx_check_word()` in `src/bypass_pure.c`, proved by CBMC
-  over the full byte domain of every member: single-bit detection (C8), and the
-  fold definition plus its all-zeros stuck-at guard (C9) — the latter being why
-  the fold is complemented at all. Enabled by `BYPASS_CTX_CHECK` on the
-  PIC12F675, PIC10F322, classic-AVR and AVR-XT shells. **The PIC10F320 is
-  excluded**: it links no pure core, and even the cheapest fold overflows its
-  256 words of flash, so its range-only gate stays — documented and statically
-  asserted. On AVR the integrator stays in the ISR, so both the ISR and
-  `main()` perform complete local transactions; main's snapshot-through-publish
-  sequence is one `ATOMIC_BLOCK`, which is the source of MISRA deviation D-5.
-  XC8 v3.10 measured the `0.9.10` PIC10F322 images at 476/502/493 of 512
-  words for the simple/mute/relay variants. Design:
-  `docs/context_seu_detection.md`.
-
-- **The watchdog-margin invariant is now enforced at compile time on every
-  shell.** Previously only `src/bypass_mcu_pic10f320.c` static_asserted `(tick +
-  longest blocking pulse) < de-rated WDT floor`; the other four shells carried
-  the argument in comments only. Each part now defines a datasheet-derived
-  `WDT_MIN_PERIOD_MS` (PIC12F675 and PIC10F322 160 ms, classic-AVR 100 ms,
-  ATtiny202 128 ms) and a `TICK_PERIOD_MS` in its pin map, and the shared
-  blocking output drivers assert the bound against them — so a future prescaler,
-  tick, or coil/mute-pulse change that erodes the margin now fails the build
-  rather than eroding it silently. A focused static-assert regression mutates
-  the floor below the bound and confirms the guard fires. This closes the
-  deferred `TODO.md` T25-wdt-margin-assert across all shells.
-
-- **PIC fault injection now proves post-reset liveness, not just the reset.**
-  After each expected watchdog recovery the harness requires the restarted image
-  to reach its main-loop `CLRWDT` again before the case passes. Earlier cases had
-  this only implicitly — the next case's setup would have stalled on a dead
-  recovery — but the final injection had no successor, so a reset-then-wedge
-  recovery on the last case would have scored as a pass. Every case, the final
-  one included, now carries the same explicit liveness guarantee.
-
-- **A branch-only working document can no longer slip into a release.** The
-  release now refuses to stage if the tree still contains a root-level
-  `v*-polish.md` working document, or still references one by name, machine-
-  enforcing the previously manual "delete before merge" and "no references
-  remain" steps. The gate runs on the actual release-staging path — not the
-  preflight capability probe, which legitimately validates a live polish branch
-  — so a release started from an un-merged polish branch fails fast, while the
-  retained `docs/*_post_release_polish.md` history is unaffected.
-
-- **PIC12F675 release programming is bound to the signed release bytes.** The
-  guarded release target verifies the annotated tag and checksum signature,
-  requires a clean checkout at that exact tag, and admits the private fresh
-  build to the device transaction only when it matches the selected digest in
-  the complete 21-image signed release set.
-
-- **The PIC12F675 CONFIG gate no longer consumes a stale ignored executable.**
-  Each programming transaction builds the tracked checker privately, pins its
-  identity, and requires an exact image-bound CONFIG verdict before hardware is
-  reachable.
-
-- **Interrupted PIC12F675 writes now have a read-only finalization path.** A
-  retained PENDING transaction validates its baseline, part, variant, tools, and
-  independently retained image before one device read publishes an exclusive,
-  sealed PASS/FAIL result. Recovery never invokes writer arguments, and
-  interrupted private attempts remain safely retryable.
-
-- **PIC12F675 release evidence now binds both aggregate suites to one retained
-  matrix.** Local staging and clean-runner attestation request the pre-hardware
-  and all-variant target aggregates in one Make graph, so their shared qualifier
-  runs once. The retained format-2 JSON identifies all six shipping/simulator
-  images and six consumed assembly/symbol sidecars; its digest is recorded in
-  `QUALIFICATION` and `MANIFEST.md`, and publication verification requires every
-  aggregate PASS, final shipped HEX, and corresponding `SHA256SUMS` entry to
-  match it. Soak-harness compilation reuses rather than rebuilds that matrix.
-
-- **Current release documentation now identifies v0.9.10 consistently.** The
-  changelog, release availability, TODO status, and PIC10F320 qualification
-  documents agree on seven release parts, 21 images, 18 soak combinations, and
-  the six-target/four-shell modular topology. Versioned release preflight now
-  rejects a missing requested-version changelog section or stale bounded
-  current-release declarations before creating scratch space or building.
-
-- **The release workflow now revalidates every frozen publication asset
-  immediately before upload.** The canonical image set plus fixed and optional
-  metadata are installed into a root-owned read-only bundle and recorded in a
-  canonical descriptor-based inventory whose digest is carried independently.
-  Publication rechecks the exact file set, types, sizes, identities, and hashes;
-  re-verifies the detached checksum signature and strict image checksums from
-  that same directory; rechecks the inventory again; and then invokes `gh`
-  without an intervening command. Added, removed, renamed, empty, symlinked,
-  non-regular, or byte-modified assets fail before upload.
-
-- **Release-environment pinning is now described factually.** `ubuntu-24.04` is
-  a moving hosted-runner label and the apt-installed tools carry no version
-  constraint, so the runner image and that part of the toolchain are recorded,
-  not pinned — the workflow header and `TOOLCHAIN.adoc` now say exactly that
-  rather than implying otherwise. Both also state what the release does enforce:
-  every published image is rebuilt and compared byte-for-byte against the signed
-  `SHA256SUMS`; the compilers that define those bytes are version-pinned and
-  checked before anything is built (XC8 V3.10 and PIC10-12Fxxx_DFP 1.9.189 by
-  digest, avr-gcc 7.3.0 by `scripts/make-release.sh`, with a hard failure on
-  drift); and the XC8/DFP cache is integrity-verified on every restore by the
-  new `scripts/verify_pic_toolchain_cache.sh`, closing a path where a restored
-  cache bypassed the SHA-verified installer entirely. Analyzer and simulator
-  versions ride the runner and are recorded in each release `MANIFEST.md`.
-
-- **The image-defining compiler pins are now exact.** The three preflight checks
-  that enforce avr-gcc 7.3.0 and XC8 V3.10 were shell substring patterns, so any
-  banner *containing* the pin satisfied them: `avr-gcc (GCC) 17.3.0` passed the
-  7.3.0 check, and XC8 `V3.100` passed the V3.10 check, as would `7.3.0.1`. A
-  neighbouring version is exactly what a drifting host has, and every published
-  image byte is gated on the exact compiler, so the enforcement `TOOLCHAIN.adoc`
-  and the release workflow header promised was wider than the code delivered.
-  Each check now parses a whole version token out of the selected tool's own
-  banner and compares it for equality, and fails on a banner carrying no version
-  token or more than one. GCC's parenthesised distributor blob is discarded
-  first, so `avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0` is still the pinned
-  compiler. The checks continue to read the commands `CC`, `PIC_CC` and
-  `PIC10F320_CC` actually select — PIC12F675 shares `PIC_CC` with the
-  PIC10F322 — and to run before any scratch tree, build or soak; a rejection
-  names the selected tool, the observed banner, the expected version and the
-  corrective action.
-
-- **The published PIC12F675 recovery instructions can now finalize the
-  transaction they describe.** `make pic12f675-finalize` passes the
-  caller-selected release identity to the recovery oracle, which compares it
-  against the identity the reservation recorded. Both static examples --
-  `README.md` and `release/README.md` -- omitted `PIC12F675_RELEASE_TAG`, so
-  following either one rejected a valid PENDING signed-release transaction
-  instead of resolving it, at the worst possible moment: after an interrupted
-  write, holding a device whose factory trim is already at stake. The generated
-  per-release documentation carried the argument, which is how the two drifted
-  apart unnoticed. Both examples now carry it, `make help` no longer describes
-  the variable as programming-only, and a new documentation contract holds every
-  published finalization command -- static and generated, by the same oracle --
-  to the identity of the transaction it recovers: every reserved argument must
-  repeat the preceding command's value, not merely its name, and the release tag
-  is required after a `pic12f675-release-program` command and refused after a
-  `pic12f675-program` one, since a development reservation records no release
-  identity. Documents that publish the command are discovered rather than
-  enumerated, so a new one is covered when it is written; shipped
-  `release/<version>/` directories are excluded as immutable artifacts.
-
-- **The host C compiler now has a published, enforced minimum: GCC 10, or any
-  Clang.** GCC 9 and older report a false narrowing on the PIC shells' OR-folded
-  integrity checks -- they fold an explicit `(uint8_t)` cast away whenever the
-  operand provably fits in eight bits (a narrow bitfield read, or a read masked
-  with a small constant) and then blame the compound assignment that writes the
-  folded result back. Every host gate compiles firmware with `-Werror
-  -Wconversion`, so on those compilers `pic10f322-coverage-check-fw` failed over
-  correct firmware; measured here, GCC 9.5.0 reports four such errors and GCC
-  10.5.0 none, on identical sources. Rewriting the casts to satisfy GCC 9 was
-  measured at four PIC10F322 words, which the 512-word `cd4053_with_mute`
-  variant cannot spare, so the floor is enforced instead of paid for. The new
-  `host-compiler-valid` gate runs second in every aggregate, right after
-  `python-version-valid`, and is a prerequisite of all three
-  `*-coverage-check-fw` targets and of the local-CI preflight; it probes the
-  construct itself rather than parsing a version banner, so a compiler is judged
-  by what it accepts. `README.md`, `TOOLCHAIN.adoc`, and `test/README.md`
-  publish the floor, and a contract test holds all three in agreement with the
-  enforced constant.
-
-- **`make test` now runs both PIC shipping-source coverage gates.**
-  `pic10f322-coverage-check-fw` and `pic12f675-coverage-check-fw` compile the
-  real PIC shells, the shared pure core and all three output drivers under gcov
-  and gate the annotations exactly. Neither needs XC8, the device pack, gpsim or
-  a built HEX -- only the host compiler, gcov and Bash that `make test` already
-  requires -- yet both were reachable only through `pic10f322-test` and
-  `pic12f675-test`, standalone aggregates whose *other* lanes do need those
-  tools. `pic12f675-test` is worse than merely standalone: it skips its entire
-  matrix when XC8 has qualified nothing, so on a host without a PIC toolchain
-  that coverage gate did not run at all.
-
-  The cost of that routing was already paid once. A stale host fault oracle, a
-  compile configuration that was not the shipping one (the gate never defined
-  `BYPASS_CTX_CHECK`, leaving `debounce_ctx_check_word()` dead), and a coverage
-  anchor matching zero lines all coexisted with a green `make test` for the
-  length of a polish branch. Both gates now sit in the one shared gate
-  inventory, so `test` and `test-long` pick them up together; the standalone
-  aggregates still run them. Measured cost is about 8 s and 12 s.
-
-  `test-workload-rebuild` gained the routing assertions that keep this true:
-  `test` and `test-long` must resolve to the same gate set apart from
-  `test-mutation`, neither aggregate may name a gate twice, and both coverage
-  gates must appear exactly once. The comparison is made against Make's own
-  prerequisite sets rather than the text of the two lists.
-
-- **Field-use reports and controlled hardware qualification are now separate
-  claims.** `HARDWARE_VALIDATION_LOG.md` described its table of community build
-  reports as "which firmware has been flashed-to and tested on actual hardware",
-  while this file, `DESIGN_DOCUMENTATION.adoc`, `TODO.md`, the Makefile and two
-  design documents simultaneously said no part had ever run on a chip. Both were
-  wrong, in opposite directions: builders really have flashed released images
-  onto ATtiny13a and PIC10F320 parts and reported them working, and none of
-  those reports retains the source/image identity, board revision,
-  programmer, configuration bytes, procedure, measurements or acceptance result
-  that a qualification record needs.
-
-  The log now carries two bounded sections. Section 1 keeps the field reports,
-  labelled as self-reported and uncorroborated -- the linked threads were not
-  opened or independently assessed here. Section 2 defines the eleven fields a
-  controlled record must retain and states that no part has one. The `1.x.y`
-  criterion is restated across the project as *controlled hardware
-  qualification* rather than "has run on silicon", which is the phrasing that
-  could not be true and false at once. `T3-hw-procedure` is now recorded as
-  gating section 2 for every part, since the **Procedure** field has nothing to
-  reference until it exists.
-
-  The unqualified "same pinout, can be used interchangeably" notes are replaced
-  by the actual constraint: a shared pinout is a *board* property. The AVR
-  classic trio needs a different image and different fuse bytes per part
-  (ATtiny13a at 1.2 MHz, ATtiny45/85 at 1.0 MHz) or the device runs on the wrong
-  clock and still appears to work; the PIC10F32x pair needs each part's own
-  image with its own CONFIG word and a matching programmer part name.
-
-  `release_validate_hardware_claims` enforces all of this from `--preflight`, so
-  it runs on the live tree inside `make test`: the sections must exist exactly
-  once in order with no part row outside them, section 2 must define every field
-  and then either declare that no record exists or hold records carrying all of
-  them, the pin-compatibility qualification must name both families and both
-  mechanisms, and no durable document may assert the retired idiom or the
-  retired interchangeability sentence. Naming a retired phrase is not using it,
-  so code spans and quoted spans are blanked before matching -- this paragraph
-  and `test/README.md` both have to quote both forms in order to retire them --
-  while a bare assertion sharing a line with a quotation is still caught. Shipped
-  `release/<version>/` artifacts and root-level branch-only working documents are
-  pruned outright. `test-release-preflight`: 85 -> 101 checks.
-
-- **Four stale evidence and simulator claims are corrected.**
-  `docs/context_seu_detection.md` opened by calling target-toolchain
-  qualification "still pending" while its own evidence section recorded a fully
-  provisioned run that passed the AVR/XC8 builds and resource gates, the
-  simavr/yasimavr/gpsim lanes, CBMC, static analysis and the complete mutation
-  suite. Those are statements about two different things and neither said which:
-  the run is complete, and it is *local*. What does not exist yet is retained
-  release evidence -- a signed `v0.9.10` MANIFEST binding those gates to one
-  published commit. The record now draws that line in both places, and points at
-  `HARDWARE_VALIDATION_LOG.md` for the third claim it does not make either.
-
-  `test/README.md`'s mutation-mapping section still said the ATtiny202 output
-  tracer calls `SimLoop.run(1)`, and repeated the superseded "one cycle per
-  instruction" explanation that the same file corrects 450 lines earlier. The
-  tracer free-runs in millisecond budgets and timestamps pin edges from a signal
-  hook, so it asserts delivered width as well as ordering, polarity, exclusion
-  and presence, and the pinned yasimavr's cycle rewind reaches no timing
-  assertion; the fault driver's non-timing transaction-seam probe is the one
-  deliberate `run(1)` caller left. The delay oracle's role is restated
-  accurately too: it is the tightest absolute-width witness because it recovers
-  the *compiled* width from the disassembled image, which makes it
-  simulator-independent -- not because it is the only route to a width.
-
-  Simulator observations are no longer described as physical-hardware ones.
-  `docs/pic10f320_special_case.md` said its target-I/O lane asserted "physical
-  `PORTA`" and that "the output lanes do observe real pin state"; both are gpsim
-  or host-compiled observations, and they now say modeled `PORTA` and name what
-  they are. The same correction is applied to the PIC12F675 I/O and fault-lane
-  descriptions in the Makefile and to the built-image lane list in
-  `docs/non-blocking_output_schemes_feasibility.md`. Where "physical port" names
-  the *register* semantics that classic mid-range and PIC10F32x parts have --
-  `GPIO`/`PORTA` reading pins where a shadow or `LATA` holds the latch -- it is
-  left alone: that is a datasheet distinction, not an evidence claim.
-
-  `.github/workflows/ci.yml`'s header called the runner "pinned to ubuntu-24.04"
-  -- a moving hosted-runner label whose apt packages carry no version constraint
-  -- and listed a `make test` matrix that predated the ATtiny202 host oracles and
-  both PIC shipping-source coverage gates. It now matches `release.yml`: the
-  runner and its apt toolchain are recorded, not pinned, and what *is* pinned is
-  named (every third-party action by commit SHA; XC8 V3.10 +
-  PIC10-12Fxxx_DFP 1.9.189, SHA-verified on install and integrity-checked on
-  every cache restore). Its inventory and the `verify` job's now cover the
-  host-side lanes of all seven parts. `release.yml`'s header needed no change --
-  the PIC12F675 additions and the moving-runner note landed with the release
-  provenance and compiler-pin work earlier in this cycle.
-
-- **The pre-release metadata window is now explicit and bounded.** Release
-  documentation identified `v0.9.10` as released and pointed at
-  `release/v0.9.10/` for its authoritative evidence, in a tree that contained
-  neither. That is not a slip in one sentence: source finalization and the
-  artifact commit are necessarily *different* commits, because
-  `scripts/verify-release-history.sh` rejects a release whose qualified source
-  commit already contains `release/<version>/QUALIFICATION`. The tree that
-  declares a release therefore never contains it, and the declaration has to be
-  written to be true across that window.
-
-  `release/README.md` now documents the four-step sequence -- source
-  finalization, production staging, artifact commit, signed tag -- says which
-  identity each step fixes, and states the rollback rule: if a release is
-  abandoned or postponed, the source-finalization commit is reverted or
-  corrected on `main` rather than left standing. `scripts/make-release.sh`
-  carries the same sequence in its header and in the hand-off it prints.
-
-  The declarations themselves are now checked rather than trusted. A bounded
-  current-release block may not name a release directory the tree does not
-  contain; the one exception is the version being released, and naming it
-  requires the exact pre-tag transition line recording that the release cut
-  creates it. `TODO.md` and `docs/pic10f320_validation.md` carry that line and
-  state the source contract they are, where the earlier wording asserted
-  retained evidence.
-
-  After staging, the same declarations are re-validated against the inventory
-  actually staged rather than against the canonical set the Makefile predicted:
-  images counted as files, soak combinations counted as machine records so a
-  build log sharing the soak naming cannot pad the count. That is the last
-  documentation check before the artifact commit and the tag, and its position
-  is pinned. `test-release-preflight`: 101 -> 113 checks;
-  `test-release-history`: 88 -> 89, adding a release commit that restates a
-  bounded declaration to the paths it already refuses.
-
-- **The release gate no longer chases working-document names.** The
-  branch-only-document guard refused a root-level `v*-polish.md` and nothing
-  else, so a root-level pre-release fix list -- a working document of exactly
-  the same kind, kept on a branch and deleted before merge -- was invisible to
-  it, and so would be the next such document under any other name. Release
-  staging now governs the whole root-level Markdown set as an allowlist: the
-  durable documents ship, both branch-only families are recognized by name for a
-  diagnostic that identifies them, and any other root-level document fails the
-  release until it is deleted or deliberately added to the durable set. The
-  reference half, which must search by name because a deleted document leaves
-  nothing else to search for, covers both families, so no durable file is left
-  pointing at a document the release removed.
-
-  Release preflight is unchanged and stays usable on a live branch, where the
-  working document legitimately exists: this gate runs only on the real
-  release-staging path, after the preflight capability probe exits.
-  `test-release-preflight`: 113 -> 118 checks, including the live tree held to
-  the same durable set so the allowlist cannot drift unnoticed until release
-  day.
+- **The flashing helper could publish `PASS` over half the previous firmware.**
+  Its post-write comparison walked only the addresses the release image supplies,
+  and the images occupy 495, 521 and 523 of this part's 1023 program words, so a
+  writer that never erased could pass every check while leaving hundreds of stale
+  instructions in the image's holes, still reachable by a computed jump or a
+  runaway program counter. The comparison now covers one complete expected
+  device, and the result records how many words were verified beside the total it
+  has to equal.
+- **The helper bound the tool that shipped, not the tool that ran.** It checked
+  its own bytes against the release checksums only when run from inside the
+  bundle directory; `ipecmd` and the retained image were hashed by pathname and
+  then used by pathname with the whole transaction in between, so a process
+  running as the operator could swap either after the reservation and before the
+  erase; and a device export with a self-contradicting duplicate address or a
+  partial read of program memory was accepted as the trim baseline. Binding is on
+  bytes rather than location now, everything the child executes or reads is
+  passed by descriptor, and the image is a sealed anonymous copy with no name to
+  replace. That makes the guarded transaction a Linux procedure; elsewhere the
+  helper refuses to touch a device rather than run a check it cannot honour.
+- Neither the evidence reservation nor the published result was crash-atomic: the
+  directory entry naming the reservation was never flushed, and the result file
+  was created under its final immutable name and then written into, so an
+  interruption could leave a transaction that was neither a valid result nor a
+  recoverable PENDING.
+- **Every AVR `*-program` goal builds and validates its image before it writes a
+  fuse byte.** `*-program: *-fuses *-flash` made the firmware image a
+  prerequisite of the *later* goal, so a compile, link, size or Intel HEX failure
+  landed **after** the clock, watchdog and BOD fuses were rewritten, leaving a
+  part configured for firmware that does not exist. On a fresh chip that is not
+  academic: the fuse write is what moves it off its factory clock. Each goal is
+  one ordered transaction now. `*-fuses` and `*-flash` keep their single-step
+  meaning and stay ungated.
+- A production release could be staged under a development override. Both
+  independent statements of what a release contains are composed from the
+  variables a caller can move, so `make release FW_BASE=other` reached the
+  staging script through `MAKEOVERRIDES` and both opinions agreed on a
+  never-reviewed image set; an exported MCU tag or die selector did the same
+  without appearing in any typed command, those being `?=`. The reviewed identity
+  is pinned as literal `override` text and a release goal fails at parse time
+  against it. Build-directory and tool-path overrides stay available.
+- The XC8 cache manifest could be frozen from a partial scan. Installer and
+  verifier both computed it as one `find | sort | xargs sha256sum` pipeline under
+  `/bin/sh`, which reports only the last stage's status, so a `find` that died
+  part-way was masked by the `sha256sum` over the fragment; on a synthetic
+  install the old installer exited 0 having recorded one of nine files. The
+  dangerous case was never the loud one: a partial record is not caught at
+  restore time if the same condition truncates both walks the same way.
+- The image-defining compiler pins were substring matches, so `avr-gcc (GCC)
+  17.3.0` passed the 7.3.0 check and XC8 `V3.100` passed the V3.10 check. A
+  neighbouring version is what a drifting host has, and every published image
+  byte is gated on the exact compiler.
+- PIC10F320 de-energizes both relay coils in one write. Two separate
+  read-modify-writes settle in the same place but differ in the transient: with
+  *both* coil bits high, the upset the sanity gate escalates on, the per-bit
+  clear left the second coil driven for the whole first write, on the one path
+  whose purpose is to stop driving them. One constant-mask write is also cheaper
+  -- the relay image went from 248 to **242** of 256 words and its worst-case
+  return-stack depth from 4 to **3** of 8. Both CD4053 images are byte-identical
+  to the previous release.
+- PIC12F675 relay coil clears commit through one whole-port write, so a shadow
+  upset cannot be replayed as an intermediate physical high while RESET is
+  cleared first. Because that write publishes the whole shadow, the emergency
+  path also canonicalizes the parked spare output GP4 in the same write;
+  otherwise an upset that set only that bit, inert until something writes the
+  port, would be published to the pad by the escalation itself and held there for
+  the watchdog period, on a pin the board contract permits only while it is low.
+  Two words on the relay image; the CD4053 images are byte-identical.
+- Both published PIC12F675 recovery examples omitted `PIC12F675_RELEASE_TAG`, so
+  following either rejected a valid PENDING signed-release transaction instead of
+  resolving it -- after an interrupted write, holding a device whose factory trim
+  is already at stake. The generated per-release documentation carried the
+  argument, which is how the two drifted apart.
+- The guarded PIC12F675 release path admitted a build it had not bound, and its
+  CONFIG gate could consume a stale ignored executable. The target now requires a
+  clean checkout at the verified tag and a digest match against the signed
+  release set, and builds the CONFIG checker privately per transaction.
+- `make test` now runs both PIC shipping-source coverage gates. They need only
+  the host compiler, gcov and Bash, which `make test` already requires, yet were
+  reachable only through standalone aggregates whose *other* lanes need XC8, the
+  device pack or gpsim -- and one of those skips its whole matrix when XC8 has
+  qualified nothing. That routing had already cost something: a stale host fault
+  oracle, a compile configuration that was not the shipping one, and a coverage
+  anchor matching zero lines coexisted with a green `make test` for the length of
+  a branch.
+- Two ways a lane could score a pass it had not earned. PIC fault injection
+  relied on the next case's setup stalling to expose a recovery that reset and
+  then wedged, so the final case, having no successor, would have passed. And a
+  mutant that produced its exact three-variant failure record could be reported
+  as a compile error when unrelated compiler-shaped text appeared elsewhere in
+  the Make log.
+- Resource figures in four documents had drifted from the images they describe,
+  in the direction that matters when a reader is deciding whether a change fits.
+  `make test-resource-tables` recomputes every cell from its own size and the
+  datasheet capacity and measures any documented image a build directory holds.
+  What is genuinely unmeasured is named: whole-program Data-space totals for
+  PIC10F322 and PIC10F320 are withdrawn, their release logs not retaining the
+  records those claims need, and the ATtiny202's peak stack stays unretained
+  because no AVR-XT lane measures a call-chain-plus-interrupt high-water mark.
+- Field-use reports and controlled hardware qualification were conflated in
+  opposite directions. `HARDWARE_VALIDATION_LOG.md` presented community build
+  reports as evidence that firmware had been tested on actual hardware, while
+  this file, `DESIGN_DOCUMENTATION.adoc`, `TODO.md`, the Makefile and two design
+  documents said no part had ever been qualified. Builders really have
+  flashed released images onto ATtiny13a and PIC10F320 parts and reported them
+  working, and none of those reports retains the source and image identity, board
+  revision, programmer, configuration bytes, procedure, measurements or
+  acceptance result a qualification record needs. The log separates the two now,
+  and the `1.x.y` criterion is restated project-wide as controlled hardware
+  qualification. Unqualified pin-compatibility notes are replaced by the actual
+  constraint: a shared pinout is a *board* property. The AVR classic trio needs a
+  different image and different fuse bytes per part or the device runs at the
+  wrong clock and still appears to work; the PIC10F32x pair needs each part's own
+  image, CONFIG word and programmer part name.
+- A release declared evidence the tree could not contain. Source finalization and
+  the artifact commit are necessarily *different* commits, because the history
+  verifier rejects a release whose qualified source commit already holds its own
+  `QUALIFICATION` record. `release/README.md` documents the four-step sequence,
+  says which identity each step fixes, and states the rollback rule; a bounded
+  current-release block may no longer name a release directory the tree lacks.
+- Branch-only working documents could reach a release. The staging guard refused
+  one family by name and nothing else, so a root-level pre-release fix list was
+  invisible to it, as the next such document would be under any other name.
+  Staging governs the whole root-level Markdown set as an allowlist now, and no
+  durable file is left pointing at a document the release removed. Preflight is
+  unchanged and stays usable on a live branch.
+- The release workflow revalidates every frozen publication asset immediately
+  before upload -- file set, types, sizes, identities, hashes, the detached
+  checksum signature, then the inventory again, then `gh` with no intervening
+  command. Added, removed, renamed, empty, symlinked, non-regular or
+  byte-modified assets fail before upload.
+- The durable documents disagreed about what the PIC12F675 route is. One
+  published the helper's procedure while two others said no such procedure
+  existed, and `release/README.md` contradicted itself, opening by saying this
+  part admits no downloaded image and documenting the helper that does exactly
+  that further down. The policy is published now, software-tested, not
+  hardware-qualified, and every publisher says so; the Make-based development and
+  release-provenance route keeps its own statement, because the reads it would
+  need immediately before and after an IPE write have no validated
+  dual-programmer handoff.
+- A design document's banner still opened by saying nothing in it was implemented
+  while two of its proposals had shipped, and its account of a failed build
+  leaving changed AVR fuses with no matching firmware still read as an open
+  hardware-safety defect after the repair. Two figures checked by eye had drifted
+  the same way, an occupancy summary understating its own table's tightest image
+  and a target-result row reporting a count no other record used.
+- Simulator observations were described as physical-hardware ones in several
+  documents, the Makefile and the workflow comments; they say modeled pin levels
+  now. Where the word names the *register* semantics classic mid-range and
+  PIC10F32x parts have, a port reading pins where a shadow or latch holds the
+  level, it is unchanged: that is a datasheet distinction, not an evidence claim.
+  The ATtiny202 harness account was stale in four documents, and the distinction
+  that makes its claims compatible is drawn in all of them now -- the *compiled*
+  width comes from the delay oracle reading the loop count out of the
+  disassembly, simulator-independent, while the *delivered* width is what the pin
+  held, timestamped from a signal hook and a few percent longer because the tick
+  ISR preempts the busy loop. The pinned simulator's cycle-rewind defect reaches
+  no timing assertion at all. One portability promise outlived its code the same
+  way: the yasimavr fetch script's stripped-`ensurepip` recovery was deleted for
+  fetching and running an unhashed script, but the prose survived it.
 
 ## [0.9.9] - 2026-08-15
 
