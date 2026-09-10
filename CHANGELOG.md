@@ -709,101 +709,73 @@ the same release at different lengths.
 
 ## [0.9.12] - 2026-09-03
 
+Users of `v0.9.11` should flash from `FLASHING.md` rather than from that
+release's manifest: most of its programming commands are templates rather than
+pasteable shell, and the PIC12F675 has its own helper requirements.
+
 ### Added
 
-- **Release manifests now publish qualification-bound resource use.** Each image
-  reports flash use against its reviewed ceiling, and the Resources section
-  reports applicable static RAM, observed Classic AVR stack high-water,
-  AVR-XT per-frame compiler bound, PIC12F675 Data-space and PIC return-stack
-  results with their ceilings and margins. The AVR-XT figure is a per-frame
-  bound, not an observed whole-path high-water mark.
-
-- **Focused documentation and safety contracts now run under `make test`.**
-  Durable links and anchors are checked, deliberately independent safety
-  definitions remain structurally separate, and selected high-consequence
-  AVR-XT and PIC guards are exercised under their target toolchains. Modular
-  shells now reject missing or conflicting MCU/output selectors, and shared
-  output drivers reject a foreign variant selector. Guard mutations are
-  representative rather than exhaustive. Valid firmware behavior is unchanged.
-
 - **`make pic10f320-program` flashes a built PIC10F320.** It mirrors
-  `pic10f322-program` with its own `PIC10F320_PROG*` variables, and selects the
-  output stage with `PIC10F320_VARIANT` -- the name its build goal reads, so the
-  image flashed is the image built. Release manifests publish a source-checkout
-  command for this part too, and each published PIC10F32x command is now pinned
-  byte for byte to the Makefile command it names. No PIC10F32x programming
-  command has been run against silicon under a written procedure.
+  `pic10f322-program` with its own `PIC10F320_PROG*` variables and selects the
+  output stage with `PIC10F320_VARIANT`, the same name its build goal reads, so
+  the image flashed is the image built. Every published PIC10F32x command is now
+  pinned byte for byte to the Makefile command it names. No PIC10F32x
+  programming command has been run against silicon under a written procedure.
+- **Release manifests publish resource use against reviewed ceilings.** Each
+  image reports its flash use, and the Resources section reports static RAM,
+  stack and return-stack results with their ceilings and margins. The AVR-XT
+  figure is a per-frame compiler bound, not an observed whole-path high-water
+  mark.
+- **Modular shells reject a missing or conflicting MCU or output selector**, and
+  shared output drivers reject a foreign variant selector. Valid firmware
+  behaviour is unchanged.
 
 ### Changed
 
-- **Changing measurements and inventories now stay with their executable or
-  per-release authorities.** Maintained design documentation keeps stable
-  capacities, reviewed ceilings and their enforcing gates, while exact resource
-  results come from source- and toolchain-bound release evidence. Reader guides
-  no longer duplicate release target, image, profile, evidence or soak
-  inventories. Transient simavr watchdog timing, PIC loop-cycle/current and XC8
-  optimization results are no longer maintained as current design/toolchain
-  facts; the historical PIC10F320 fit experiment remains with its exact source
-  commit, compiler and device-pack binding. The live documentation contract
-  rejects representative unbound measurements and numeric topology copies.
-  PIC12F675 source-checkout transaction semantics now have one maintained home
-  in the release policy; the toolchain guide retains only tool-support facts.
-
-- **Retained qualification evidence is now bound to what each operation
-  produced.** Build and target-test logs bind their payload, source commit, role
-  and identity through the qualification index. Manifest toolchain rows are
-  rendered from qualification-bound toolchain evidence rather than parallel
-  prose. Classic AVR clean-build and post-soak final-image phases now carry
-  distinct roles rather than two generic build claims.
-
-- **Release-state documentation now fails closed between releases.** A declared
-  release must carry the pre-tag transition disclosure until a nonempty regular,
-  non-symlinked qualification record exists. Root-level branch-only working
-  documents must declare that status in their opening blockquote.
+- **Measurements that change now live only with the authority that produces
+  them.** Design documentation keeps stable capacities, reviewed ceilings and
+  the gates enforcing them; exact results come from source- and toolchain-bound
+  release evidence, and reader guides no longer copy release inventories.
+  Transient timing, loop-cycle, current and optimization figures are no longer
+  maintained as current facts.
+- **Retained evidence is bound to the operation that produced it, and
+  release-state documentation fails closed between releases.** Build and
+  target-test logs bind their payload, source commit, role and identity through
+  the qualification index. A declared release must carry the pre-tag transition
+  disclosure until a real qualification record exists.
 
 ### Removed
 
-- **Retired the flashing-simplicity design journal.** Shipped instructions stay
-  in `FLASHING.md` and their executable checks; unresolved work stays in
-  `TODO.md`, while historical reasoning remains in Git history.
-
-- **Retired the one-shot v0.9.8 rename-identity lane from current
-  qualification.** The signed v0.9.8 tag and report remain the historical
-  authority, while current releases retain canonical image reproduction,
-  expected-image identity, checksum and publication-inventory checks.
+- **The flashing-simplicity design journal.** Shipped instructions stay in
+  `FLASHING.md` and their executable checks, unresolved work in `TODO.md`.
+- **The one-shot v0.9.8 rename-identity lane**, whose signed tag and report
+  remain the historical authority. Current releases keep canonical image
+  reproduction, expected-image identity, checksum and publication-inventory
+  checks.
 
 ### Fixed
 
-- **Newly generated release manifests now contain validated, shell-valid,
-  image-specific programming commands.** Project defaults, supported
-  substitutions and power assumptions are explicit; PIC writes require
-  readback, and PIC12F675 continues to use its dedicated flashing helper rather
-  than a per-image command. The published v0.9.11 manifest is unchanged and most
-  of its commands are templates rather than pasteable shell; users of that
-  release should follow `FLASHING.md` and its PIC12F675 helper requirements.
-
-- **PIC context sidecars now prove the guarded context is in reviewed SRAM.**
-  The pinned XC8 resolver accepts `_ctx_` only in `BANK0`; program,
-  configuration, EEPROM, alternate-bank and unknown classes fail closed.
-
-- **Beginning with v0.9.12, the release signature covers provenance as well as
+- **Beginning with `v0.9.12` the release signature covers provenance as well as
   firmware.** Signed checksums now include `QUALIFICATION`, `MANIFEST.md` and
-  `README.md`. Releases through v0.9.11 remain unchanged, so their provenance is
-  outside their checksum signatures; signed tags and the repository's
-  immutability gate are separate historical controls, not retroactive signature
-  coverage. The immutability baseline also records the prior safety-errata
-  amendment to v0.9.0-v0.9.2 rather than claiming published files never changed.
-  Release policy now distinguishes the immutable tag and signed payload from an
-  explicitly registered amendment to a current-tree result record, and assigns
-  each durable documentation authority one non-overlapping lifecycle.
-
+  `README.md`. Releases through `v0.9.11` are unchanged, so their provenance
+  sits outside their checksum signatures; their signed tags and the immutability
+  gate are separate historical controls, not retroactive signature coverage. The
+  immutability baseline records the earlier safety-errata amendment to `v0.9.0`
+  through `v0.9.2` rather than claiming published files never changed.
 - **The Makefile's `ipecmd` route now reads the device back.** Under
-  `PIC10F322_PROG=ipecmd`, and its new PIC10F320 equivalent, the command
+  `PIC10F322_PROG=ipecmd` and its new PIC10F320 equivalent the command
   programmed the device without verifying it and left the part in reset. It is
-  now `-F<hex> -M -Y -OL`, matching both `FLASHING.md`'s published PICkit 3
-  procedure and the PIC12F675 helper's validated write. `PIC10F322_PROG_TOOL`
-  defaults to `PK3` rather than `PK4` for the same reason. Releases publish no
-  `ipecmd` command line, before or after this change.
+  now `-F<hex> -M -Y -OL`, matching both the published PICkit 3 procedure in
+  `FLASHING.md` and the PIC12F675 helper's validated write, and
+  `PIC10F322_PROG_TOOL` defaults to `PK3` rather than `PK4` for the same reason.
+  Releases publish no `ipecmd` command line, before or after this change.
+- **Manifest generation now emits validated, shell-valid, image-specific
+  commands** with explicit defaults, substitutions and power assumptions. PIC
+  writes require readback, and the PIC12F675 keeps its dedicated helper rather
+  than a per-image command.
+- **PIC context sidecars prove the guarded context is in reviewed SRAM.** The
+  pinned XC8 resolver accepts `_ctx_` only in `BANK0`; program, configuration,
+  EEPROM, alternate-bank and unknown classes fail closed.
 
 ## [0.9.11] - 2026-08-29
 
