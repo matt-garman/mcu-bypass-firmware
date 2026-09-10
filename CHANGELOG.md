@@ -1806,73 +1806,58 @@ to six parts and 18 images.
 ## [0.9.2] - 2026-07-09
 
 ### Added
-- Per-tick sanity gate now checks `ANSELA` on the PIC10F322: an SEU/EMI flip
-  that re-selects an output pin as analog (dark LED / dead control pin, with the
-  `TRISA` direction bit unchanged) now forces a watchdog reset. `ANSELA` is
-  masked to `BYPASS_OUTPUT_DDR_MASK` (`RA0|RA1|RA2`) and added as a fifth term
-  to `hw_critical_sfrs_intact()`.
-- Fault-injection coverage for the new `ANSELA` gate term: three inject cases
-  (`ANSELA.RA0/RA1/RA2`) in `test/pic/test_fault_pic.cc`, each independently
-  proven to force a reset and to fail if the guard is removed.
-- `test/README.md` "Known gaps" now records the two PIC properties gpsim cannot
-  faithfully assert: WDT-timing / brown-out behaviour, and the TMR2 prescaler
-  *select* clamp (gpsim models `T2CKPS = 0b11` as 1:16 instead of the
-  datasheet's 1:64) — both are hardware-bench guarantees.
-- `CHANGELOG.md`.
-- TODO items for two Tier-3 robustness explorations: a hardware-in-the-loop
-  validation rig and complemented (inverted-copy) `ctx_` storage.
+
+- **The PIC10F322 per-tick sanity gate now checks `ANSELA`.** An SEU or EMI flip
+  that re-selects an output pin as analog leaves `TRISA` unchanged while the LED
+  goes dark or a control pin goes dead. That now forces a watchdog reset.
+- **`test/README.md` records the two PIC properties gpsim cannot faithfully
+  assert**, both of them bench guarantees: watchdog timing with brown-out
+  behaviour, and the TMR2 prescaler select clamp, which gpsim models as 1:16
+  where the datasheet says 1:64. The second hid the defect below.
+- **`CHANGELOG.md`.**
 
 ### Changed
-- **PIC10F322 core clock reduced from 16 MHz to 2 MHz** (HFINTOSC), roughly
-  halving MCU supply current (~0.85 mA → ~0.43 mA at 5 V) for no change to the
-  reliability architecture — the busy-wait tick, per-tick SEU/EMI sanity gate,
-  and LFINTOSC-based watchdog are untouched. The 1 ms tick is re-derived on the
-  1:4 Timer2 prescaler (`T2CON = 0x05`, `PR2 = 124`) to land exactly 1 ms; the
-  `__delay_ms` pulse widths (which track `_XTAL_FREQ`) and the FOSC-independent
-  watchdog margin are unchanged. Low power is not a project goal — this simply
-  avoids spending ~4 mW where ~2 mW does the same job, and emits less
-  high-frequency switching noise into the analog audio path.
-- **Renamed the PIC shell `pic10f32x` → `pic10f322`.** This project targets the
-  PIC10F322 specifically, so the family "32x" naming is retired:
-  `src/bypass_mcu_pic10f32x.c` → `_pic10f322.c`, `bypass_pins_pic10f32x.h` →
-  `_pic10f322.h` (include guards included), and the build macro
-  `BYPASS_MCU_PIC10F32X` → `BYPASS_MCU_PIC10F322`; every build/test/doc
-  reference follows.
-- Made PIC `ctx_` fault injection deterministic: the driver now parks the core
-  at the main-loop `CLRWDT` (located by opcode, not a hardcoded address) before
-  injecting, so no variant can land in the integrate-before-gate window where
-  the integrator would overwrite the injected field before the sanity gate reads
-  it. (At 2 MHz the previous ms-based settle produced intermittent false
-  passes.)
-- Normalized every `src/` license header from the "All rights reserved /
-  Licensed under the MIT License" three-liner to the self-describing
-  `SPDX-License-Identifier: MIT` form already used by the test sources.
-- Refreshed the stale Phase-2 design docs with "as-built (2 MHz)" banners
-  pointing at the shipped firmware as the source of truth, and corrected the
-  Timer2/oscillator bullets (including a `T2CKPS` register description that
-  listed 1/4/16 and dropped the 1:64 code).
+
+- **PIC10F322 core clock reduced from 16 MHz to 2 MHz** on HFINTOSC, roughly
+  halving supply current from about 0.85 mA to about 0.43 mA at 5 V and emitting
+  less high-frequency switching noise into the analog audio path. Low power is
+  not a project goal. The reliability architecture is untouched: the busy-wait
+  tick, the per-tick sanity gate and the LFINTOSC watchdog are unchanged, the
+  1 ms tick is re-derived on the 1:4 Timer2 prescaler (`T2CON = 0x05`,
+  `PR2 = 124`), and pulse widths and the watchdog margin are unaffected.
+- **The PIC shell is renamed `pic10f32x` to `pic10f322`,** since the project
+  targets that part specifically. Source files, include guards, the
+  `BYPASS_MCU_PIC10F322` build macro and every build, test and documentation
+  reference follow.
+- **PIC `ctx_` fault injection is now deterministic.** The driver parks the core
+  at the main-loop `CLRWDT`, located by opcode rather than a fixed address,
+  before injecting, so no variant lands in the window where the integrator would
+  overwrite the injected field before the gate reads it. At 2 MHz the previous
+  settle produced intermittent false passes.
+- **Design documents carry as-built banners and corrected Timer2 and oscillator
+  descriptions**, including a `T2CKPS` table that listed 1, 4 and 16 and dropped
+  the 1:64 code. `src/` license headers are normalized to
+  `SPDX-License-Identifier: MIT`.
 
 ### Fixed
-- **PIC10F322 1 ms system tick ran ~4× slow (~4 ms) on real silicon.** `init()`
-  programmed Timer2 with `T2CON = 0x07` (`T2CKPS = 0b11` = 1:64) while intending
-  the 1:16 prescale, stretching every debounce interval 4× (press-confirm
-  ~8 ms → ~32 ms, release-lockout ~25 ms → ~100 ms). Every simulation-based test
-  masked it because gpsim mis-models the `0b11` code as 1:16, and the host /
-  equivalence layers count ticks rather than wall-clock time; the defect was
-  caught by cross-checking the programmed register against the datasheet
-  (DS40001585D, Register 17-1 / Figure 17-1). Now a true 1 ms tick. The
-  behaviour was still serviceable — and not a safety regression, the watchdog
-  margin was unaffected — but off-spec in the v0.9.0–v0.9.1 prebuilt images.
 
-> These PIC10F322 changes bring the shell to parity with the sibling
+- **The PIC10F322 1 ms system tick ran about four times slow, at roughly 4 ms.**
+  `init()` programmed `T2CON = 0x07`, selecting a 1:64 prescale where 1:16 was
+  intended, stretching every debounce interval fourfold: press-confirm from
+  about 8 ms to about 32 ms, release-lockout from about 25 ms to about 100 ms.
+  Every simulation-based test masked it, because gpsim mis-models that prescaler
+  code and the host and equivalence layers count ticks rather than elapsed time.
+  Cross-checking the programmed register against the datasheet caught it. The
+  behaviour was serviceable and not a safety regression, the watchdog margin
+  being unaffected, but it is off-spec in the `v0.9.0` and `v0.9.1` prebuilt
+  images.
+
+> These PIC10F322 changes brought the shell to parity with the then-separate
 > [pic10f320-bypass-firmware](https://github.com/matt-garman/pic10f320-bypass-firmware)
-> child project, which landed the same TMR2 / 2 MHz / `ANSELA` work after the
-> fork. The pure debounce core and the output drivers are unchanged; the AVR
-> targets are unaffected.
->
-> *(Historical note, added at the merge: that project is no longer separate — the
-> PIC10F320 target now lives in this repository. This entry is preserved as
-> written because it describes the state of the world at v0.9.2.)*
+> project, which landed the same TMR2, 2 MHz and `ANSELA` work after the fork.
+> The pure debounce core, the output drivers and the AVR targets are unaffected.
+> That project is no longer separate; its target was merged into this repository
+> at `0.9.6`.
 
 ## [0.9.1] - 2026-07-04
 
