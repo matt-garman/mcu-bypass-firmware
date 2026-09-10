@@ -1571,283 +1571,170 @@ release artifacts and should be re-cloned.
 
 ## [0.9.6] - 2026-07-30
 
+The first unified release: the PIC10F320 is merged in from its own repository
+and the ATtiny202 is promoted out of development-only, bringing the product set
+to six parts and 18 images.
+
 ### Added
-- **The GitHub workflow files are now validated locally** (`make
-  test-workflow-syntax`, and a `ci-local.sh` preflight that runs it first).
-  Nothing in the repo had ever parsed them: the release regressions `grep`
-  `release.yml` for fixed strings, which succeeds on a file GitHub cannot load,
-  and `ci-local.sh` reproduces the job order from a comment header rather than
-  from `ci.yml`. An unquoted job `name:` containing `": "` therefore took the
-  entire CI matrix down with "Invalid workflow file" after a full clean
-  `ci-local.sh` pass. Both workflows must now parse, every job must have a
-  runner and steps, every `needs:` must resolve to a declared job, every action
-  must be version-pinned, and `ci.yml`'s job list must agree with
-  `ci-local.sh`'s CI-JOB MAPPING in both directions -- so a job added, renamed
-  or dropped can no longer silently stop being mirrored locally.
-- **ATtiny202 (AVR-XT) promoted from development-only to a release-supported
-  target**, bringing the release product set to six parts and 18 images. It was
-  classified development-only on 2026-07-14, in the middle of the week its
-  harness was being hardened; the classification recorded a scoping decision, not
-  a technical blocker, and the lane has since caught up with its peers. Its three
-  images are now built, qualified, staged and reproduced, and all three ATtiny202
-  release soak combinations are run directly.
-- ATtiny202 firmware/model **lock-step co-simulation** (`make attiny202-lockstep`),
-  the AVR-XT counterpart of the classic simavr co-sim and `pic-test-lockstep`.
-  After every settled 1 ms tick it reads the shell's `ctx_` out of simulated SRAM
-  and requires all three bytes to equal the shipping core's state after the same
-  tick, over both power-on scenarios. This closed the last structural verification
-  gap: the harness previously asserted observable behaviour only, so a shell that
-  reached the right LED state by the wrong internal trajectory passed.
-- A ctypes bridge (`test/avr/model_step_ffi.c`/`.py`) letting the Python drivers
-  call the **shipping** `src/bypass_pure.c` through `test/model_step.h`. Python
-  cannot include a C header, and re-implementing the algorithm there would
-  recreate exactly the drift hazard `model_step.h` exists to eliminate. Its own
-  host gate (`make test-attiny202-model-ffi`) asserts independent hard-coded
-  algorithm properties, since lock-step mutates model and firmware together.
-- An **ATtiny202 mutation lane**: 19 mutants against the AVR-XT shell and the two
-  shared coil-pulse widths, each mapped to the gate that observes what the fault
-  actually perturbs. Nothing previously established that this lane's suite would
-  fail on a defect in the shell it exists to test. One mutant weakens the PA7
-  pin-control guard to its pre-hardening bit test rather than defeating it, which
-  is what proves the fault matrix's `PIN7CTRL=0x88` injection is load-bearing:
-  that value keeps `PULLUPEN` set, so only the exact comparison can reject it.
-  Gated on the ATtiny_DFP and the patched yasimavr venv both resolving *and*
-  every kill target passing on the unmutated tree, since each `attiny202-*`
-  target exits 0 on a missing input and would otherwise report 19 survivors as a
-  clean run.
-- `make attiny202-test-target`, the fail-closed AVR-XT aggregate (sim + fault +
-  lock-step, every variant) that release qualification and release CI run with
-  `STRICT_TOOLS=1`.
-- ATtiny202 documentation to match its peers: a rationale section, the SOIC-8
-  pinout and pin roles, resource utilization, its place in the multi-MCU
-  architecture chapter, a full target-validation-layers table, and an explicit
-  "Known gaps (AVR-XT — hardware-bench only)" section covering yasimavr's flat
-  instruction timing, the unobservable force-reset completion, the two vendored
-  simulator patches, the missing shell stack bound, and untested UPDI programming.
-- **PIC10F320 integrated as a release-supported target** — the first whose
-  firmware does not compile the verified core but implements the debounce
+
+- **PIC10F320 integrated as a release-supported target**, the first whose
+  firmware does *not* compile the verified core but implements the debounce
   algorithm directly, because 256 words of flash cannot hold the shared-core
   architecture. Merged from a separate repository with its full history
-  preserved. See `docs/pic10f320_special_case.md` for what that difference does
-  and does not buy, and `docs/pic10f320_merge_plan.md` for every decision taken.
-- PIC10F320 validation lanes: firmware-to-core equivalence against
-  `src/bypass_pure.c` itself (266,144 sequences, all 66 reachable model states),
-  per-variant actuation-sequence checks, host fault injection, an exact-line
-  firmware coverage gate, real-HEX lock-step, target fault injection, target I/O
-  timing, CONFIG-word verification, cppcheck + MISRA across all three variants,
-  and a libgpsim soak. The host subset needs only a C compiler and gcov, so it
-  runs inside `make test` on every push.
-- A dependency-free PIC10F320 final-HEX return-stack oracle now strictly parses
-  Intel HEX and explores reachable classic mid-range PIC14 control flow with the
-  exact abstract hardware stack. Its host fixtures are in `make test`; the
-  fail-closed base `pic320` recipe checks every generated image before marking it
-  complete, while `pic320-test-return-stack` rebuilds and rechecks the supported
-  three-image matrix against the architectural eight-entry limit as part of
-  `pic320-test`.
-  Its state and return stack preserve the 9-bit architectural PC; instruction
-  fetch alone aliases through the low eight bits to 256 physical words.
-- The shared fake-tool PIC build regression now has a PIC10F320-only
-  rebuild-trigger lane. Exact output-specific compiler logs prove identical
-  `pic320` and host-test requests rebuild, and that changed/restored clock,
-  output-variant and host flags reach the current invocation. Canonical target
-  counts make activation fail closed; same-name target sentinels enforce
-  `.PHONY`, and exact fake-binary execution counts enforce each host run recipe.
-  This proves fresh triggering, not byte-for-byte XC8 reproducibility.
-- A standing PIC10F320 expected-image regression now pins the complete
-  three-variant HEX matrix to the reviewed XC8 V3.10 / DFP 1.9.189 SHA-256
-  baseline. Its dependency-free parser and fixtures run in `make test`, while
-  `pic320-test-build` performs the real comparison through CI/release
-  qualification. The hash gate stays outside mutation kill targets so byte drift
-  cannot mask whether each behavioural lane catches its assigned defect.
-- A **canonical release product set** (`RELEASE_IMAGES` in the Makefile),
-  enforced by the release script, the image verifier and its regression alike.
-  Previously the committed directory, the `SHA256SUMS` entries and the fresh
-  build were all derived by globbing, so three "independent" checks agreed
-  perfectly on a release with an entire MCU missing. They no longer can.
-- Three PIC10F320 full-duration soak combinations are required by the release
-  pipeline. `v0.9.6` is the first unified release to publish those images as
-  release assets; normal CI also publishes its separate development artifact.
-- `make pic320-*` targets, `make help` entries for them, and a
-  `docs/pic10f320_special_case.md` linked from the README, the design
-  documentation, the release documentation and the generated release manifest.
+  preserved. What that difference does and does not buy is in
+  `docs/pic10f320_special_case.md`, and every decision taken in
+  `docs/pic10f320_merge_plan.md`.
+- **The validation lanes that let a part which does not link the core still earn
+  a release.** Firmware-to-core equivalence is proved against `src/bypass_pure.c`
+  itself over 266,144 sequences covering all 66 reachable model states, beside
+  the fault, lock-step, coverage, timing and soak lanes its peers have. The host
+  subset needs only a C compiler and gcov, so it runs on every push, and three
+  full-duration soak combinations are required by the release pipeline.
+- **A dependency-free return-stack oracle for the final PIC10F320 image**, which
+  parses Intel HEX strictly and explores reachable control flow against the
+  architectural eight-entry hardware stack. Its state and return stack preserve
+  the 9-bit program counter while instruction fetch alone aliases through the low
+  eight bits to 256 physical words, which is the distinction it exists to get
+  right.
+- **ATtiny202 promoted from development-only to release-supported.** That
+  classification was a scoping decision taken while its harness was being
+  hardened, not a technical blocker. Its three images are now built, qualified,
+  staged and reproduced, and its three release soak combinations run directly.
+- **A canonical release product set**, `RELEASE_IMAGES`, enforced by the release
+  script, the image verifier and its regression alike. The committed directory,
+  the checksum entries and the fresh build were all previously derived by
+  globbing, so three "independent" checks could agree perfectly on a release with
+  an entire MCU missing.
+- **The GitHub workflow files are validated locally.** Nothing had ever parsed
+  them: the release regressions grep `release.yml` for fixed strings, which
+  succeeds on a file GitHub cannot load, and the local CI script reproduced the
+  job order from a comment header rather than from the workflow. An unquoted job
+  name containing a colon-space took the entire CI matrix down after a full clean
+  local pass. Both must parse now, and the workflow's job list must agree with
+  the local script's mapping in both directions.
+- **ATtiny202 lock-step co-simulation**, which closed the last structural
+  verification gap on that part: the harness asserted observable behaviour only,
+  so a shell reaching the right LED state by the wrong internal trajectory
+  passed. After every settled tick it now requires the shell's context in
+  simulated SRAM to equal the shipping core's state, reached through a ctypes
+  bridge rather than a re-implementation that would have recreated the drift
+  hazard the shared model header exists to eliminate.
+- **An ATtiny202 mutation lane**, 19 mutants against the AVR-XT shell and the two
+  shared coil-pulse widths, since nothing previously established that this lane's
+  suite would fail on a defect in the shell it exists to test. It is gated on
+  every kill target passing on the unmutated tree, because each `attiny202-*`
+  target exits 0 on a missing input and would otherwise report 19 survivors as a
+  clean run.
+- A standing expected-image regression pinning the three-variant PIC10F320 HEX
+  matrix to the reviewed XC8 V3.10 and DFP 1.9.189 baseline. It deliberately
+  stays outside the mutation kill targets, so byte drift cannot mask whether each
+  behavioural lane catches its assigned defect.
+- ATtiny202 documentation to match its peers, including a **known gaps** section
+  scoped to hardware-bench work: yasimavr's flat instruction timing, the
+  unobservable force-reset completion, the two vendored simulator patches, the
+  missing shell stack bound, and untested UPDI programming.
 
 ### Changed
-- The ATtiny202 soak now emits the same `SOAK_RESULT format=1 ...` machine record
-  and `SOAK PASS: <duration> ms ...` line the AVR Classic and PIC soaks do, so all
-  three substrates are interchangeable to the release orchestrator. Its schedule
-  moved onto a soak clock that excludes the time a liveness round-trip itself
-  consumes — the classic loop's semantics — because scheduling on raw simulated
-  time lets each round-trip's ~120 ms eat the schedule: invisible over an hour,
-  but enough to silently drop the last two or three checks at the release's 24 h
-  and fail an otherwise perfect run. `checks` in that record means liveness
-  checks, matching the peers; the finer-grained reset-witness sampling is counted
-  and reported separately.
-- The one fail-closed mutation run (the `pic` CI job) now provisions the ATtiny202
-  toolchain too, so a single authoritative run still covers every substrate rather
-  than splitting into partial per-job gates. Skip accounting counts PIC and
-  ATtiny202 separately, so a partial run always names which substrate went
-  unexercised.
-- The final-HEX return-stack oracle no longer hardcodes the device geometry.
-  `--program-words` supplies the implemented program memory from the device
-  pack's `ROMSIZE`, is validated as a power of two inside the 9-bit PC space
-  (both supported parts declare `PCBITS=0x9`), and an image carrying program
-  data above the declared size is now **rejected outright**. Under-declaring was
-  the dangerous direction — the fetch alias would fold a high PC onto a
-  different instruction and could report a *lower* depth than the truth — and it
-  previously surfaced only as a confusing downstream error about a computed
-  `PCL` write at an aliased address. Ten selftest checks pin the alias in both
-  directions; the regression is now 149 checks.
-- The strict-tools inventory now covers optional-tool recipes for **both** PIC
-  chips, not just the two host analyzers it started with.
-- MISRA documentation is now a per-target statement rather than a comparison
-  against another project, and records deviation **D-4** (the PIC10F320
-  analyzer symbol-resolution waiver) that the suppressions file already cited.
-- The `pic` CI job covers both PIC parts; `scripts/ci-local.sh` mirrors it and
-  documents that `--skip-pic` skips both chips.
-- Simulator "known gaps" documentation is now shared PIC content covering both
-  parts, rather than two per-repository copies that had already drifted.
+
+- The ATtiny202 soak emits the same machine record and PASS line its peers do, so
+  all three substrates are interchangeable to the release orchestrator, and its
+  schedule moved onto a clock that excludes the time a liveness round-trip
+  consumes. Scheduling on raw simulated time let each round-trip's ~120 ms eat
+  the schedule: invisible over an hour, enough to silently drop the last checks
+  at 24 h and fail an otherwise perfect run.
+- The return-stack oracle takes the implemented program memory from the device
+  pack rather than hardcoding it, and rejects an image carrying data above the
+  declared size. Under-declaring was the dangerous direction: the fetch alias
+  would fold a high program counter onto a different instruction and could report
+  a *lower* stack depth than the truth.
+- The one fail-closed mutation run provisions the ATtiny202 toolchain too, so a
+  single authoritative run still covers every substrate, and skip accounting
+  names which substrate went unexercised.
+- The PIC CI job covers both PIC parts, the strict-tools inventory covers
+  optional-tool recipes for both, and the simulator known-gaps documentation is
+  one shared PIC document rather than two copies that had already drifted. MISRA
+  documentation is a per-target statement rather than a comparison against
+  another project.
 
 ### Fixed
-- Current release documentation, Make help, source comments, and generated
-  manifest wording now consistently describe ATtiny202 as release-supported and
-  use the 18-image, 15-soak, 28-evidence-file, 93-mutant contract. Dated
-  rehearsal records retain their historical 15-image, 12-soak, and 74-mutant
-  results.
-- The Classic AVR `timer_isr_called_` fault injection no longer treats an
-  already-dark BYPASS LED after roughly 7 ms as proof of watchdog recovery. It
-  starts ENGAGED, single-steps to the ISR's handshake write, corrupts it before
-  main can read it, and requires both a device-reset witness (simavr's
-  `avr->reset` hook, which its watchdog reset path calls) and fail-safe dark
-  output after reset. A dedicated mutant removes only that sanity term.
-- The ATtiny202 fault matrix now covers `PORTA.PINnCTRL.INVEN` on the LED,
-  control/relay, parked-spare, and footswitch pins. The PA7 case preserves its
-  pull-up while reversing input polarity, proving the firmware's exact PA7
-  control check rather than the old pull-up-only predicate. Exact zero control
-  checks similarly protect the four output pins, and the per-variant matrix
-  expands from 17 injections / 18 results to 22 / 23.
-- Qualification documentation now distinguishes historical phase evidence, the
-  clean but non-publishable `4b28210` full-tool rehearsal, and retained
-  final-source production evidence. It no longer claims that corrected 74/74
-  mutation execution and real-image stack gating never occurred, and the release
-  guide scopes the `QUALIFICATION` soak/evidence contract to unified releases
-  rather than directing `v0.9.0` through `v0.9.5` to files and targets they
-  predate.
-- Release publication now requires both cryptographic signatures promised by the
-  trust model. CI verifies `SHA256SUMS.asc` and the exact remote annotated tag
-  object against the checked-in public key and pinned full fingerprint before
-  publishing; missing, empty, malformed, wrong-key, lightweight, unsigned,
-  same-target-replaced, and moved tags all fail closed. Signing instructions pin
-  the same key explicitly instead of relying on the operator's GPG default.
-  Producer and verifier version validation now matches the workflow's optional
-  hyphen-suffix trigger and rejects malformed or invalid Git tag names before a
-  production qualification run.
-- Mutation results now conserve an immutable 93-mutant inventory across seven
-  pinned categories: dispatched plus skipped must equal 93, and killed plus
-  survived plus errored must equal dispatched. Inventory records, baseline Make
-  commands, worker exits, sandbox setup, atomic result pairs, exact status/output
-  grammar, and unexpected artifacts all fail closed instead of allowing a
-  shortened or partially published run to report "all mutants killed."
-- The PIC10F322 `pic` producer now requires the complete immutable output-variant
-  matrix before invoking XC8, rejecting empty, duplicate, unsupported, and
-  incomplete requests. Classic AVR and PIC10F322 entries in `RELEASE_IMAGES` now
-  derive from that immutable set, so a `VARIANTS` override cannot weaken the
-  independent release contract along with the requested build. Both PIC matrix
-  requests are sanitized before recursive Make or shell expansion, and their
-  HEX/assembly/symbol cleanup inventories cannot be disabled by command-line
-  overrides.
-- PIC builds now invalidate XC8's generated `.s` and `.sym` sidecars together
-  with each HEX before compiling and remove the same complete product set after
-  failure or interruption. The hardware-stack targets skip only when no current
-  HEX exists; a current image without fresh, regular, nonempty assembly now fails
-  instead of allowing stale evidence or an absent-tool skip.
-- Tag CI now binds retained 24-hour qualification to Git history: the tagged
+
+- **The mutation sandbox mirrored four extensions one level down**, so a header
+  that is a prerequisite of both chips' soak binaries and all three target lanes
+  never reached it, and 18 PIC mutants were silently skipped. Two smaller gaps
+  closed with it: the PIC10F320 sandboxes omitted the folded gpsim wrappers, so a
+  cadence mutant falsely counted as killed, and the shared gpsim preflight read
+  the Git index outside a work tree, where an empty mode looked like failure. The
+  copy stays an extension allowlist by design, because `test/` also holds build
+  products and mirroring them with preserved mtimes could make Make skip a
+  rebuild and score a mutant against unmutated source. With all three closed, the
+  full run completes 93 mutants: 93 killed, none survived, errored or skipped.
+- **`pic320-test-gpsim` had no simulator probe at all**, so a strict run on a
+  host without gpsim reported all PIC10F320 pre-hardware checks complete having
+  run none of its six scenarios: the wrappers exit 0 on a missing simulator by
+  design, and nothing above them looked. The port had also dropped the tool-path
+  passthrough, so that override was ignored and the lane tested whatever `gpsim`
+  was on `PATH`.
+- **The Classic AVR interrupt-handshake fault injection accepted the wrong
+  evidence**, treating an already-dark BYPASS LED after roughly 7 ms as proof of
+  watchdog recovery. It starts ENGAGED now, corrupts the handshake before the
+  main loop can read it, and requires both a device-reset witness and fail-safe
+  dark output after the reset.
+- **Mutation results conserve an immutable 93-mutant inventory** across seven
+  pinned categories: dispatched plus skipped must equal 93, killed plus survived
+  plus errored must equal dispatched. Inventory records, baseline commands,
+  worker exits, sandbox setup, result pairs and status grammar fail closed
+  rather than letting a shortened run report that all mutants were killed, and a
+  skip says whether the tool was absent or the baseline failed.
+- **Release publication requires both cryptographic signatures the trust model
+  promises.** CI verifies the detached checksum signature and the exact remote
+  annotated tag object against the checked-in public key and pinned fingerprint,
+  with lightweight, unsigned, wrong-key, replaced and moved tags all failing
+  closed, and the signing instructions pin the key rather than relying on the
+  operator's GPG default.
+- **Tag CI binds retained 24-hour qualification to Git history**: the tagged
   release commit must be a single-parent, artifact-only child of the exact source
-  commit named by `QUALIFICATION`. A scratch-repository regression rejects wrong
-  parents, merge commits, mixed source/release changes, sibling-release changes,
-  checkout drift, a snapshot differing from the tagged record, and a remote tag
-  that moved before publication.
-- Release qualification is now machine-verifiable before publication: an
-  immutable 15-combination inventory, exact retained-evidence set, strict
-  `QUALIFICATION` schema, and one identity/timing/counter-bearing `SOAK_RESULT`
-  per log must agree. Tag CI verifies a private snapshot before installing tools
-  and publishes the qualification record; PIC images are hash-pinned across soak
-  compilation, execution, and staging just like validated AVR ELFs.
-- Dry-run release artifacts cannot be staged under the repository's release tree,
-  and tag CI requires an explicit production-mode manifest while independently
-  rejecting the dry-run banner before any release can be published. The output
-  path is revalidated immediately before staging, and tag-derived values reach
-  privileged workflow shells through the environment rather than source-text
-  interpolation.
-- `pic320-variants` now requires the complete supported build matrix, and the
-  canonical release set no longer shrinks with a `PIC320_VARIANTS_ALL` override.
-- Release provenance now probes both selected XC8 compilers fail-closed and
-  records target-qualified compiler paths and versions instead of attributing
-  both PIC image families to `PIC_CC`.
-- PIC host and real-target "all variants" aggregates now reject proper subsets
-  of the supported matrix instead of running one variant and reporting that all
-  variants passed.
-- PIC gpsim validation now shares one exact pin-name resolver across all
-  libgpsim harnesses and tests RA3 against substring decoys; fake CLI gpsim also
-  rejects stimuli not attached exactly once to `ra3`.
-- The host lock-step progress regression now compiles and stalls both PIC
-  adapters. Dropping the byte-identical child script had accidentally retained
-  only the PIC10F322 source path and left PIC10F320 stall handling untested.
-- The shared fake-XC8 interruption regression now requires proof that SIGTERM
-  reached each PIC build recipe; `pic320` exports its recipe PID so a missing
-  variable can no longer masquerade as successful cleanup validation.
-- `pic320-size` now fails closed on compiler, image-validation, and summary
-  failures and removes every temporary XC8 artifact after success, failure, or
-  interruption instead of suppressing the probe pipeline's exit status.
-- The shared gpsim wrappers and both public PIC functional targets now honor
-  `STRICT_TOOLS=1`; a missing simulator cannot become a successful strict run.
-- Standalone PIC10F320 target and soak selectors now rebuild the selected
-  variant instead of potentially consuming a stale image while rebuilding the
-  default `PIC320_VARIANT`.
-- `pic320-test-gpsim` now runs the forked PIC10F320 toggle stimulus instead of
-  silently using the PIC10F322 cadence checkpoints through the shared wrapper.
-- PIC10F320 mutation sandboxes now include the folded gpsim wrappers and stimuli,
-  and the tool probe baselines every distinct kill command. A missing harness can
-  no longer make the TMR2IF cadence mutant falsely count as killed.
-- The mutation sandbox now mirrors every test source at any depth instead of
-  four extensions one level down, restoring 18 PIC mutants that had been silently
-  skipped: `test/pic/find_pin_exact.h` never reached the sandbox, and it is a
-  prerequisite of both chips' soak binaries and all three target lanes. The
-  sandbox validator requires that header, and the self-test proves the copy
-  reaches three levels deep. The copy stays an extension allowlist by design —
-  `test/` also holds build products, and mirroring them with preserved mtimes
-  could make Make skip a rebuild and score a mutant against unmutated source.
-- The shared PIC gpsim preflight no longer consults the git index outside a work
-  tree, where `git ls-files` reports an empty mode that the guard read as a
-  failure. This made `pic320-test-gpsim` unrunnable inside the mutation sandbox;
-  the PIC10F322 lane had routed around the same obstacle, so only one chip was
-  affected. The local executable-bit check is unchanged and still unconditional.
-- Mutation skips now report whether a lane was disabled because a tool was
-  absent or because its baseline FAILED, and the closing advice no longer tells
-  the reader to install a toolchain that is already complete. With both sandbox
-  gaps closed, `make test-mutation MUTATION_ALLOW_SKIP=0` completes all 93
-  mutants — 93 killed, 0 survived, 0 errored, 0 skipped.
-- The PIC10F320 real-HEX target aggregate now requires explicit fault-injection,
-  lock-step, and target-I/O completion markers, so a skipped or incomplete lane
-  cannot be reported as a successful CI/release gate.
-- **`pic320` and `pic320-size` printed "skipping" and then built anyway.**
-  `$(SKIP)` is `exit 0` in non-strict mode and exits only its own shell, so a
-  guard on its own recipe line skipped nothing. An audit found no other instance
-  in the Makefile.
-- **The PIC10F320 build left a partial image set** when one variant failed; it
-  now removes the whole set.
-- The ported flash-budget comparison was weaker than this project's own and
-  conflated "not over budget" with "the comparison tool failed".
-- **`pic320-test-gpsim` had no gpsim probe at all**, so `make pic320-test
-  STRICT_TOOLS=1` on a host without gpsim reported "all PIC10F320 pre-hardware
-  checks complete" having run none of its six scenarios — the wrappers exit 0 on
-  a missing simulator by design, and nothing above them looked. The port also
-  dropped the `GPSIM=` passthrough, so that override was silently ignored on this
-  chip and the lane tested whatever `gpsim` was on `PATH`. Both chips' lanes now
-  share one preflight definition, and both are registered in the strict-tools
-  inventory (18 → 22 checks) rather than excluded from it.
-- `pic320-test-config` now skips cleanly when no image was built, instead of
-  handing an unexpanded glob to the CONFIG checker and failing where the
-  PIC10F322 lane skipped.
+  commit the qualification record names. Qualification is machine-verifiable
+  before publication against an immutable soak inventory, an exact
+  retained-evidence set, a strict schema and one identity-bearing result record
+  per log.
+- **Dry-run artifacts cannot be staged under the release tree**, and tag CI
+  requires a production-mode manifest while independently rejecting the dry-run
+  banner. The output path is revalidated immediately before staging, and
+  tag-derived values reach privileged workflow shells through the environment
+  rather than source-text interpolation.
+- **A `VARIANTS` override could weaken the release contract along with the
+  requested build.** Both PIC producers require the complete immutable
+  output-variant matrix before invoking the compiler, and the canonical release
+  entries derive from that immutable set rather than from the request.
+- **`pic320` and `pic320-size` printed "skipping" and then built anyway**,
+  because the skip helper is `exit 0` in non-strict mode and exits only its own
+  shell, so a guard on its own recipe line skipped nothing. An audit found no
+  other instance in the Makefile.
+- Aggregates could report more than they ran: the PIC "all variants" aggregates
+  accepted proper subsets of the supported matrix and reported that all passed,
+  and the PIC10F320 real-HEX aggregate now requires explicit completion markers
+  from each lane.
+- Stale or partial build products could be consumed as evidence. PIC builds
+  invalidate the generated assembly and symbol sidecars with each HEX and remove
+  the complete set after failure or interruption; a current image without fresh
+  assembly now fails rather than passing on stale evidence or an absent-tool
+  skip; a failed PIC10F320 variant no longer leaves a partial image set; and the
+  standalone selectors rebuild the variant they were asked for.
+- Release provenance probes both selected XC8 compilers fail-closed and records
+  target-qualified compiler paths and versions, rather than attributing both PIC
+  image families to one variable.
+- Assorted lane defects found while merging: the PIC10F320 gpsim lane ran the
+  PIC10F322 cadence checkpoints rather than its own forked stimulus, the ported
+  flash-budget comparison conflated "not over budget" with "the comparison tool
+  failed", the harnesses did not share one exact pin-name resolver and so
+  accepted substring decoys, the lock-step progress regression had retained only
+  the PIC10F322 source path, the interruption regression could not prove the
+  signal reached each build recipe, and the CONFIG lane handed an unexpanded glob
+  to its checker where its peer skipped.
+- Documentation and qualification records separate what was rehearsed from what
+  was retained, and the release guide scopes the qualification soak and evidence
+  contract to unified releases rather than directing earlier ones to files and
+  targets they predate.
 
 ## [0.9.5] - 2026-07-18
 
