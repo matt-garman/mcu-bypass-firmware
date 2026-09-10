@@ -630,82 +630,57 @@ the same release at different lengths.
 
 - **`make release-prepare` writes the derived release lines instead of refusing
   them.** Cutting a release meant hand-editing seven lines across
-  `CHANGELOG.md` and `release/README.md` -- the dated heading, the
-  `[Unreleased]` section that must survive the rename, both comparison links,
-  the bounded contract line and the pre-tag transition line -- until the
-  validator stopped objecting. Each is a pure function of the version being
-  cut, the version before it and the date, and none records a decision.
-  `scripts/release-prepare.sh` renders them through the same `release_render_*`
-  functions the validator compares against, so writer and checker cannot
-  disagree about a format and a mismatch has one repair. It writes structure,
-  never prose: it refuses when `[Unreleased]` says nothing about the release,
-  and refuses outright for a version already tagged or already holding a
-  retained record. Every existing check stays; what goes away is the hand
-  authoring, not the verification.
-
+  `CHANGELOG.md` and `release/README.md` until the validator stopped objecting,
+  though each is a pure function of the version being cut, the version before it
+  and the date. They are now rendered through the same functions the validator
+  compares against. It writes structure and never prose, refusing when
+  `[Unreleased]` says nothing about the release and refusing outright for a
+  version already tagged or already holding a retained record. Verification is
+  unchanged.
 - **A release must now prove the commit the tag will name before the tag
-  exists.** `scripts/make-release.sh` qualifies the source tree and stages
-  `release/vX.Y.Z/` without touching Git, so until now no gate had ever run
-  against the tree a tag actually carries -- the one that *contains* the
-  release directory and the publication-registry append. That window cost
-  `v0.9.12`, which passed every local gate, reproduced all 21 images bit for
-  bit on the clean runner, and then failed re-running the gates on the tag's
-  own tree. `scripts/verify-release-artifact-commit.sh` closes it: run after
-  the artifact commit, it repeats the two checks tag CI makes before it builds
-  and runs every gate whose verdict that commit can change
-  (`RELEASE_ARTIFACT_GATES`), and it is now the only thing that prints the tag
-  and push commands -- on success. A release that has not proved itself yields
-  no command to paste. `docs/ci_parity.md` records the design and the remaining
-  work; the script mutates nothing, as the rest of the release path does not.
+  exists.** Qualification stages `release/vX.Y.Z/` without touching Git, so no
+  gate had ever run against the tree a tag actually carries, the one containing
+  the release directory and the publication-registry append.
+  `scripts/verify-release-artifact-commit.sh` runs after the artifact commit,
+  repeats the two checks tag CI makes before it builds, and runs every gate
+  whose verdict that commit can change. It is now the only thing that prints the
+  tag and push commands, and only on success, so a release that has not proved
+  itself yields no command to paste.
 
 ### Changed
 
-- **Documentation gates hold claims to their terms, not to their sentences.**
-  Roughly seventeen places pinned the maintainer's own prose byte for byte, and
-  the cost was not theoretical: capitalizing one letter of a README heading
-  produced five test failures, and changing a period to a semicolon in a
-  sentence that altered no claim, no number and no part failed a safety gate. A
-  rule an author cannot satisfy by writing correctly eventually gets satisfied
-  by deleting it. Nine fenced claims replace those pinned sentences. A claim is
-  now bound by a named marker pair and held to the terms it must still state, so
-  deleting the fence, emptying it, leaving it unclosed, inverting the claim, or
-  keeping a denial while dropping what it denies each fail with the marker
-  named -- and every rule carries an accept case that rewrites the same
-  commitment in another voice. No property is dropped; only the technique
-  changes.
-
-- **`DESIGN_DOCUMENTATION.adoc` no longer carries a date or a source
-  revision.** The PIC10F320 modular-build overrun was the last byte-pinned
-  passage, mitigated by pinning its provenance because a measurement sat in
-  durable prose. The measurement is gone -- it restated a conclusion the same
-  sentence already drew -- and what remains is fenced as the overrun it records.
-  A current-fact rule now refuses ISO dates and commit bindings in that
-  document, so the mitigation cannot return in place of moving a measurement
-  out. Git records when a thing was written and against what.
+- **Documentation gates now hold claims to their terms rather than to their
+  sentences.** Roughly seventeen places pinned prose byte for byte, at real
+  cost: changing a period to a semicolon failed a safety gate without altering
+  any claim, number or part. A rule an author cannot satisfy by writing
+  correctly eventually gets satisfied by deleting it. Nine fenced claims replace
+  those pinned sentences, each bound by a named marker pair and held to the
+  terms it must still state, so deleting, emptying, unclosing or inverting a
+  fence fails with the marker named. No property is dropped.
+- **`DESIGN_DOCUMENTATION.adoc` no longer carries a date or a source revision.**
+  Its last byte-pinned passage had been mitigated by pinning provenance, because
+  a measurement sat in durable prose. That measurement is gone, having restated
+  a conclusion its own sentence already drew, and a current-fact rule now
+  refuses ISO dates and commit bindings in the document so the mitigation cannot
+  return in place of moving a measurement out.
 
 ### Fixed
 
 - **`v0.9.12` was tagged and never published: its own release-history gate
   refused it.** Tag CI rebuilt every image from the tagged source and confirmed
   all 21 reproduced bit for bit, then failed re-running `make test-long`.
-  `test-release-history` requires a superseded release to declare what it did to
-  the images it inherited, and a release's artifact commit is the one commit in
-  which that declaration cannot land -- see the fixture defect below.
   `Publish GitHub Release` never ran. The signed tag and `release/v0.9.12/` are
-  retained as the record of that cut rather than rewritten, so its
-  `CHANGELOG.md` section and comparison link stay resolvable.
-
+  retained as the record of that cut rather than rewritten, so its changelog
+  section and comparison link stay resolvable.
 - **The release-history suite no longer holds a release to a declaration no
-  tagged tree can carry.** `test-release-history` appends a synthetic future
-  prerelease to the real published set, which moved the image-continuity gate's
-  newest-release exemption off the release being cut. Every release therefore
-  failed the suite from its own artifact commit onward, for a debt that commit
-  cannot pay: it may change only `release/<version>/` and the publication
-  registry append, and a declaration written any earlier names a version that is
-  not yet published. The fixture now writes that declaration itself, in the
-  source commit of the release it appends, with the gate's own release ordering
-  and signed-list parse rather than a second copy of either. The register also
-  records what `v0.9.12` did to the images it inherited.
+  tagged tree can carry.** Its fixture appends a synthetic future prerelease to
+  the real published set, which moved the image-continuity gate's newest-release
+  exemption off the release being cut. Every release therefore failed from its
+  own artifact commit onward, for a debt that commit cannot pay: it may change
+  only `release/<version>/` and the registry append, and a declaration written
+  any earlier names a version that is not yet published. The fixture now writes
+  that declaration itself, in the source commit of the release it appends, using
+  the gate's own release ordering and signed-list parse.
 
 ## [0.9.12] - 2026-09-03
 
