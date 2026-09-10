@@ -559,6 +559,25 @@ historical records and are not retroactively compacted by this policy.
   never against the file on disk -- so `image_pinning` now reports
   `evidence-snapshot` rather than claiming a seal the writer never sees.
 
+- **A rewritten commit no longer costs a 24-hour soak to discover.** The release
+  binds its provenance to the commit it started from and re-checks it before
+  staging, and that check used to run only there. `v0.9.14`'s first attempt paid
+  the full price: 18 combinations soaked for 24 hours, all 18 PASS, and the
+  release was then refused because HEAD no longer named that commit. The commit
+  had been amended 83 seconds into the run -- the message, nothing else -- so the
+  two commits carried a byte-identical tree and every hour of that soak had
+  validated exactly the right bytes.
+
+  Refusing is still right: a release names a commit, and a rewritten commit is a
+  different release however identical its content. What was wrong was when. The
+  check now also runs at the validation and soak phase boundaries, so the same
+  refusal costs the phase that just started rather than the whole run, and the
+  end-of-run check stays as the only one that can see a rewrite made *during* the
+  soak. Its diagnostic also compares the two trees now, because an identical tree
+  means the validation is sound and only the provenance is not -- which is safe
+  to re-run immediately -- while a changed tree means the gates measured
+  something else.
+
 - **The artifact-commit gates no longer inherit build inputs from whoever
   started them.** `release-artifact-gates` passes its gates nothing but
   `STRICT_TOOLS=1`, and that was true of the goal and false of the run: GNU Make

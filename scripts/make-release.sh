@@ -1655,6 +1655,14 @@ hash_xt_image_set() {
 # 2. FULL PRE-HARDWARE GATES
 # ============================================================================
 section "2. validation: test-long + ATtiny202 and both PIC chips' pre-hardware/target gates"
+
+# The provenance this run will be recorded against is re-checked at every phase
+# boundary, not only at the end. See the note at the head of phase 3: the final
+# check is the authoritative one, and these bound what getting it wrong costs to
+# the phase that has just started rather than to the whole run.
+release_source_is_unchanged "$GIT_SHA" "$DRY_RUN" \
+	|| die "source provenance changed before validation. No release staged."
+
 # PIC12F675_FLASH_IMAGES=build: the flashing-helper gate inside test-long must
 # exercise the images section 1 just rebuilt from this release's source, not
 # fall back to the previous release's HEXes. The fallback exists so `make test`
@@ -2545,6 +2553,25 @@ ok "toolchain evidence records $toolchain_rows tools; the MANIFEST table renders
 # 3. PARALLEL SOAK -- every release combo, full duration
 # ============================================================================
 section "3. soak (all release combos, parallel, ${SOAK_DURATION_MS} ms each)"
+
+# WHY THE PROVENANCE IS CHECKED HERE AND NOT ONLY AT THE END
+#   This is the phase that costs a day, and the check that can refuse the whole
+#   run over it is a single `git rev-parse`. It used to run only after the soak.
+#   v0.9.14's first attempt paid for that: 18 combinations soaked for 24 hours,
+#   all 18 PASS, and the release was then refused because HEAD no longer named
+#   the commit the run had bound itself to. The commit had been amended -- 83
+#   seconds in, message only -- so the tree was byte-identical and every hour of
+#   that soak had validated exactly the right bytes. The refusal was correct
+#   (provenance names a commit, and that commit no longer existed on a branch)
+#   and it was knowable before the soak started.
+#
+#   That is this document's own principle: a release must only be able to fail
+#   on something that could not have been known before it started. The check at
+#   the end stays, and stays authoritative -- it is the one that covers a change
+#   made DURING the soak. This one makes the far likelier case, a rewrite during
+#   the ~40 minutes of unattended build and validation, cost minutes instead.
+release_source_is_unchanged "$GIT_SHA" "$DRY_RUN" \
+	|| die "source provenance changed before the soak. No release staged, and no soak run."
 
 # Build metadata for every soak combo: a binary, the cwd to run it from, a log.
 declare -a SOAK_NAMES=()

@@ -409,19 +409,31 @@ current_sha=$(git -C "$repo" rev-parse HEAD)
 expect_fail "HEAD drift" "$base_sha" 0 "source HEAD changed during release"
 expect_pass "matching updated HEAD" "$current_sha" 0
 
-# Keep orchestration fail-closed: capture HEAD before the one final check, and
-# complete that check before creating the staging directory.
+# Keep orchestration fail-closed: capture HEAD before every check, and complete
+# the LAST of them before creating the staging directory.
+#
+# There is more than one check now. There used to be exactly one, at the end, and
+# v0.9.14's first attempt paid for that: a commit amended 83 seconds into the run
+# was not caught until 18 combinations had soaked for 24 hours. The phase-boundary
+# checks that fixed it are pinned individually, by position, in
+# test_release_preflight.sh. What this pins is the pair of relations that makes
+# any check meaningful at all, however many there are: none may precede the
+# capture of the SHA it compares against, and the last must precede staging.
 mapfile -t capture_lines < <(grep -nF 'GIT_SHA=$(git rev-parse HEAD)' "$RELEASE")
 mapfile -t check_lines < <(grep -nF 'release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"' "$RELEASE")
 mapfile -t stage_lines < <(grep -nF 'mkdir -p "$OUTPUT_DIR/evidence"' "$RELEASE")
 [ "${#capture_lines[@]}" -eq 1 ] \
-	&& [ "${#check_lines[@]}" -eq 1 ] \
+	&& [ "${#check_lines[@]}" -ge 1 ] \
 	&& [ "${#stage_lines[@]}" -eq 1 ] \
 	|| fail "release provenance capture/check/stage markers are missing or ambiguous"
 capture_line=${capture_lines[0]%%:*}
-check_line=${check_lines[0]%%:*}
 stage_line=${stage_lines[0]%%:*}
-[ "$capture_line" -lt "$check_line" ] && [ "$check_line" -lt "$stage_line" ] \
+final_check_line=${check_lines[-1]%%:*}
+for check_entry in "${check_lines[@]}"; do
+	[ "${check_entry%%:*}" -gt "$capture_line" ] \
+		|| fail "a source-provenance check runs before HEAD is captured (check at line ${check_entry%%:*}, capture at $capture_line)"
+done
+[ "$final_check_line" -lt "$stage_line" ] \
 	|| fail "release provenance is not rechecked between capture and staging"
 checks=$((checks + 1))
 
@@ -1101,13 +1113,16 @@ mapfile -t source_check_lines < <(grep -nF \
 mapfile -t release_stage_lines < <(grep -nF 'section "4. stage $OUTPUT_DIR"' "$RELEASE")
 [ "${#output_guard_lines[@]}" -eq 2 ] \
 	&& [ "${#precondition_lines[@]}" -eq 1 ] \
-	&& [ "${#source_check_lines[@]}" -eq 1 ] \
+	&& [ "${#source_check_lines[@]}" -ge 1 ] \
 	&& [ "${#release_stage_lines[@]}" -eq 1 ] \
 	|| fail "release output guard/precondition wiring is missing or ambiguous"
 first_output_guard_line=${output_guard_lines[0]%%:*}
 final_output_guard_line=${output_guard_lines[1]%%:*}
 precondition_line=${precondition_lines[0]%%:*}
-source_check_line=${source_check_lines[0]%%:*}
+# The LAST source check, because what this brackets is the window between the
+# authoritative provenance verdict and staging. The earlier phase-boundary checks
+# sit well before it and would make this relation trivially true.
+source_check_line=${source_check_lines[-1]%%:*}
 release_stage_line=${release_stage_lines[0]%%:*}
 [ "$first_output_guard_line" -lt "$precondition_line" ] \
 	&& [ "$source_check_line" -lt "$final_output_guard_line" ] \

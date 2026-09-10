@@ -44,9 +44,19 @@ source of the friction.
 | `v0.9.10` | Tag CI, after images reproduced | a workflow-scope `env:` leaked into the preflight baseline |
 | `v0.9.12` (first attempt) | staging, after the soak | `toolchain.txt` was not staged |
 | `v0.9.12` (second attempt) | Tag CI, after images reproduced | the image-continuity declaration becomes owed only once the release directory exists |
+| `v0.9.14` (first attempt) | the final provenance check, after the soak | the source commit was amended 83 seconds into the run, and the provenance check ran only at the end |
 
-No firmware defect, and nothing a soak could have found. Two of the three were
+No firmware defect, and nothing a soak could have found. Three of the four were
 discovered after a full-duration soak had already been paid for.
+
+The `v0.9.14` entry is the cleanest example of the principle below, and the most
+expensive: the amend rewrote a commit message and nothing else, so the two
+commits carried a byte-identical tree and all 18 combinations had soaked for 24
+hours against exactly the right bytes. Refusing was still correct -- a release
+names a commit, and that commit no longer existed on a branch -- but it was
+knowable a minute in. The check now runs at each phase boundary as well as at the
+end, and says so when the trees match, because a rewritten commit and a changed
+tree need opposite reactions.
 
 ### Three of the last four releases soaked identical binaries
 
