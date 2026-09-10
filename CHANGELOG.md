@@ -1739,100 +1739,61 @@ to six parts and 18 images.
 ## [0.9.5] - 2026-07-18
 
 ### Added
-- Fail-closed ATtiny202 production-fuse verification for `WDTCFG`, `BODCFG`,
-  `OSCCFG`, `SYSCFG0/1`, `APPEND`, and `BOOTEND`, including host regressions
-  proving yasimavr receives the same complete Makefile-defined fuse set.
-- ATtiny202 built-image target-output coverage for exact physical PA2/PA3
-  startup/engage/bypass sequences, pulse presence and ordering, relay-coil
-  exclusion, and low parked outputs, backed by a host-only oracle regression
-  for positive and fail-closed trace paths.
-- Fail-closed ATtiny202 fault execution now requires all 17 independently pinned
-  injectable guards, zero skips, exact result counts, witnessed WDT resets,
-  phase-swept ISR-handshake corruption, and a long healthy negative control.
-- An ATtiny202 disassembly oracle now verifies absolute 5 ms mute and 12 ms
-  relay pulse widths directly from each built image, independent of yasimavr's
-  non-cycle-accurate delay execution. *(Note added 2026-08-02: the oracle is
-  unchanged and still correct, but that stated reason for it was not — yasimavr
-  does model multi-cycle instruction timing. See the correction under `0.9.8`.)*
-- Host-only regressions now exercise PIC target-matrix validation and lock-step
-  simulator stalls without requiring XC8 or libgpsim.
+
+- **ATtiny202 validation brought up to the level of its peers.** Production
+  fuses are verified fail-closed against the complete Makefile-defined set, the
+  built image is read for its exact PA2/PA3 startup, engage and bypass
+  sequences with relay-coil exclusion and parked-low outputs, and fault
+  injection requires every pinned guard to execute with witnessed watchdog
+  resets and a healthy negative control.
+- **A disassembly oracle that reads the ATtiny202 5 ms mute and 12 ms relay
+  pulse widths out of the built image** rather than trusting the simulator to
+  execute delays. *(The reason first given for it -- that yasimavr does not
+  model instruction timing -- was wrong; see the correction under `0.9.8`. The
+  oracle itself is unchanged and still correct.)*
 
 ### Changed
-- Complete Make and direct release-script invocations now hold one worktree-local
-  lock, preventing independent processes from replacing shared firmware, test,
-  coverage, or simulator artifacts while preserving explicitly isolated
-  recursive test fan-out.
-- Classic AVR, AVR-XT, and PIC10F322 sanity gates now verify the complete
-  settled output latch against the logical effect state, including low-driven
-  spare pins and inactive relay coils.
-- Classic AVR and ATtiny202 sanity gates now require the complete GPIO direction
-  state configured at startup, detecting footswitch pins becoming strong outputs
-  and intended low-driven spare outputs becoming inputs.
-- The PIC10F322 sanity gate now requires the complete TRISA direction state
-  configured at startup (exact `0x08`), closing the gap where a spare RA2
-  direction upset on the simple-CD4053 variant fell outside the required-subset
-  check. Fault injection, shipping-source coverage, and mutation coverage now
-  exercise the exact predicate on every variant.
-- Routine push, scheduled, and manually dispatched CI now runs mutation testing
-  in strict mode on the full PIC-toolchain runner; pull requests retain the
-  faster non-mutation path.
-- ATtiny202 is now explicitly classified as development-only/non-release. Its
-  normal build and yasimavr CI lane remains available, while release images,
-  reproduction, and long-soak qualification remain scoped to AVR Classic and
-  PIC10F322.
-- The full-tool ATtiny202 CI job now runs `make attiny202-test STRICT_TOOLS=1`,
-  making its cppcheck and MISRA analysis mandatory alongside fuse, build, and
-  flash-budget and pulse-width validation.
-- PIC shipping-source coverage is now a required gate, and mutation coverage
-  explicitly rejects the wrong unified x4053 BYPASS polarity.
+
+- **ATtiny202 is classified development-only and non-release.** Its build and
+  simulator lane stay available, while release images, reproduction and
+  long-soak qualification remain scoped to Classic AVR and PIC10F322.
+- **Sanity gates now assert the complete settled output latch and startup GPIO
+  direction state** on Classic AVR, AVR-XT, ATtiny202 and PIC10F322, rather
+  than a required subset of each. The subset check had let a spare RA2
+  direction upset pass on the simple-CD4053 PIC10F322 variant.
+- **Make and release-script runs hold one worktree-local lock**, so concurrent
+  processes can no longer replace each other's firmware, test, coverage and
+  simulator artifacts.
 
 ### Fixed
-- Long release runs now recheck the recorded source `HEAD` and worktree
-  cleanliness after validation and immediately before creating the staging
-  directory, refusing to attach artifacts or evidence to stale provenance. The
-  dirty-tree exception is now restricted to non-publishable dry runs.
-- Tap-timing documentation now scopes the 33 ms minimum to the pure model,
-  ISR-driven AVR shells, and simple PIC variant, and records conservative polled
-  PIC mute/relay qualification budgets of 38 ms/45 ms plus the pending-timer
-  nuance that can shorten the ideal path by roughly one tick.
-- Symbolic-test documentation now accurately scopes host/KLEE coverage to every
-  invariant-valid state/input tuple and identifies CBMC as the separate proof of
-  corrupt program-state handling, released-input recovery of out-of-range
-  counters, and undefined behavior obligations.
-- The optional KLEE target now compiles and links the symbolic harness with the
-  shipping `src/bypass_pure.c` bitcode before execution, preventing unresolved
-  core calls from masquerading as a proof of the real implementation.
-- `scripts/ci-local.sh --skip-pic` now permits unavailable PIC mutants to skip
-  during push-mode `test-long` while retaining `STRICT_TOOLS=1` for host/AVR
-  gates; full local-CI runs explicitly keep mutation fail-closed.
-- Missing CBMC or cppcheck now fails `test-cbmc` and `analyze-cppcheck` under
-  `STRICT_TOOLS=1` instead of silently turning required CI analysis into a skip.
-- Native Classic AVR and PIC soaks now require the liveness interval to fit
-  within the total run, and short release rehearsals clamp and propagate that
-  interval so a passing soak includes at least one responsiveness round-trip.
-- PIC flash-budget acceptance now requires a positive decimal budget, compares
-  arbitrarily long usage counts without fixed-width shell arithmetic, and
-  rejects failed comparisons or missing percentage results.
-- Release reproduction now rejects committed-as-fresh and duplicate fresh
-  directories after physical-path resolution, then verifies `SHA256SUMS`,
-  committed images, and fresh images from one immutable set of private snapshots.
-- Historical `v0.9.0` through `v0.9.2` release documentation now prominently
-  identifies the superseded `*_tmux*` images whose direct-drive polarity maps
-  the absent/undriven-MCU pull-down state to ENGAGED instead of fail-safe
-  BYPASS, and directs users to the unified images from `v0.9.3` or later.
-- Classic AVR, ATtiny202, and PIC image generation now fails closed on missing,
-  stale, partial, malformed, over-budget, or unverifiable output. Intel HEX
-  structure, stack/flash/fuse evidence, workload rebuilds, model coverage, soak
-  timing, and release image sets all have isolated negative-path regressions.
-- gpsim wrappers reject non-positive or malformed timeout values before invoking
-  the simulator and propagate process failures or kills even after valid
-  snapshots, while libgpsim targets remove stale binaries before rebuilding.
-- PIC target fault injection now verifies register identity, write-back,
-  simulator progress, exact per-variant completion counts, and restoration of
-  negative controls before reporting PASS.
-- PIC target aggregates reject empty, duplicate, or unsupported variant matrices
-  before execution, and PIC lock-step stalls abort immediately during settle,
-  calibration, or completion instead of looping on a frozen cycle counter.
+
+- **Releases `v0.9.0` through `v0.9.2` ship a fail-dangerous polarity, and
+  their documentation now says so prominently.** In the superseded `*_tmux*`
+  images the direct-drive polarity maps the absent or undriven-MCU pull-down
+  state to ENGAGED instead of fail-safe BYPASS. Users of those releases should
+  move to the unified images from `v0.9.3` or later.
+- **Five checks could report success without having checked anything.** The
+  KLEE target linked the symbolic harness without the shipping
+  `src/bypass_pure.c` bitcode, so unresolved core calls stood in for a proof of
+  the real firmware. A missing CBMC or cppcheck became a silent skip under
+  `STRICT_TOOLS=1`. A soak passed with a liveness interval longer than the run
+  itself, so no responsiveness round-trip ever happened. PIC fault injection
+  reported PASS without confirming register write-back, simulator progress,
+  per-variant completion counts or restored negative controls. Release
+  reproduction could compare a committed directory against itself. Each now
+  fails closed.
+- **Tap-timing documentation now scopes its numbers to what they describe.**
+  The 33 ms minimum applies to the pure model, the ISR-driven AVR shells and
+  the simple PIC variant; the polled PIC variants carry qualification budgets
+  of 38 ms mute and 45 ms relay, and a pending timer can shorten the ideal path
+  by roughly one tick.
+- **Image generation, flash-budget acceptance, gpsim wrappers and PIC variant
+  aggregates fail closed** on missing, stale, partial, malformed, over-budget or
+  duplicate input instead of proceeding on it.
+- **Long release runs re-check provenance immediately before staging.** The
+  recorded source `HEAD` and worktree cleanliness are confirmed after
+  validation, so artifacts and evidence cannot attach to stale provenance. The
+  dirty-tree exception is restricted to non-publishable dry runs.
 
 ## [0.9.4] - 2026-07-11
 
