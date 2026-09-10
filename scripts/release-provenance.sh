@@ -434,7 +434,7 @@ release_stage_classic_avr_images() {
 release_source_is_unchanged() {
 	local expected_sha=$1
 	local permit_dirty=$2
-	local current_sha status
+	local current_sha status expected_tree current_tree
 
 	case "$permit_dirty" in
 		0|1) ;;
@@ -452,6 +452,24 @@ release_source_is_unchanged() {
 	if [ "$current_sha" != "$expected_sha" ]; then
 		printf 'FATAL: source HEAD changed during release (expected %s, found %s)\n' \
 			"$expected_sha" "$current_sha" >&2
+		# The likeliest way this fires is an amend or rebase that rewrites the
+		# commit and leaves the TREE alone, and two SHAs say nothing about that.
+		# It is worth one line, because the two cases need opposite reactions: a
+		# changed tree means the validation just done was of something else and
+		# has to be redone, while an identical tree means the validation is sound
+		# and only the provenance is not. Either way this refuses -- a release
+		# names a commit, and a rewritten commit is a different release however
+		# identical its content -- but only one of them is safe to re-run
+		# immediately from the new HEAD without repeating what was proved.
+		expected_tree=$(git rev-parse --verify "$expected_sha^{tree}" 2>/dev/null) \
+			|| expected_tree=""
+		current_tree=$(git rev-parse --verify "$current_sha^{tree}" 2>/dev/null) \
+			|| current_tree=""
+		if [ -n "$expected_tree" ] && [ "$expected_tree" = "$current_tree" ]; then
+			printf 'FATAL:   the trees are IDENTICAL (%s), so the commit itself was rewritten -- an amend or rebase during the run.\n' \
+				"$expected_tree" >&2
+			printf 'FATAL:   Every gate that passed, passed on these exact bytes. Re-run from the new HEAD.\n' >&2
+		fi
 		return 1
 	fi
 

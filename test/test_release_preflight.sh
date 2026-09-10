@@ -1675,6 +1675,44 @@ done
 	|| fail "release handoff does not sign, register, verify, stage, commit and prove in order"
 checks=$((checks + 1))
 
+# The source-provenance check bounds what a rewritten HEAD costs, and it is one
+# `git rev-parse`. Until v0.9.14's first attempt it ran only after the soak: 18
+# combinations soaked for 24 hours, all 18 PASS, and the release was then refused
+# because HEAD no longer named the commit the run had bound itself to. The commit
+# had been amended 83 seconds in, message only, so the tree was byte-identical and
+# every hour of that soak had validated exactly the right bytes.
+#
+# All three call sites are pinned. Dropping either early one restores a day-long
+# failure that a minute-long one already covered; dropping the last one removes
+# the only check that can see a rewrite made DURING the soak, which is the case
+# the early ones cannot reach.
+mapfile -t provenance_lines < <(grep -Fn 'release_source_is_unchanged "$GIT_SHA" "$DRY_RUN"' \
+	"$release_script" | cut -d: -f1)
+validation_section_line=$(grep -Fn 'section "2. validation:' \
+	"$release_script" | head -1 | cut -d: -f1)
+soak_section_line=$(grep -Fn 'section "3. soak (all release combos' \
+	"$release_script" | head -1 | cut -d: -f1)
+soak_launch_line=$(grep -Fn 'launching $NCOMBOS soak combos' \
+	"$release_script" | head -1 | cut -d: -f1)
+soak_done_line=$(grep -Fn 'ok "all $NCOMBOS soak combos passed' \
+	"$release_script" | head -1 | cut -d: -f1)
+for boundary in "$validation_section_line" "$soak_section_line" \
+		"$soak_launch_line" "$soak_done_line"; do
+	[[ "$boundary" =~ ^[0-9]+$ ]] \
+		|| fail "could not locate every validation and soak phase boundary in make-release.sh"
+done
+[ "${#provenance_lines[@]}" -eq 3 ] \
+	|| fail "make-release.sh must check the source provenance three times -- before validation, before the soak, and after it -- but ${#provenance_lines[@]} call site(s) are present"
+[ "${provenance_lines[0]}" -gt "$validation_section_line" ] \
+	&& [ "${provenance_lines[0]}" -lt "$soak_section_line" ] \
+	|| fail "the first source-provenance check must run at the start of the validation phase (found at line ${provenance_lines[0]})"
+[ "${provenance_lines[1]}" -gt "$soak_section_line" ] \
+	&& [ "${provenance_lines[1]}" -lt "$soak_launch_line" ] \
+	|| fail "a source-provenance check must run at the start of the soak phase, BEFORE any combination is launched (found at line ${provenance_lines[1]}, launch at $soak_launch_line)"
+[ "${provenance_lines[2]}" -gt "$soak_done_line" ] \
+	|| fail "the authoritative source-provenance check must still run after the soak (found at line ${provenance_lines[2]})"
+checks=$((checks + 1))
+
 # The refusal is structural or it is advice. An operator can only paste a tag
 # command that some file prints, so exactly one file may print one: the proof,
 # which prints it after the gates pass and not before. A tag recipe restored to
