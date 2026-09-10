@@ -1094,332 +1094,178 @@ command.
 
 ## [0.9.9] - 2026-08-15
 
-### Fixed
-
-- Local CI mutation skips are now authorized per substrate: `--skip-pic` cannot
-  hide a missing ATtiny202 lane, and `--skip-attiny202` cannot hide missing PIC
-  coverage. Partial runs no longer claim they are safe-to-push reproductions.
-  Workflow validation independently pins the six PIC aggregates, their five
-  exact Make invocations, strict/tool arguments, enabled state, uniqueness, and
-  all four downstream `needs: pic` edges. The shared PIC installer now rejects a
-  DFP missing `pic12f675.h`, with an offline supply-chain regression.
-
-- The Makefile name contract now walks every shell statement produced by a lone
-  Make-variable expansion instead of inspecting only its first statement. A
-  shell-local prefix in the first statement stays local, while real environment
-  channels in later statements are checked against their own child commands.
-  Prefix and suffix tokens surrounding the expansion attach only where the
-  reconstructed shell text permits. Boundary fixtures plus a later-statement
-  `PIC_GPSIM_PROC` severance probe move the gate from 45 to 48 checks.
-
-- PIC12F675 mutation results now fail closed by reason. Each of its 20 rows must
-  produce a named gpsim, fault-injection, lock-step, target-I/O, or soak failure
-  before receiving kill credit; XC8 compile failures, timeouts, incomplete
-  checker output, and unrelated nonzero exits are errors. Broken unmutated
-  simulator-image or kill-target baselines remain fatal even in partial mode,
-  while genuine tool absence remains skippable. Six new rows pin T0IF re-arming,
-  exact OPTION_REG and ADC/global-pull-up guards, and both previously uncovered
-  context write-backs, taking the complete mutation inventory from 112 to 118.
-
-- The direct PIC12F675 soak-binary target now builds and validates its simulator
-  image and `.sym` inputs before deriving `PIC_SHADOW_ADDR`, so it works from a
-  clean tree. Its 1.024 ms tick and per-variant 0/5/12 ms blocking times are
-  derived from constants consumed by the firmware and pinned to exact physical
-  hold budgets. `pic12f675-simcal` now classifies a zero-XC8 image tree before
-  requiring Python, while still failing if images exist and Python is absent.
-
-- PIC libgpsim soaks now propagate a core-advance failure through startup,
-  liveness holds, and the duration loop instead of discarding it and repeatedly
-  retrying a wedged simulator. A wedge stops at the resume cap, reports completed
-  requested milliseconds plus actual advanced cycles/time, and cannot emit a
-  full-duration result record. The host fake-gpsim progress regression exercises
-  this contract through all three PIC routes.
+The PIC12F675 joins the release as a seventh part and a fourth core generation.
+Released images go from 18 to 21 and release soak combinations from 15 to 18.
 
 ### Added
 
 - **PIC12F675 support, release-supported from `v0.9.9`.** A fourth core
-  generation (Microchip *classic* mid-range, beside AVR Classic, AVR-XT and the
-  enhanced mid-range PIC10F32x) and a fourth modular shell,
-  `src/bypass_mcu_pic12f675.c`, over the same compiled `src/bypass_pure.c`
-  core. 1024 program words, ~51% used by the largest variant.
+  generation -- Microchip *classic* mid-range, beside AVR Classic, AVR-XT and
+  the enhanced mid-range PIC10F32x -- and a fourth modular shell over the same
+  compiled pure core. 1024 program words, about 51% used by the largest variant.
 
-  The part needs its own shell rather than a PIC10F32x rename because the
-  classic core lacks four things the 32x has, each with a design consequence:
+  It needs its own shell rather than a PIC10F32x rename, because the classic
+  core lacks four things the 32x has and each absence has a design consequence:
 
   - **No `LATx`.** Reading `GPIO` returns physical pin levels, so the 322's
     read-modify-write idiom would be a read-modify-write *on the pins*. Every
     output write goes through an SRAM shadow instead, and the shadow guards
-    itself — the per-tick integrity check compares it against both the expected
+    itself: the per-tick integrity check compares it against both the expected
     mask and the physical port, so an upset in either direction forces a reset.
-    That comparison is strictly stronger than anything the 322 can do, where
-    latch and port are two views of one register.
-  - **No period register and one shared prescaler.** `OPTION_REG.PSA` assigns
-    the single prescaler to the timer *or* the watchdog, never both. It goes to
-    the watchdog (1:16, ~288 ms nominal, 160 ms characterized minimum), leaving
-    TMR0 unprescaled at F_OSC/4; four 256 us rollovers counted in software make
-    a **1.024 ms** tick. The 2.4% stretch changes nothing in the debounce core,
-    which counts samples, but it moves every physical timing figure.
-  - **No `OSCCON`.** The 4 MHz INTOSC is fixed by `FOSC=INTRCIO` and trimmed by
-    a factory `OSCCAL` value in the last program word. The runtime guard
-    therefore compares against a value captured at init, not a constant.
-  - **A comparator holding GP0 and GP1 out of reset** — `CM<2:0> = 000` makes
-    them analog inputs, and an analog input reads back 0 whatever the pin is
-    driving, so the port-follows-shadow check would fail every tick. Three of
-    the eight modes additionally put `COUT` on GP2. All three are active output
-    pins here, so `CMCON` and `ADCON0` are part of bring-up and part of the
-    per-tick guard set.
+    That is strictly stronger than anything the 322 can do, where latch and port
+    are two views of one register.
+  - **No period register, and one prescaler shared between timer and watchdog.**
+    It goes to the watchdog at 1:16, leaving TMR0 unprescaled at F_OSC/4, so
+    four 256 us rollovers counted in software make a **1.024 ms** tick. The 2.4%
+    stretch changes nothing in the debounce core, which counts samples, but it
+    moves every physical timing figure.
+  - **No `OSCCON`.** The 4 MHz oscillator is fixed by CONFIG and trimmed by a
+    factory `OSCCAL` value in the last program word, so the runtime guard
+    compares against a value captured at init rather than against a constant.
+  - **A comparator holding GP0 and GP1 out of reset.** An analog input reads
+    back 0 whatever the pin is driving, so the port-follows-shadow check would
+    fail every tick, and three of the eight comparator modes additionally put
+    `COUT` on GP2. All three are active output pins here, so `CMCON` and
+    `ADCON0` are part of bring-up and part of the per-tick guard set.
 
-  The footswitch is on GP5, not on the input-only pin the 322 uses: `WPU`
-  implements bits 0,1,2,4,5, so GP3 has no internal weak pull-up and siting the
-  switch there would delete the pull-up integrity check from this target.
+  The footswitch sits on GP5 rather than the input-only pin the 322 uses,
+  because GP3 has no internal weak pull-up and siting the switch there would
+  delete the pull-up integrity check from this target.
 
-  Validation is the full pre-hardware set: build and 1024-word budget, CONFIG
-  decode, cppcheck + MISRA, host-gcov shipping-source coverage, the 8-level
-  hardware return-stack bound, gpsim CLI functional tests, and libgpsim
-  target-I/O, lock-step, fault-injection and long-duration soak lanes, behind
-  the fail-closed `pic12f675-test` and `pic12f675-test-target-variants`
-  aggregates. 20 mutants with their own toolchain probe take the mutation
-  inventory to 118. Both aggregates run in CI and in `scripts/ci-local.sh`.
+  Simulator images are **derived**: an oscillator calibration word is injected
+  into a *copy*, because an erased image never reaches `main()` in gpsim. A
+  dedicated gate proves the injection leaves the shipping images byte-identical,
+  which is what lets the release soak run the derived image and still bind to
+  the shipped HEX.
 
-  One thing is structurally unusual, and one is deferred. Simulator images are
-  **derived**: an oscillator calibration word is injected into a *copy*, because
-  an erased image never reaches `main()` in gpsim — and `pic12f675-test-calibration`
-  proves the injection leaves the shipping images byte-identical, which is what
-  lets the release soak run the derived image and still bind to the shipped HEX.
-  And like every other part in this repository, the PIC12F675 has **not** run on
-  silicon: its release rests on simulation, formal proof and static analysis,
-  and its three silicon-only residual risks (programmer OSCCAL/BG preservation,
-  and GP2's Schmitt-Trigger readback margin) are the `1.x.y` hardware-validation
-  pass, tracked as `T3-pic12f675-bench`, not `0.9.x` release blockers. See
+  Like every other part here, the PIC12F675 has not completed controlled
+  hardware qualification. Its release rests on simulation, formal proof and
+  static analysis, and its silicon-only residual risks -- whether a programmer
+  preserves the factory calibration and bandgap trim, and GP2's Schmitt-Trigger
+  readback margin -- are `1.x.y` work rather than `0.9.x` release blockers. See
   `docs/pic12f675_feasibility.md` section 8.
 
-- **`make pic12f675-program`**, so the part can be put on real silicon. Same
-  shape as `pic10f322-program` — one `VARIANT`, the CONFIG word carried inside
-  the HEX, and a conservative no-Vdd default — with one gate the 10F32x parts
-  have no need of. `PIC12F675_PROG` names the executable and
-  `PIC12F675_PROG_KIND=pk2cmd|ipecmd` selects its argument dialect when a
-  path-qualified or renamed executable cannot identify itself.
+- **`make pic12f675-program`**, so the part can be put on a device. Same shape
+  as `pic10f322-program` -- one variant, the CONFIG word carried inside the HEX,
+  a conservative no-Vdd default -- with one gate the 10F32x parts have no need
+  of. Every simulator lane for this part runs a derived image carrying a
+  fabricated calibration word, and writing one to a device would overwrite that
+  device's factory trim irreversibly and silently, because the part still runs
+  afterwards at the wrong clock. So the target rebuilds the matrix, derives the
+  image only from a validated variant, and proves through the injector's inverse
+  mode that the image leaves the calibration word unprogrammed and does fetch
+  it, so the answer cannot be vacuously true of another part's HEX. External
+  image and whole-command overrides are rejected, and without `python3` it
+  refuses to program rather than flash unchecked.
 
-  Every simulator lane for this part runs a *derived* image carrying a
-  fabricated oscillator calibration word. Writing one to a device would
-  overwrite that device's factory trim irreversibly, and silently, because the
-  part still runs afterwards at the wrong clock. So the target rebuilds the
-  complete matrix, derives the image only from validated `VARIANT`, and checks a
-  private read-only snapshot through the injector's inverse mode
-  (`--assert-preserves-calibration`). The image must leave the calibration word
-  unprogrammed and prove it fetches that word, so the answer cannot be vacuously
-  true of another part's HEX. The target decodes CONFIG from that same snapshot
-  and requires its SHA-256 digest unchanged before passing the path directly to
-  validated pk2cmd/ipecmd argv. External image and whole-command overrides are
-  rejected. Without `python3` it refuses to program rather than flash unchecked.
+  The programmer's erase behaviour is a fail-closed bench transaction rather
+  than a warning. `pic12f675-preflight` retains a read-only baseline -- reader
+  binary and version, device ID and revision, full read-HEX digest, the
+  calibration word, CONFIG and the bandgap field -- and `pic12f675-program`
+  requires that baseline, repeats the read immediately before writing, compares,
+  and reads again afterwards. A changed trim, a failed write or a failed
+  post-read retains FAIL evidence and fails the target; the evidence directory
+  is reserved before programming, so even an interruption leaves a `PENDING`
+  account, and evidence is never overwritten. pk2cmd is the only pinned readback
+  dialect: ipecmd remains available for the write but must be paired with a
+  pk2cmd reader, because the Makefile does not guess an untested read argv.
+  Fake-tool coverage exercises the transaction, not trim preservation on real
+  silicon, so it enables the `1.x.y` bench check without standing in for it.
 
-  The programmer's erase behaviour is now a fail-closed bench transaction rather
-  than a warning. `pic12f675-preflight` uses pk2cmd's read-only export to retain
-  the reader binary/version, target Device ID/revision, full read-HEX digest,
-  word `0x3FF`, CONFIG and `BG<1:0>`. `pic12f675-program` requires that baseline
-  and a new result-directory path, repeats the read immediately before writing, compares
-  device identity/OSCCAL/BG, and reads again after programming. A successful
-  result retains exact before/after values and raw transcripts; a changed trim,
-  failed write, or failed post-read retains FAIL evidence and fails the target.
-  The directory is exclusively reserved with the intended image and pre-write
-  evidence before programming; writer/post-read logs are written there directly,
-  so even interruption leaves a `PENDING` account. The post-read must also match
-  every requested image byte outside the factory BG field, preventing a
-  zero-exit no-op writer from producing PASS. Evidence is never overwritten.
-
-  pk2cmd is the only pinned readback dialect. ipecmd remains available for the
-  write, but must be paired with `PIC12F675_READ_PROG=<pk2cmd>` for the baseline
-  and before/after reads; the Makefile does not guess an untested IPE read argv.
-  Fake-tool coverage exercises the transaction, not silicon preservation, so it
-  enables the `1.x.y` bench check without standing in for it.
-
-- **The PIC12F675 is fully integrated into the release pipeline.** Its three
-  shipped HEXes join `RELEASE_IMAGES` (18 → 21) and `RELEASE_IMAGE_DIRS`, its
-  three soak combinations join `RELEASE_SOAK_NAMES` (15 → 18), and its build and
-  both aggregate logs initially took the retained-evidence inventory from 28 to
-  34 files; the source-bound resource record added later in this release makes
-  the final inventory 35.
-  `scripts/make-release.sh` gains a full arm — preflight device/analysis
-  assertions, a build step, both qualification gates, a soak loop, and a
-  manifest generator arm — and `.github/workflows/release.yml` rebuilds the part
-  and re-runs its lanes on the pinned runner. Because the release soak drives the
-  part's **derived** simcal image rather than the shipped HEX, the part is
-  threaded like the ATtiny202 (whose soak drives the ELF, not the HEX): the
-  shipped image is bound to what its gates validated — including
-  `pic12f675-test-calibration`, which pins the simcal to the shipped HEX modulo
-  word `0x3FF` — and the simcal image is pinned unchanged across the soak.
-
-  The staging apparatus that had withheld the part (`RELEASE_STAGED_IMAGES` and
-  its parse-time disjoint-with-`RELEASE_IMAGES` guard) is retired with the
-  graduation; `test-release-images` continues to cross-check the manifest
-  generator's arms against the canonical set in both directions — every released
-  image has an arm, every arm describes a released image — so a future part added
-  without its manifest arm still fails the release instead of publishing a PIC
-  labelled as an ATtiny with AVR fuse bytes.
-
-- **The PIC12F675 output-integrity predicate is now exercised one clause at a
-  time.** The target fault harness changes a valid settled context from BYPASS to
-  ENGAGED while leaving the BYPASS shadow and physical GPIO untouched and
-  matching. The context range check accepts the value and port-versus-shadow
-  remains true, so the resulting watchdog reset independently witnesses
-  shadow-versus-expected for all three output variants. Target fault coverage
-  moves from 36 to 37 checks per variant; host predicate coverage moves from 84
-  to 85.
-
-  A dedicated mutant tautologizes only shadow-versus-expected while retaining
-  both operands; later fail-closed mutation-result work took the PIC12F675
-  category to 20 and the complete mutation inventory to 118. The pulled shell
-  refactor moved main-loop source lines
-  without changing executable-line coverage; the gcov oracle and its negative
-  probe were re-pointed from the old 556-589 anchors to 569-602 so they stopped
-  rejecting live HEAD. They no longer carry line numbers at all -- see below.
-
-- **The PIC12F675 target OSCCAL fault is now physically realizable.** The target
-  matrix formerly XORed `0x01`, but this part implements `CAL5:CAL0` only in
-  OSCCAL bits 7:2; bits 1:0 read zero on silicon. The case now flips implemented
-  `CAL0` with `0x04`, producing the intended one-step `0x80 -> 0x84` trim change
-  with the canonical simulator value while retaining the write-stick check and
-  exact-one-reset verdict. The
-  independent host fault lane already used the implemented bit. Fault counts do
-  not change.
-
-- **PIC12F675 aggregate evidence now binds every lane to one retained image
-  matrix.** A repository-owned oracle exclusively records SHA-256 for all three
-  shipping images, all three derived simulator images, and the assembly/symbol
-  sidecars consumed by stack, fault, lock-step and I/O. Qualification stages that
-  record, compares a discarded private shipping build to reject compiler
-  nondeterminism, reuses the calibration contract's private probes to reject
-  injector nondeterminism, and only then promotes the final qualified manifest.
-
-  Pre-hardware and target wrappers suppress only their producer prerequisites,
-  verify the retained manifest after every consumer, invalidate it on any byte
-  change, and include the same six-image hash record in every aggregate PASS.
-  CI and `ci-local.sh` request both public aggregates in one Make graph, so the
-  common qualifier runs once rather than the target sweep republishing nine
-  matrices. Fake-tool coverage rejects nondeterministic compiler/injector output,
-  symlinked roots, stale or overwritten evidence, and a failing lane that mutates
-  a retained image, moving PIC12F675 build validation from 82 to 86 checks.
-
-- **PIC12F675 target aggregates now require exact lane verdicts.** Fault,
-  lock-step and target-I/O emit a terminal `PIC_TARGET_RESULT format=1` record
-  binding the device, lane, selected variant, status, canonical check count and
-  failure count. The per-variant aggregate requires exactly one byte-exact
-  record and one matching human PASS summary, rejects contradictory FAIL output
-  or trailing diagnostics, and independently pins 37 fault, 3005 lock-step and
-  25/26/36 target-I/O checks. The all-variant wrapper validates even an otherwise
-  overwritten caller selector before qualification, while the central selector
-  guard classifies literal values without evaluating hostile Make or shell text.
-  Host regressions cover empty/multi/unknown selectors, every malformed-result
-  shape, the relay record producer and temporary paths containing spaces.
+- **The PIC12F675 is fully integrated into the release pipeline**, with its
+  three shipped images, three soak combinations and both aggregate logs joining
+  the canonical sets and the retained-evidence inventory. Because the release
+  soak drives the derived image rather than the shipped HEX, the part is
+  threaded like the ATtiny202, whose soak drives the ELF. The staging apparatus
+  that had withheld the part is retired with the graduation, and the manifest
+  generator's arms stay cross-checked against the canonical set in both
+  directions, so a future part added without its manifest arm fails the release
+  rather than publishing a PIC labelled as an ATtiny with AVR fuse bytes.
 
 - **The PIC12F675's three datasheet-read risks are closed** (DS41190G, read
-  2026-08-11). They never needed silicon, only the datasheet:
+  2026-08-11). None of them needed silicon, only the datasheet.
 
-  - **Watchdog period** (Table 12-4 param 31 `TWDT`): 10 ms min / 17 ms typ /
-    25 ms max, 30 ms max at extended temperature. The risk item had *assumed*
-    the spread was no worse than the PIC10F32x's −37%/+69%; measured, it is
-    −41%/+47% and +76% extended — worse at both ends. The assumption was the
-    defect, not the design: the prescaler stays at 1:16 because the argument
-    rests on the **minimum** (10 ms × 16 = 160 ms) against the conservative
-    16 ms compile-time pet bound, a factor of 10. The earlier 13.024 ms figure
-    was a rough pulse-plus-tick estimate, not the formal upper bound. The shell's
-    citation of the watchdog minimum was exact. Note the two nominals are both
-    the datasheet's: §9.6.1 states
-    an 18 ms nominal in prose (the figure gpsim models), Table 12-4 gives a
-    17 ms characterized typical, and nothing depends on either.
-  - **Brown-out** (Table 12-4 `BVDD`): trips at 2.025–2.175 V, with a 100 µs
-    minimum excursion. Against peripherals that want >4 V, `BOREN=ON` is
-    therefore **not** the protection it looks like, and this part has no `BORV`
-    field to raise it — a hardware-design constraint, now recorded with numbers.
-  - **INTOSC accuracy** (Table 12-2 param F10): ±1% at 3.5 V/25 °C, ±2% over
-    0–85 °C, **±5%** over the industrial and extended ranges. At the −5% corner
-    the relay coil pulse degrades from a 3× to a 2.85× margin over the TQ-L2's
-    4 ms minimum. The rough physical pet estimate becomes 13.68 ms and remains
-    inside the conservative 16 ms compile-time bound, whose margin against the
-    independent watchdog floor is 10×. Debounce is unaffected in the way that
-    matters — the core counts samples, not milliseconds.
+  - **Watchdog period.** The risk item had *assumed* the spread was no worse
+    than the PIC10F32x's -37%/+69%; measured, it is -41%/+47%, and +76% at
+    extended temperature -- worse at both ends. The assumption was the defect,
+    not the design: the prescaler stays at 1:16 because the argument rests on
+    the **minimum**, 10 ms x 16 = 160 ms against a conservative 16 ms
+    compile-time pet bound, a factor of 10.
+  - **Brown-out.** The detector trips at 2.025-2.175 V with a 100 us minimum
+    excursion. Against peripherals that want more than 4 V, enabling it is
+    therefore **not** the protection it looks like, and this part has no field
+    to raise the trip point. That is a hardware-design constraint, now recorded
+    with numbers.
+  - **Oscillator accuracy.** +/-1% at 3.5 V and 25 C, +/-2% over 0-85 C, but
+    **+/-5%** over the industrial and extended ranges. At the -5% corner the
+    relay coil pulse degrades from a 3x to a 2.85x margin over the TQ-L2's 4 ms
+    minimum, and the rough physical pet estimate becomes 13.68 ms, still inside
+    the 16 ms compile-time bound. Debounce is unaffected in the way that
+    matters, because the core counts samples rather than milliseconds.
 
-- **`TODO.md` T25-wdt-margin-assert.** Found while checking whether the margin
-  above is enforced anywhere: `src/bypass_mcu_pic10f320.c` static_asserts
-  `(TICK_PERIOD_MS + pulse) < WDT_MIN_PERIOD_MS` per blocking variant, and the
-  other four shells carry the same invariant in comments only. No shell is near
-  its floor today; the gap is that a future timing change erodes the margin
-  silently.
+- **`make test-pinout-alignment`.** The ASCII package-pinout diagrams are what
+  somebody wires a board from, and nothing checked them. The PIC12F675 DIP-8
+  diagram had shipped with one extra leading space on its supply row, putting
+  that row's package walls one column right of every other row. It rendered
+  visibly stepped and survived review, because that is the class of defect a
+  reader's eye completes for them. The gate derives each box's wall columns from
+  its corner rows, and asserts a floor on the number of diagrams found so a
+  checker that has stopped recognizing them fails rather than passing quietly. A
+  sweep of the other three found no second instance.
 
-- **`make test-todo-index`.** TODO.md states an index invariant — "the stable ID
-  in each row matches exactly one open section above" — that nothing checked,
-  and it had drifted: the 2026-08-10 MISRA-review entry added a section with no
-  summary row. The new gate pins the correspondence both ways, checks each row's
-  tier column against the section it indexes, and checks that an ID's prefix
-  matches the tier it is filed under (`T2` → Tier 2, `T25` → Tier 2.5). Both
-  missing rows were added.
+- **`make test-todo-index`**, because `TODO.md` states an index invariant that
+  nothing checked -- each row's stable ID matches exactly one open section --
+  and it had drifted. The gate pins the correspondence both ways and checks each
+  row's tier column, and an ID's prefix, against the section it indexes.
 
-- **`make test-pinout-alignment`.** The ASCII package-pinout diagrams are
-  transcribed from each device pack's own pinout data and are what somebody
-  wires a board from, and nothing checked them. The PIC12F675 DIP-8 diagram had
-  shipped with one extra leading space on its `V_DD` row, putting that row's
-  package walls one column right of the corner rows and of every other pin row.
-  It rendered visibly stepped and survived review, because that is the class of
-  defect a reader's eye completes for them. The gate reads each box's wall
-  columns from its corner rows and requires every row between them to carry a
-  wall character in both, across every tracked `.md`/`.adoc` outside the frozen
-  `release/v*/` artifacts. It asserts a floor on the number of diagrams found,
-  so a checker that has stopped recognizing them fails rather than passing
-  quietly, and it runs six synthetic probes on every invocation — one of them
-  the real historical defect, which it reports by file, line, column and the
-  character actually found. The diagram itself was corrected, and a sweep of
-  the other three found no second instance.
-
-- **Authored-header MISRA findings now fail closed.** The 2026-08-10
-  suppression review measured that cppcheck 2.13.0 leaves `--error-exitcode`
-  unset for some findings located in an included header, so such a finding was
-  printed and then ignored. (Which ones is rule-dependent rather than purely
-  location-dependent: re-measured 2026-08-11 against real cppcheck 2.13.0, a
-  Rule 2.5 finding in an authored header leaves the status 0 while a Rule 20.7
-  finding in one sets it to 2. The parser exists so the project does not have
-  to know which.) All five MISRA recipes now force a structured diagnostic
-  format and pass captured output through a repository-owned parser that
-  normalizes paths and fails every unwaived record in authored `src/*.c` or
-  `src/*.h`, independently of cppcheck's status. Malformed output and analyzer
-  failure also fail closed.
-
-  `make test-misra-output-contract` supplies all five recipes with a fake
-  cppcheck that returns zero while emitting a Required-rule finding in an
-  authored header. Every lane must reject it, and only the exact `rule:file`
-  suppression may restore clean; direct probes cover absolute paths, authored C,
-  adopted and test paths, unattributed/malformed records, tool failure, and a
-  severed parser call. PIC10F322 and PIC12F675 no longer suppress `misra-config`
-  invocation-wide: exactly three `misra-config` accommodations are pinned to the
-  three PIC shell source paths, and the same ID in an authored header remains
-  failing.
+- **Authored-header MISRA findings now fail closed.** A suppression review
+  measured that cppcheck 2.13.0 leaves `--error-exitcode` unset for some
+  findings located in an included header, so such a finding was printed and then
+  ignored. Which ones is rule-dependent rather than purely location-dependent,
+  which is why the project parses rather than trying to know: all five recipes
+  force a structured diagnostic format and pass the output through a
+  repository-owned parser that fails every unwaived record in authored `src/`
+  code, independently of cppcheck's status.
 
 - **The PIC shipping-source coverage oracle no longer takes source line numbers
-  as input.** `test/pic/fw_coverage/check_fw_coverage.sh` asserted five required
-  constructs and one allow-listed one by literal line number, so an edit that
-  merely moved the shell reported the guards themselves as missing. The main-loop
-  refactor above shifted the PIC12F675 loop by thirteen lines and fired six
-  violations against a shell whose behaviour and executable-line count were
-  unchanged; the message named the guard, the defect was in the gate. The same
-  breakage sat latent in the PIC10F322 arm, four violations deep, unfired only
-  because nothing had moved that file yet.
+  as input.** It asserted five required constructs by literal line number, so an
+  edit that merely moved the shell reported the guards themselves as missing:
+  the main-loop refactor in this release shifted the PIC12F675 loop by thirteen
+  lines and fired six violations against a shell whose behaviour was unchanged,
+  and the same breakage sat latent in the PIC10F322 arm. Anchors are located by
+  the source text gcov already carries now, and location is fail-closed -- an
+  anchor matching zero lines, or several, is a failure -- so a guarded construct
+  cannot be renamed, deleted or duplicated and quietly stop being checked.
 
-  Every anchor is now located by the source text gcov already carries on each
-  record, and the line number is reported as observed evidence instead of
-  required as input. Location is fail-closed: an anchor matching zero lines, or
-  several, is a failure, so a guarded construct cannot be renamed, deleted or
-  duplicated and quietly stop being checked. `hw_force_wdt_reset();` is
-  deliberately not unique -- it is the live sanity-gate call and the res.fault
-  call, character for character -- so those two are separated by file order under
-  a requirement that exactly two exist. Matching them by text alone would accept
-  an annotation in which the live call went uncovered while the structurally
-  unreachable one became reachable, which is the precise regression the gate
-  exists to catch. `test/pic10f320/fault/check_fw_coverage.sh` was already text
-  anchored and is unchanged; it accepts that weaker separation knowingly, with
-  its own fault harness as the compensating control, and its header says so.
+- The PIC12F675 target fault matrix gained a case that exercises the
+  output-integrity predicate one clause at a time, and its calibration fault is
+  now physically realizable: the matrix formerly flipped a bit this part does not
+  implement, since only the top six bits of the calibration word exist on
+  silicon.
 
-  The negative probe in `run_fw_coverage.sh` locates its target the same way,
-  so a renumbering cannot leave it flipping a line that no longer holds the
-  res.fault call and passing vacuously against a gate it is no longer testing.
+### Fixed
+
+- Local CI mutation skips are authorized per substrate now, so skipping the PIC
+  toolchain cannot hide a missing ATtiny202 lane and skipping the ATtiny202
+  cannot hide missing PIC coverage. Partial runs no longer claim they are
+  safe-to-push reproductions.
+- PIC12F675 mutation results fail closed by reason: each row must produce a
+  named simulator, fault-injection, lock-step, target-I/O or soak failure before
+  receiving kill credit, while compile failures, timeouts, incomplete checker
+  output and unrelated nonzero exits are errors. A broken unmutated baseline
+  stays fatal even in partial mode, while genuine tool absence stays skippable.
+- PIC libgpsim soaks propagate a core-advance failure through startup, liveness
+  holds and the duration loop instead of discarding it and repeatedly retrying a
+  wedged simulator. A wedge stops at the resume cap, reports the milliseconds it
+  actually advanced, and cannot emit a full-duration result record.
+- The direct PIC12F675 soak-binary target builds and validates its simulator
+  image and symbol inputs before deriving the shadow address, so it works from a
+  clean tree, and its tick and per-variant blocking times are derived from
+  constants the firmware itself consumes rather than restated.
+- The Makefile name contract walks every shell statement produced by a lone
+  Make-variable expansion instead of inspecting only the first, so a shell-local
+  prefix in the first statement stays local while real environment channels in
+  later statements are checked against their own child commands.
 
 ## [0.9.8] - 2026-08-08
 
