@@ -89,13 +89,14 @@ expect_output_path_fail "wrong production version" "$ROOT/release/v99.0.1" produ
 	"production output must be exactly"
 expect_output_path_fail "external production tree" "$work/production/v99.0.0" production \
 	"production output must be exactly"
-# Express is publishable, so it obeys the production path rule exactly: one
-# staging directory, the one the artifact commit and the tag will name.
-expect_output_path_pass "express release tree" "$ROOT/release/v99.0.0" express
-expect_output_path_fail "express release root" "$ROOT/release" express \
-	"express output must be exactly"
-expect_output_path_fail "external express tree" "$work/express/v99.0.0" express \
-	"express output must be exactly"
+# A soak stages nothing, so it is held out of the release tree by the same rule
+# a rehearsal is: neither publishes, and neither may leave anything where a
+# published release lives.
+expect_output_path_pass "external soak tree" "$work/soak/v0.0.0-soak" soak
+expect_output_path_fail "soak release root" "$ROOT/release" soak \
+	"soak output must not be staged under the repository release tree"
+expect_output_path_fail "soak release tree" "$ROOT/release/v99.0.0" soak \
+	"soak output must not be staged under the repository release tree"
 expect_output_path_pass "external dry-run tree" "$work/dry-run/v99.0.0" dry-run
 expect_output_path_fail "dry-run release root" "$ROOT/release" dry-run \
 	"dry-run output must not be staged under the repository release tree"
@@ -867,7 +868,7 @@ sealed_evidence=(
 	attiny202-test.log attiny202-test-target.log
 	pic10f322-test.log pic10f322-test-target-variants.log
 	pic10f320-test.log pic10f320-test-target-variants.log
-	soak-build.log final-image-build.log
+	final-image-build.log
 )
 # Staging begins at the evidence loop's head, already located above. This used
 # to re-derive the position from the literal comment `# Copy evidence.`, so
@@ -891,6 +892,26 @@ for sealed_name in "${sealed_evidence[@]}"; do
 		&& [ "$seal_line" -lt "$copy_evidence_line" ] \
 		|| fail "$sealed_name is not sealed after its operation and before staging"
 done
+checks=$((checks + 1))
+
+# soak-build.log is the fourteenth, and it is sealed somewhere else for a reason
+# a release can no longer reach: a release does not compile soak drivers. The
+# sweep that does owns its transcript, seals it at its own operation closure,
+# and the record carries it into the release that consumes it. Its role says so
+# too -- soak-build rather than build -- which is what lets the qualification
+# verifier expect the soak's commit in the seal instead of the release's.
+soak_lib="$ROOT/scripts/release-soak.sh"
+mapfile -t seal_lines < <(grep -nF 'seal_evidence_result "$buildlog"' "$soak_lib")
+[ "${#seal_lines[@]}" -eq 1 ] \
+	|| fail "the soak sweep seals its build transcript ${#seal_lines[@]} times, expected 1"
+seal_line=${seal_lines[0]%%:*}
+last_operation_line=$(grep -nF '>>"$buildlog"' "$soak_lib" | cut -d: -f1 | sort -n | tail -1 || true)
+[[ "$last_operation_line" =~ ^[0-9]+$ ]] \
+	|| fail "could not locate the final write to the soak build transcript"
+[ "$seal_line" -gt "$last_operation_line" ] \
+	|| fail "the soak build transcript is sealed before the last thing that appends to it"
+! grep -qF 'seal_evidence_result "$EVID/soak-build.log"' "$RELEASE" \
+	|| fail "the release still seals a soak build transcript it does not produce"
 checks=$((checks + 1))
 
 # The manifest bullet is authored by the producer and matched literally by the
@@ -1057,10 +1078,14 @@ checks=$((checks + 1))
 # Thirteen: the eleven that identify the image-producing and analysis tools,
 # plus the two host C++ compilers that build the PIC soak harnesses. The latter
 # two are in the soak input key, so a release that could not identify them could
-# not say what its soak result is valid for.
+# not say what its soak result is valid for -- and they are probed where that
+# key is computed, which is the sweep both the soak and the release share.
 version_assignments=$(grep -Ec '^TC_[A-Z0-9_]+=\$\(release_tool_version_line ' "$RELEASE" || true)
-[ "$version_assignments" -eq 13 ] \
-	|| fail "release has $version_assignments fail-closed executable version probes, expected 13"
+soak_version_assignments=$(grep -Ec '^[[:space:]]+[a-z0-9_]+=\$\(release_tool_version_line ' "$soak_lib" || true)
+[ "$version_assignments" -eq 11 ] \
+	|| fail "release has $version_assignments fail-closed executable version probes, expected 11"
+[ "$soak_version_assignments" -eq 2 ] \
+	|| fail "the soak input key has $soak_version_assignments fail-closed compiler probes, expected 2"
 # yasimavr is identified by its venv build stamp rather than by --version,
 # because 0.1.6 reports 0.1.6 with or without the vendored patches the ATtiny202
 # soak depends on. It must still be fail-closed.

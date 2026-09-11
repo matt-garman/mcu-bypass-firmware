@@ -60,22 +60,31 @@ release_soak_require_host() {
 # record the exact artifact it drives, and cross-check the assembled set against
 # the canonical one the Makefile declares.
 #
-# usage: release_soak_assemble DURATION_MS LIVENESS_MS SOAKDIR EVID MATRIX_RECORD
+# usage: release_soak_assemble DURATION_MS LIVENESS_MS SOAKDIR EVID MATRIX_RECORD DRIVERS
 #
 # MATRIX_RECORD is the caller's already-qualified PIC12F675 fault-matrix record.
 # That lane's soak driver rebuilds pic12f675-simcal, so every compile in it is
 # re-checked against this record: the harness must compile from the exact matrix
 # the caller qualified, never replace it with a later build.
 #
-# Sets, for the caller: SOAK_NAMES, SOAK_BIN, SOAK_IMAGE, SOAK_CWD, SOAK_LOG,
-# NCOMBOS, and appends the derived simcal images to PIC12F675_SIMCAL_IMAGES.
+# DRIVERS is 1 to compile and generate the drivers, 0 to build only the map of
+# what each combination drives. Both callers need the map, because the map is
+# what the input key hashes; only the soak needs anything to execute. A release
+# that compiled eighteen harnesses it will never run would be paying for the
+# production half of a thing it exists to stop producing -- and the map is the
+# one part that must not be written twice, so the lanes are enumerated once here
+# and the execution half is what the flag removes.
+#
+# Sets, for the caller: SOAK_NAMES, SOAK_IMAGE, SOAK_LOG, NCOMBOS, and appends
+# the derived simcal images to PIC12F675_SIMCAL_IMAGES. With DRIVERS=1 it also
+# sets SOAK_BIN and SOAK_CWD, and seals the build transcript.
 release_soak_assemble() {
-	if [ "$#" -ne 5 ]; then
-		printf 'FATAL: release_soak_assemble requires a duration, liveness interval, soak dir, evidence dir and matrix record\n' >&2
+	if [ "$#" -ne 6 ]; then
+		printf 'FATAL: release_soak_assemble requires a duration, liveness interval, soak dir, evidence dir, matrix record and driver flag\n' >&2
 		return 2
 	fi
 	release_soak_require_host || return 1
-	local duration_ms=$1 liveness_ms=$2 soakdir=$3 evid=$4 matrix_record=$5
+	local duration_ms=$1 liveness_ms=$2 soakdir=$3 evid=$4 matrix_record=$5 drivers=$6
 	local buildlog="$evid/soak-build.log"
 	local v p f e name bin elf rundir current_matrix_record
 	local -a xt_fuse_env_args=()
@@ -90,7 +99,8 @@ release_soak_assemble() {
 	# The input key below is only as honest as this map.
 	declare -gA SOAK_IMAGE=()
 
-	log "compiling soak binaries..."
+	[ "$drivers" -eq 1 ] && log "compiling soak binaries..." \
+		|| log "mapping what each release soak combination drives..."
 	for v in $VARIANTS; do for p in $TINYX5_PARTS; do
 		# The binary path is READ from the Makefile, not composed here. Unlike
 		# the image basenames the caller restates on purpose so they can be
@@ -98,22 +108,25 @@ release_soak_assemble() {
 		# against nothing, and a copy of it severed silently once already --
 		# see the rename this file's header records.
 		name="${p}_${v}"
-		# --no-print-directory for the same reason mkv carries it: -s alone
-		# loses to an inherited -w, and a banner here would name a soak binary
-		# that cannot exist.
-		bin=$(make -s --no-print-directory print-AVR_SOAK_BIN \
-			AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p") \
-			|| die "cannot read AVR_SOAK_BIN for $name from the Makefile"
-		[ -n "$bin" ] || die "AVR_SOAK_BIN expands empty for $name"
 		elf="$(fw_image "$AVR_BUILD_DIR" "$p" "$v").elf"
-		make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
-			AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p" AVR_SOAK_DURATION_MS="$duration_ms" \
-			AVR_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
-			AVR_SOAK_COMBINATION_NAME="$name" \
-			>>"$buildlog" 2>&1 || die "failed to build AVR soak $name"
-		SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$REPO_ROOT/$bin"
+		if [ "$drivers" -eq 1 ]; then
+			# --no-print-directory for the same reason mkv carries it: -s alone
+			# loses to an inherited -w, and a banner here would name a soak
+			# binary that cannot exist.
+			bin=$(make -s --no-print-directory print-AVR_SOAK_BIN \
+				AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p") \
+				|| die "cannot read AVR_SOAK_BIN for $name from the Makefile"
+			[ -n "$bin" ] || die "AVR_SOAK_BIN expands empty for $name"
+			make --old-file="$elf" "$bin" AVR_REBUILD_PREREQ= \
+				AVR_SOAK_VARIANT="$v" AVR_SOAK_CHIP="$p" AVR_SOAK_DURATION_MS="$duration_ms" \
+				AVR_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
+				AVR_SOAK_COMBINATION_NAME="$name" \
+				>>"$buildlog" 2>&1 || die "failed to build AVR soak $name"
+			SOAK_BIN[$name]="$REPO_ROOT/$bin"
+			SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
+		fi
+		SOAK_NAMES+=("$name")
 		SOAK_IMAGE[$name]="$elf"
-		SOAK_CWD[$name]="$REPO_ROOT"   # relative FW_PATH; the binary writes no files
 		SOAK_LOG[$name]="$evid/soak-$name.log"
 	done; done
 	# ATtiny202: three more combos, one per output stage, at the same full
@@ -132,6 +145,7 @@ release_soak_assemble() {
 		name="attiny202_${v}"; bin="$soakdir/soak_attiny202_${v}.sh"
 		elf="$REPO_ROOT/$(fw_image "$XT_BUILD_DIR" "$XT_TAG" "$v").elf"
 		[ -f "$elf" ] || die "ATtiny202 soak ELF missing: $elf"
+		if [ "$drivers" -eq 1 ]; then
 		{
 			printf '#!/bin/sh\n'
 			printf '# generated by release-soak.sh -- ATtiny202 release soak combo %s\n' "$name"
@@ -149,22 +163,27 @@ release_soak_assemble() {
 		chmod +x "$bin" || die "could not make $bin executable"
 		printf 'generated ATtiny202 soak wrapper: %s -> %s\n' "$name" "$elf" \
 			>>"$buildlog"
-		SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
-		SOAK_IMAGE[$name]="$elf"
+		SOAK_BIN[$name]="$bin"
 		SOAK_CWD[$name]="$REPO_ROOT"   # the wrapper cd's itself; nothing is written here
+		fi
+		SOAK_NAMES+=("$name")
+		SOAK_IMAGE[$name]="$elf"
 		SOAK_LOG[$name]="$evid/soak-$name.log"
 	done
 	for v in $VARIANTS; do
 		name="pic10f322_${v}"; bin="$soakdir/test_soak_pic10f322_${v}"
-		make "$bin" PIC10F322_SOAK_BIN="$bin" PIC10F322_SOAK_VARIANT="$v" \
-			PIC10F322_SOAK_DURATION_MS="$duration_ms" \
-			PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
-			PIC10F322_SOAK_COMBINATION_NAME="$name" \
-			>>"$buildlog" 2>&1 || die "failed to build PIC soak $name"
-		rundir="$soakdir/run-$name"; mkdir -p "$rundir"
-		SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+		if [ "$drivers" -eq 1 ]; then
+			make "$bin" PIC10F322_SOAK_BIN="$bin" PIC10F322_SOAK_VARIANT="$v" \
+				PIC10F322_SOAK_DURATION_MS="$duration_ms" \
+				PIC10F322_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
+				PIC10F322_SOAK_COMBINATION_NAME="$name" \
+				>>"$buildlog" 2>&1 || die "failed to build PIC soak $name"
+			rundir="$soakdir/run-$name"; mkdir -p "$rundir"
+			SOAK_BIN[$name]="$bin"
+			SOAK_CWD[$name]="$rundir"   # absolute FW_PATH; isolates gpsim.log per combo
+		fi
+		SOAK_NAMES+=("$name")
 		SOAK_IMAGE[$name]="$(fw_image "$PIC10F322_BUILD_DIR" "$PIC10F322_TAG" "$v").hex"
-		SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 		SOAK_LOG[$name]="$evid/soak-$name.log"
 	done
 	# Three more combos, one per PIC10F320 output stage -- the same full duration
@@ -174,15 +193,18 @@ release_soak_assemble() {
 	# SOAK_LIVENESS_DUE).
 	for v in $PIC10F320_VARIANTS; do
 		name="pic10f320_${v}"; bin="$soakdir/test_soak_pic10f320_${v}"
-		make "$bin" PIC10F320_SOAK_BIN="$bin" PIC10F320_SOAK_VARIANT="$v" \
-			PIC10F320_SOAK_DURATION_MS="$duration_ms" \
-			PIC10F320_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
-			PIC10F320_SOAK_COMBINATION_NAME="$name" \
-			>>"$buildlog" 2>&1 || die "failed to build PIC10F320 soak $name"
-		rundir="$soakdir/run-$name"; mkdir -p "$rundir"
-		SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+		if [ "$drivers" -eq 1 ]; then
+			make "$bin" PIC10F320_SOAK_BIN="$bin" PIC10F320_SOAK_VARIANT="$v" \
+				PIC10F320_SOAK_DURATION_MS="$duration_ms" \
+				PIC10F320_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
+				PIC10F320_SOAK_COMBINATION_NAME="$name" \
+				>>"$buildlog" 2>&1 || die "failed to build PIC10F320 soak $name"
+			rundir="$soakdir/run-$name"; mkdir -p "$rundir"
+			SOAK_BIN[$name]="$bin"
+			SOAK_CWD[$name]="$rundir"   # absolute FW_PATH; isolates gpsim.log per combo
+		fi
+		SOAK_NAMES+=("$name")
 		SOAK_IMAGE[$name]="$(fw_image "$PIC10F320_BUILD_DIR" "$PIC10F320_TAG" "$v").hex"
-		SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 		SOAK_LOG[$name]="$evid/soak-$name.log"
 	done
 	# Three more combos, one per PIC12F675 output stage. UNIQUE to this part: the
@@ -194,27 +216,32 @@ release_soak_assemble() {
 	# also pinned unchanged across the soak, exactly as the ATtiny202 ELF is.
 	for v in $VARIANTS; do
 		name="pic12f675_${v}"; bin="$soakdir/test_soak_pic12f675_${v}"
-		make --old-file=_pic12f675-build-soak "$bin" \
-			PIC12F675_SOAK_BIN="$bin" PIC12F675_SOAK_VARIANT="$v" \
-			PIC12F675_SOAK_DURATION_MS="$duration_ms" \
-			PIC12F675_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
-			PIC12F675_SOAK_COMBINATION_NAME="$name" \
-			PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
-			>>"$buildlog" 2>&1 || die "failed to build PIC12F675 soak $name"
-		current_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
-			--build-dir "$PIC12F675_BUILD_DIR" --fw-base "$FW_BASE" \
-			--tag "$PIC12F675_TAG") \
-			|| die "PIC12F675 matrix changed while compiling soak $name"
-		[ "$current_matrix_record" = "$matrix_record" ] \
-			|| die "PIC12F675 soak $name was compiled from a different qualified matrix"
+		if [ "$drivers" -eq 1 ]; then
+			make --old-file=_pic12f675-build-soak "$bin" \
+				PIC12F675_SOAK_BIN="$bin" PIC12F675_SOAK_VARIANT="$v" \
+				PIC12F675_SOAK_DURATION_MS="$duration_ms" \
+				PIC12F675_SOAK_LIVENESS_INTERVAL_MS="$liveness_ms" \
+				PIC12F675_SOAK_COMBINATION_NAME="$name" \
+				PIC_CC="$PIC_CC" PIC_DFP="$PIC_DFP" \
+				>>"$buildlog" 2>&1 || die "failed to build PIC12F675 soak $name"
+			current_matrix_record=$(python3 "$PIC12F675_MATRIX_EVIDENCE" verify \
+				--build-dir "$PIC12F675_BUILD_DIR" --fw-base "$FW_BASE" \
+				--tag "$PIC12F675_TAG") \
+				|| die "PIC12F675 matrix changed while compiling soak $name"
+			[ "$current_matrix_record" = "$matrix_record" ] \
+				|| die "PIC12F675 soak $name was compiled from a different qualified matrix"
+			rundir="$soakdir/run-$name"; mkdir -p "$rundir"
+			SOAK_BIN[$name]="$bin"
+			SOAK_CWD[$name]="$rundir"   # absolute FW_PATH; isolates gpsim.log per combo
+		fi
 		PIC12F675_SIMCAL_IMAGES+=("$(fw_image "$PIC12F675_SIMCAL_DIR" "$PIC12F675_TAG" "$v")_simcal.hex")
-		rundir="$soakdir/run-$name"; mkdir -p "$rundir"
-		SOAK_NAMES+=("$name"); SOAK_BIN[$name]="$bin"
+		SOAK_NAMES+=("$name")
 		SOAK_IMAGE[$name]="${PIC12F675_SIMCAL_IMAGES[-1]}"
-		SOAK_CWD[$name]="$rundir"      # absolute FW_PATH; isolates gpsim.log per combo
 		SOAK_LOG[$name]="$evid/soak-$name.log"
 	done
-	seal_evidence_result "$buildlog"
+	# The build transcript belongs to whoever compiled the drivers. A release
+	# compiles none, and takes this file from the record instead.
+	[ "$drivers" -eq 0 ] || seal_evidence_result "$buildlog"
 
 	NCOMBOS=${#SOAK_NAMES[@]}
 	actual_soaks=$(printf '%s\n' "${SOAK_NAMES[@]}" | LC_ALL=C sort)
@@ -481,4 +508,165 @@ release_soak_record_write() {
 	rm -rf -- "$record_dir" || die "could not replace the previous soak record"
 	mv -- "$staging" "$record_dir" || die "could not install the soak record"
 	ok "soak record written: $record_dir ($members files, ${#SOAK_NAMES[@]} combinations)."
+}
+
+# Require that the record already attests the images this run just built, and
+# say exactly what is wrong when it does not.
+#
+# usage: release_soak_record_require RECORD_DIR KEY DURATION CURRENT_PAYLOAD
+#
+# There is no search, no arbitration between candidates and no fallback: one
+# record, one comparison, and a refusal naming which of three things is wrong.
+# The third is the one worth building carefully. The key's payload carries a
+# digest per combination, so a mismatch is reported as the images that moved
+# rather than as two digests that differ -- a stray rebuild touching one image
+# should say which.
+release_soak_record_require() {
+	if [ "$#" -ne 4 ]; then
+		printf 'FATAL: release_soak_record_require requires a record directory, key, duration and payload\n' >&2
+		return 2
+	fi
+	local record_dir=$1 key=$2 duration=$3 payload=$4
+	local keyfile="$record_dir/$RELEASE_SOAK_RECORD_KEY"
+	local fields record_key record_duration record_commit payload_digest
+	local name recorded current
+	local -a moved=()
+
+	fields=$(release_soak_record_read "$record_dir") || die \
+"no soak record: $RELEASE_SOAK_RECORD_DIR/$RELEASE_SOAK_RECORD_KEY is absent or unreadable.
+      Nothing has been soaked for these images. Run \`make soak\`, commit what it
+      writes, and start the release again. A soak is a prerequisite of a release,
+      not a phase inside one, so this run has cost you its build and gates rather
+      than a day."
+	record_key=$(printf '%s' "$fields" | cut -f1)
+	record_duration=$(printf '%s' "$fields" | cut -f2)
+	record_commit=$(printf '%s' "$fields" | cut -f3)
+
+	# The record's own key file must hash to the key it declares, or the two
+	# halves of the record disagree and neither is evidence.
+	payload_digest=$(grep -v '^SOAK_KEY_RESULT ' -- "$keyfile" | sha256sum) \
+		|| die "could not rehash the soak record's input key payload"
+	[ "${payload_digest%% *}" = "$record_key" ] \
+		|| die "the soak record's input key payload does not hash to the key its own result line declares."
+
+	if [ "$record_key" != "$key" ]; then
+		# Name the combinations, not the digests. Both payloads carry one
+		# `combination <name> <digest>` row per combination, so the difference
+		# is readable as a list of images that moved since the soak.
+		while IFS=$'\t' read -r _ name recorded; do
+			current=$(grep -F $'combination\t'"$name"$'\t' -- "$payload" | cut -f3) \
+				|| current=
+			if [ -z "$current" ]; then
+				moved+=("$name (no longer a release combination)")
+			elif [ "$current" != "$recorded" ]; then
+				moved+=("$name")
+			fi
+		done < <(grep $'^combination\t' -- "$keyfile")
+		while IFS=$'\t' read -r _ name _; do
+			grep -Fq $'combination\t'"$name"$'\t' -- "$keyfile" \
+				|| moved+=("$name (not soaked)")
+		done < <(grep $'^combination\t' -- "$payload")
+		if [ "${#moved[@]}" -eq 0 ]; then
+			# Every image matches, so what changed is a driver source, a harness
+			# version or the liveness interval -- the rest of the payload.
+			die "the soak record does not cover this build.
+      recorded  $record_key
+      built     $key
+      Every combination drives the image it was soaked with, so what changed is
+      a soak driver source, a harness version, or the liveness interval. Re-run
+      \`make soak\`."
+		fi
+		die "the soak record does not cover this build.
+      recorded  $record_key
+      built     $key
+      changed   $(printf '%s, ' "${moved[@]}" | sed 's/, $//')
+      Re-run \`make soak\` for the images this tree now builds."
+	fi
+
+	[ "$record_duration" -ge "$duration" ] || die \
+"the soak record attests these images for ${record_duration}ms per combination, and this release requires ${duration}ms.
+      The images are right and the soak is short. Re-run \`make soak\` to extend it."
+
+	ok "soak record covers this build: $record_key, ${record_duration}ms per combination, soaked at ${record_commit:0:12}."
+}
+
+# Verify the record's own integrity and adopt its transcripts into this run's
+# evidence directory.
+#
+# usage: release_soak_record_adopt RECORD_DIR EVID NAMES
+#
+# The record carries no signature, so nothing here appeals to one. What it does
+# establish is that the index and the transcripts describe each other: every
+# expected member has a row, every row's size and seal match the file, and every
+# seal's payload digest rehashes. A substituted body of identical length
+# carrying an identical result line satisfies every other check and cannot
+# satisfy that one.
+release_soak_record_adopt() {
+	if [ "$#" -ne 3 ]; then
+		printf 'FATAL: release_soak_record_adopt requires a record directory, evidence dir and soak names\n' >&2
+		return 2
+	fi
+	local record_dir=$1 evid=$2 soak_names=$3
+	local index="$record_dir/$RELEASE_SOAK_RECORD_INDEX"
+	local name base row row_size row_record actual_size actual_record
+	local sealed_digest actual_digest payload_lines indexed_rows
+	local -a bases=(soak-build.log)
+
+	[ -f "$index" ] && [ ! -L "$index" ] && [ -s "$index" ] \
+		|| die "the soak record carries no evidence index"
+	grep -q '^EVIDENCE_INDEX format=2 source_commit=[0-9a-f]\{40\}$' -- "$index" \
+		|| die "the soak record's evidence index carries no source-bound header"
+	grep -q '^EVIDENCE_INDEX_RESULT format=2 status=pass members=[1-9][0-9]* source_commit=[0-9a-f]\{40\}$' -- "$index" \
+		|| die "the soak record's evidence index does not conclude with a member count"
+	for name in $soak_names; do bases+=("soak-$name.log"); done
+	# grep -c exits nonzero when it counts nothing, and an index that lists
+	# nothing is exactly the case this must report rather than die around.
+	indexed_rows=$(grep -c $'\t' -- "$index" || true)
+	[ "$indexed_rows" -eq "${#bases[@]}" ] \
+		|| die "the soak record indexes $indexed_rows files, not the ${#bases[@]} a release retains"
+
+	for base in "${bases[@]}"; do
+		local log="$record_dir/$base"
+		[ -f "$log" ] && [ ! -L "$log" ] && [ -s "$log" ] \
+			|| die "the soak record retains no $base"
+		row=$(grep -F "$base"$'\t' -- "$index") \
+			|| die "the soak record's evidence index has no row for $base"
+		[ "$(printf '%s\n' "$row" | wc -l)" -eq 1 ] \
+			|| die "the soak record's evidence index has more than one row for $base"
+		row_size=$(printf '%s' "$row" | cut -f3)
+		row_record=$(printf '%s' "$row" | cut -f4-)
+		actual_size=$(stat -c%s -- "$log") \
+			|| die "could not size the recorded transcript $base"
+		[ "$actual_size" = "$row_size" ] \
+			|| die "recorded transcript $base is $actual_size bytes, not the $row_size its index records"
+		actual_record=$(grep '^EVIDENCE_RESULT ' -- "$log") \
+			|| die "recorded transcript $base carries no payload seal"
+		[ "$(tail -n 1 -- "$log")" = "$actual_record" ] \
+			|| die "recorded transcript $base does not end with its payload seal"
+		[ "$actual_record" = "$row_record" ] \
+			|| die "recorded transcript $base does not carry the seal its index records"
+		sealed_digest=${actual_record##* payload_sha256=}
+		sealed_digest=${sealed_digest%% *}
+		[[ "$sealed_digest" =~ ^[0-9a-f]{64}$ ]] \
+			|| die "recorded transcript $base carries no payload digest in its seal"
+		payload_lines=$(wc -l < "$log") \
+			|| die "could not count the lines of recorded transcript $base"
+		actual_digest=$(head -n "$(( payload_lines - 1 ))" -- "$log" | sha256sum) \
+			|| die "could not rehash recorded transcript $base"
+		[ "${actual_digest%% *}" = "$sealed_digest" ] \
+			|| die "recorded transcript $base does not hash to the payload digest its seal states"
+		case "$base" in
+			soak-build.log) ;;
+			*)  [ "$(grep -c '^SOAK_RESULT ' -- "$log")" -eq 1 ] \
+					|| die "recorded transcript $base does not carry exactly one soak result" ;;
+		esac
+	done
+	# Copy only once every member has passed. Adoption is all or nothing, so a
+	# record that fails on its eighteenth transcript leaves no trace of the
+	# seventeen that were fine -- there is no half-adopted soak to reason about.
+	for base in "${bases[@]}"; do
+		cp -p -- "$record_dir/$base" "$evid/$base" \
+			|| die "could not adopt recorded transcript $base"
+	done
+	ok "adopted ${#bases[@]} recorded transcripts; every one matches the index and its own seal."
 }

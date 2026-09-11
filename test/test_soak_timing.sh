@@ -17,6 +17,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HEADER="$ROOT/test/soak_timing_config.h"
 MAKEFILE="$ROOT/Makefile"
 RELEASE="$ROOT/scripts/make-release.sh"
+# The combination sweep is shared with the standalone soak, so the per-combo
+# wiring is asserted where that code now lives.
+SOAK_LIB="$ROOT/scripts/release-soak.sh"
 PIC12_TIMING="$ROOT/test/pic/pic12f675_soak_timing.py"
 HOSTCC=${HOSTCC:-cc}
 HOSTCXX=${HOSTCXX:-c++}
@@ -64,17 +67,26 @@ expect_release_reject() {
 	checks=$((checks + 1))
 }
 
-# --express shortens the soak; it does not remove the floor. A publishable
-# express release is still a soaked release, so a below-floor express run must
-# be refused by its OWN diagnostic -- refusing it with the production text
-# would send the operator to a 24-hour rerun they do not need.
-expect_release_express_reject() {
-	local value=$1 output
-	if output=$("$RELEASE" --express --soak-duration-ms "$value" v99.0.0 2>&1); then
-		fail "release accepted invalid express duration: $value"
-	fi
-	[[ "$output" == *"express releases require"* ]] \
-		|| fail "release rejected express '$value' for the wrong reason: $output"
+# The soak's own floor is the release's, and --soak does not enforce it: a short
+# record is not a release, it is a record the release refuses by name. That is
+# what makes the whole path rehearsable in minutes, so a short --soak run must
+# be WARNED about rather than refused.
+expect_soak_short_warning() {
+	local value=$1 output rc=0 sandbox
+	# A warning does not stop the run, and what follows it is a clean build and a
+	# soak. So it is observed from a directory that is not a git repository: the
+	# very next thing the script does after this warning is ask git where it is,
+	# and that refusal is immediate and costs nothing.
+	sandbox=$(mktemp -d) || fail "could not create the soak sandbox"
+	output=$( cd "$sandbox" && "$RELEASE" --soak --soak-duration-ms "$value" 2>&1 ) || rc=$?
+	rmdir "$sandbox" || fail "the soak wrote into a directory it was only passing through"
+	[ "$rc" -ne 0 ] || fail "the soak ran on from a non-repository directory"
+	[[ "$output" == *"not inside a git repo"* ]] \
+		|| fail "the soak did not stop where this case expects it to: $output"
+	[[ "$output" != *"a release requires --soak-duration-ms"* ]] \
+		|| fail "the soak refused a short duration instead of warning: $output"
+	[[ "$output" == *"short of the ${MIN_RELEASE_SOAK_MS:-86400000}ms a release requires"* ]] \
+		|| fail "a short soak ran without its warning: $output"
 	checks=$((checks + 1))
 }
 
@@ -131,12 +143,16 @@ expect_default_dry_run_shortened() {
 # release duration while checking liveness on a different schedule from the
 # evidence the MANIFEST claims -- and it would still print SOAK PASS.
 expect_release_liveness_wiring() {
-	grep -Eq '^[[:space:]]+AVR_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
-		|| fail "release does not pass the liveness interval to Classic AVR soaks"
-	grep -Eq '^[[:space:]]+PIC10F322_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
-		|| fail "release does not pass the liveness interval to PIC10F322 soaks"
-	grep -Eq '^[[:space:]]+PIC10F320_SOAK_LIVENESS_INTERVAL_MS="\$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
-		|| fail "release does not pass the liveness interval to PIC10F320 soaks"
+	grep -Eq '^[[:space:]]+AVR_SOAK_LIVENESS_INTERVAL_MS="\$liveness_ms"' "$SOAK_LIB" \
+		|| fail "the soak sweep does not pass the liveness interval to Classic AVR soaks"
+	grep -Eq '^[[:space:]]+PIC10F322_SOAK_LIVENESS_INTERVAL_MS="\$liveness_ms"' "$SOAK_LIB" \
+		|| fail "the soak sweep does not pass the liveness interval to PIC10F322 soaks"
+	grep -Eq '^[[:space:]]+PIC10F320_SOAK_LIVENESS_INTERVAL_MS="\$liveness_ms"' "$SOAK_LIB" \
+		|| fail "the soak sweep does not pass the liveness interval to PIC10F320 soaks"
+	# ...and the one caller that decides the interval must hand the sweep the
+	# validated value, or every assertion above is about a parameter nothing fills.
+	grep -Fq 'release_soak_assemble "$SOAK_DURATION_MS" "$SOAK_LIVENESS_INTERVAL_MS"' "$RELEASE" \
+		|| fail "the release does not hand the soak sweep its validated liveness interval"
 	checks=$((checks + 1))
 }
 
@@ -146,10 +162,10 @@ expect_release_liveness_wiring() {
 # the duration knob is threaded too. Both are per-combo `make` arguments, so
 # their presence is the closest a static check gets to "the combo exists".
 expect_release_pic10f320_soak_combos() {
-	grep -Eq '^[[:space:]]+PIC10F320_SOAK_DURATION_MS="\$SOAK_DURATION_MS"' "$RELEASE" \
-		|| fail "release does not build PIC10F320 soak combos at the release duration"
-	grep -Eq 'PIC10F320_SOAK_VARIANT="\$v"' "$RELEASE" \
-		|| fail "release does not select a PIC10F320 soak combo per output variant"
+	grep -Eq '^[[:space:]]+PIC10F320_SOAK_DURATION_MS="\$duration_ms"' "$SOAK_LIB" \
+		|| fail "the soak sweep does not build PIC10F320 soak combos at the release duration"
+	grep -Eq 'PIC10F320_SOAK_VARIANT="\$v"' "$SOAK_LIB" \
+		|| fail "the soak sweep does not select a PIC10F320 soak combo per output variant"
 	checks=$((checks + 1))
 }
 
@@ -158,14 +174,14 @@ expect_release_pic10f320_soak_combos() {
 # asserting the duration and liveness interval reach the driver's own env names
 # and that the wrapper is written once per supported variant.
 expect_release_avrxt_soak_combos() {
-	grep -q 'ATTINY202_SOAK_DURATION_MS=%q' "$RELEASE" \
-		|| fail "release does not run ATtiny202 soak combos at the release duration"
-	grep -q 'ATTINY202_SOAK_LIVENESS_INTERVAL_MS=%q' "$RELEASE" \
-		|| fail "release does not pass the liveness interval to ATtiny202 soaks"
-	grep -q 'ATTINY202_SOAK_COMBINATION_NAME=%q' "$RELEASE" \
-		|| fail "release does not bind a combination name into the ATtiny202 SOAK_RESULT"
-	grep -Eq '^for v in \$XT_VARIANTS; do' "$RELEASE" \
-		|| fail "release does not select an ATtiny202 soak combo per output variant"
+	grep -q 'ATTINY202_SOAK_DURATION_MS=%q' "$SOAK_LIB" \
+		|| fail "the soak sweep does not run ATtiny202 soak combos at the release duration"
+	grep -q 'ATTINY202_SOAK_LIVENESS_INTERVAL_MS=%q' "$SOAK_LIB" \
+		|| fail "the soak sweep does not pass the liveness interval to ATtiny202 soaks"
+	grep -q 'ATTINY202_SOAK_COMBINATION_NAME=%q' "$SOAK_LIB" \
+		|| fail "the soak sweep does not bind a combination name into the ATtiny202 SOAK_RESULT"
+	grep -Eq '^[[:space:]]+for v in \$XT_VARIANTS; do' "$SOAK_LIB" \
+		|| fail "the soak sweep does not select an ATtiny202 soak combo per output variant"
 	checks=$((checks + 1))
 }
 
@@ -567,8 +583,8 @@ expect_release_range_pass dry 4294967294
 expect_release_reject 0 "positive base-10 integer"
 expect_release_reject -1 "positive base-10 integer"
 expect_release_reject malformed "positive base-10 integer"
-expect_release_reject 60000 "production releases require"
-expect_release_express_reject 60000
+expect_release_reject 60000 "a release requires --soak-duration-ms"
+expect_soak_short_warning 60000
 expect_release_reject 4294967295 "must not exceed"
 expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
 expect_release_version_reject v99.0.0.rc1

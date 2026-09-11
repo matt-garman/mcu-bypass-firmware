@@ -15,8 +15,7 @@
 #        commit, the exact toolchain versions, the per-image fuse bytes / CONFIG
 #        word, and the validation evidence (test-long + both ATtiny202 gates +
 #        both pre-hardware and real-target aggregates for all three PIC parts +
-#        18-combination 24-h soak, or the 1-h soak an --express release records
-#        as such in both QUALIFICATION and MANIFEST.md).
+#        the recorded 18-combination 24-h soak the release consumed).
 #     2. REPRODUCIBILITY -- the Intel-HEX images are byte-deterministic for a
 #        fixed toolchain (objcopy ihex carries only code/data bytes, no
 #        timestamps/paths). SHA256SUMS pins those bytes; the tag-triggered CI
@@ -108,31 +107,14 @@
 #                              built in a scratch clone and put through the same
 #                              gates (does not produce a real release; output is
 #                              clearly marked and no git commands are emitted)
-#     --express                stage a REAL, publishable release whose soak runs
-#                              1 h per combination instead of 24 h. Every other
-#                              gate runs exactly as it does for a production
-#                              release, and the shortened soak is recorded --
-#                              release_mode=express in QUALIFICATION, a banner
-#                              in MANIFEST.md, and the true duration in both.
-#     --reuse-soak             if a published release already carries this run's
-#                              soak_inputs_sha256 -- the same images, drivers,
-#                              harnesses and liveness interval -- adopt its
-#                              signed soak instead of running one. Its attested
-#                              duration must be at least this mode's, its
-#                              signature and evidence index are verified, every
-#                              adopted log is re-validated, and the release
-#                              records soak_source=<that version> in both
-#                              QUALIFICATION and MANIFEST.md. Without a match it
-#                              soaks normally.
 #     --soak-duration-ms N     per-combo soak duration (default/minimum for a
-#                              production release: 24 h; --express lowers that
-#                              floor to 1 h; dry runs may use less)
+#                              production release: 24 h; dry runs may use less)
 #     --jobs N                 max concurrent soak combos (default: all of them)
 #     --output-dir DIR         where to stage (default release/<version>)
 #     -h | --help              this help
 #
 # This script is intentionally long-running (~24 h, dominated by the parallel
-# soaks; ~1 h under --express). Run it on a machine that can stay up, with all
+# soaks). Run it on a machine that can stay up, with all
 # toolchains installed (AVR + XC8/DFP + simavr + gpsim/gpsim-dev + analyzers).
 # See TOOLCHAIN.adoc.
 
@@ -174,8 +156,6 @@ VERSION=""
 VERSION_WAS_SUPPLIED=0
 PREFLIGHT=0
 DRY_RUN=0
-EXPRESS=0
-REUSE_SOAK=0
 SOAK_ONLY=0
 RELEASE_MODE=production
 # Independent local-release policy pins. These intentionally do not come from
@@ -189,13 +169,6 @@ readonly RELEASE_PIC12F675_DATA_LIMIT=48
 # the operator's SSH-vs-HTTPS remote and silently change published notes.
 REPO_URL=https://github.com/matt-garman/mcu-bypass-firmware
 MIN_RELEASE_SOAK_MS=86400000
-# An express release is a real, publishable release that trades soak hours for
-# turnaround. It moves the floor rather than removing it: every other gate still
-# runs in full, and one hour is still 60 liveness round-trips per combination at
-# the 60 s interval below. scripts/verify-release-qualification.sh enforces this
-# same floor for release_mode=express, so a shorter express run is not
-# publishable either.
-MIN_EXPRESS_SOAK_MS=3600000
 MAX_SOAK_DURATION_MS=4294967294    # uint32_t loop bound; preserve t + 1
 SOAK_DURATION_MS=$MIN_RELEASE_SOAK_MS
 SOAK_DURATION_WAS_SUPPLIED=0
@@ -221,8 +194,6 @@ while [ $# -gt 0 ]; do
 		--preflight)          PREFLIGHT=1; shift ;;
 		--dry-run)            DRY_RUN=1; shift ;;
 		--soak)               SOAK_ONLY=1; shift ;;
-		--express)            EXPRESS=1; shift ;;
-		--reuse-soak)         REUSE_SOAK=1; shift ;;
 		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"
 			SOAK_DURATION_WAS_SUPPLIED=1; shift 2 ;;
 		--jobs)               JOBS="${2:?--jobs needs a value}"; shift 2 ;;
@@ -235,31 +206,17 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-# Each option below names what the run IS: --express a publishable release with
-# a shortened soak, --dry-run a rehearsal that is not a release, --preflight a
-# capability probe that builds nothing. Any pair leaves the recorded mode
-# ambiguous, so all three pairs are refused here, before anything is read or
-# built. The mode-defining pair is checked first so the diagnostic names the
-# contradiction the operator actually wrote.
-[ "$EXPRESS" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
-	|| die "--express and --dry-run are mutually exclusive"
+# Each option below names what the run IS: --soak a run that produces the soak
+# evidence and stages nothing, --dry-run a rehearsal that is not a release,
+# --preflight a capability probe that builds nothing. Any pair leaves the
+# recorded mode ambiguous, so all three pairs are refused here, before anything
+# is read or built.
 [ "$PREFLIGHT" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
 	|| die "--preflight and --dry-run are mutually exclusive"
-[ "$EXPRESS" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
-	|| die "--preflight and --express are mutually exclusive"
-[ "$REUSE_SOAK" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
-	|| die "--reuse-soak is meaningless with --preflight: preflight exits before the soak"
-# --soak names what the run is just as firmly: it produces the evidence the
-# other three consume, and stages no release at all. Every pairing is refused
-# for the same reason theirs are.
 [ "$SOAK_ONLY" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
 	|| die "--soak and --preflight are mutually exclusive"
 [ "$SOAK_ONLY" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
 	|| die "--soak and --dry-run are mutually exclusive"
-[ "$SOAK_ONLY" -eq 0 ] || [ "$EXPRESS" -eq 0 ] \
-	|| die "--soak and --express are mutually exclusive"
-[ "$SOAK_ONLY" -eq 0 ] || [ "$REUSE_SOAK" -eq 0 ] \
-	|| die "--soak and --reuse-soak are mutually exclusive"
 if [ "$VERSION_WAS_SUPPLIED" -eq 0 ] && [ -n "$MAKE_VERSION" ]; then
 	# GNU Make exports command-line variables to recipes. Reading VERSION from
 	# that environment keeps arbitrary bytes out of the recipe's shell syntax;
@@ -390,14 +347,6 @@ fi
 if [ -n "$JOBS" ] && ! [[ "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
 	die "--jobs must be a positive base-10 integer"
 fi
-if [ "$EXPRESS" -eq 1 ]; then
-	RELEASE_MODE=express
-	# An operator who names a duration gets exactly that duration, checked
-	# against the express floor below. Only the untouched 24-h default is
-	# shortened, so `--express --soak-duration-ms <24 h>` cannot be silently
-	# downgraded into the very short run the flag exists to allow.
-	[ "$SOAK_DURATION_WAS_SUPPLIED" -eq 1 ] || SOAK_DURATION_MS=$MIN_EXPRESS_SOAK_MS
-fi
 if [ "$SOAK_ONLY" -eq 1 ]; then
 	RELEASE_MODE=soak
 fi
@@ -408,12 +357,9 @@ fi
 if [ "$SOAK_ONLY" -eq 1 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
 	warn "this soak runs ${SOAK_DURATION_MS}ms per combination, short of the ${MIN_RELEASE_SOAK_MS}ms a release requires; the record it writes will not qualify one."
 fi
-if [ "$DRY_RUN" -eq 0 ] && [ "$EXPRESS" -eq 0 ] && [ "$SOAK_ONLY" -eq 0 ] \
+if [ "$DRY_RUN" -eq 0 ] && [ "$SOAK_ONLY" -eq 0 ] \
 		&& [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
-	die "production releases require --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --express for a 1-h publishable release, or --dry-run for a short rehearsal"
-fi
-if [ "$EXPRESS" -eq 1 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_EXPRESS_SOAK_MS" ]; then
-	die "express releases require --soak-duration-ms >= $MIN_EXPRESS_SOAK_MS (1 h); use --dry-run for a short rehearsal"
+	die "a release requires --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --dry-run for a short rehearsal"
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -428,8 +374,6 @@ fi
 	&& SOAK_LIVENESS_INTERVAL_MS=$SOAK_DURATION_MS
 [ "$DRY_RUN" -eq 1 ] \
 	&& warn "DRY RUN: short ${SOAK_DURATION_MS}ms soak (liveness interval ${SOAK_LIVENESS_INTERVAL_MS}ms); output is NOT a real release."
-[ "$EXPRESS" -eq 1 ] \
-	&& warn "EXPRESS: publishable release with a ${SOAK_DURATION_MS}ms soak per combination instead of ${MIN_RELEASE_SOAK_MS}ms; every other gate runs in full and the shortened soak is recorded in QUALIFICATION and MANIFEST.md."
 
 # ----------------------------------------------------------------------------
 # Locate the repo and read the Makefile's single source of truth
@@ -446,8 +390,6 @@ declare -F release_tool_version_line >/dev/null \
 	|| die "release provenance checker did not define its tool-version function"
 declare -F release_yasimavr_build_line >/dev/null \
 	|| die "release provenance checker did not define its yasimavr build-identity function"
-declare -F release_reuse_soak_attestation >/dev/null \
-	|| die "release provenance checker did not define its soak-reuse function"
 declare -F release_pinned_version_matches >/dev/null \
 	|| die "release provenance checker did not define its version-pin function"
 declare -F release_require_main_branch >/dev/null \
@@ -469,7 +411,10 @@ declare -F release_stage_classic_avr_images >/dev/null \
 # shellcheck source=release-soak.sh
 source "$REPO_ROOT/scripts/release-soak.sh" \
 	|| die "release soak helper could not be loaded"
-for soak_fn in release_soak_require_host release_soak_assemble release_soak_input_key; do
+for soak_fn in release_soak_require_host release_soak_assemble \
+		release_soak_input_key release_soak_record_read \
+		release_soak_record_attests release_soak_record_write \
+		release_soak_record_require release_soak_record_adopt; do
 	declare -F "$soak_fn" >/dev/null \
 		|| die "release soak helper did not define $soak_fn"
 done
@@ -935,8 +880,8 @@ RELEASE_EVIDENCE_RESULT_ROLES=$(mkv RELEASE_EVIDENCE_RESULT_ROLES)
 [ -n "${RELEASE_EVIDENCE_RESULT_ROLES// /}" ] \
 	|| die "Makefile RELEASE_EVIDENCE_RESULT_ROLES is empty"
 [ "$(printf '%s\n' $RELEASE_EVIDENCE_RESULT_ROLES | LC_ALL=C sort)" \
-	= $'build\nfinal-image-build\ninitial-image-build\nsoak\ntarget-test' ] \
-	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, soak, and target-test"
+	= $'build\nfinal-image-build\ninitial-image-build\nsoak\nsoak-build\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, soak, soak-build, and target-test"
 declare -A RELEASE_EVIDENCE_ROLE=()
 for role_entry in $RELEASE_EVIDENCE_ROLES; do
 	role_base=${role_entry%%=*}
@@ -1494,11 +1439,11 @@ fi
 # that here -- after the preflight capability probe, which legitimately runs
 # against a live polish branch, and before any build -- so a release started
 # from an un-merged polish branch fails fast instead of trusting the manual
-# pre-merge checklist. Dry runs remain branch-safe rehearsals; every publishable
-# mode -- production and express alike -- requires the checked-out main ref,
-# because both stage into release/<version> and end at a signed tag.
+# pre-merge checklist. Dry runs and soaks remain branch-safe; the one
+# publishable mode requires the checked-out main ref, because it stages into
+# release/<version> and ends at a signed tag.
 case "$RELEASE_MODE" in
-	production|express)
+	production)
 		release_require_main_branch "$REPO_ROOT" "$RELEASE_MODE" \
 			|| die "refusing $RELEASE_MODE release outside the main branch (see the diagnostic above)."
 		;;
@@ -2628,13 +2573,13 @@ section "3. soak (all release combos, parallel, ${SOAK_DURATION_MS} ms each)"
 release_source_is_unchanged "$GIT_SHA" "$DRY_RUN" \
 	|| die "source provenance changed before the soak. No release staged, and no soak run."
 
-# Every release soak combination: the driver it runs, the exact image that
-# driver drives, and the cross-check of the assembled set against the canonical
-# one. Shared with the soak that produces the record this release consumes, so
-# one lane rename cannot reach only one of the two readers.
+# Every release soak combination: the exact image it drives, the cross-check of
+# the assembled set against the canonical one, and -- only when this run is the
+# soak -- the driver that executes it. One lane rename cannot reach only one of
+# the two readers, and a release compiles no harness it will never run.
 declare -A SOAK_RC
 release_soak_assemble "$SOAK_DURATION_MS" "$SOAK_LIVENESS_INTERVAL_MS" \
-	"$SOAKDIR" "$EVID" "$qualified_pic12f675_matrix_record"
+	"$SOAKDIR" "$EVID" "$qualified_pic12f675_matrix_record" "$SOAK_ONLY"
 
 # Baseline the derived simcal images now that they exist. The shipped HEXes were
 # already hashed after their gate; both sets are re-checked unchanged across the
@@ -2680,108 +2625,75 @@ if [ "$SOAK_ONLY" -eq 1 ] \
       a stochastic test at the cost of a day. Delete the record to ask for it."
 fi
 
-JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
-	|| die "could not resolve the release soak concurrency limit"
 # ----------------------------------------------------------------------------
-# Reuse: has this exact set of inputs already been soaked, and signed for?
+# The soak: run it, or require the record of the one that already ran.
 # ----------------------------------------------------------------------------
-# The attestation is a PUBLISHED RELEASE, not a separate store. SHA256SUMS
-# already covers SOAK_KEY and QUALIFICATION, and the detached signature already
-# signs SHA256SUMS, so a release that carries the same soak_inputs_sha256 is a
-# signed statement that these inputs were soaked -- with no second trust root
-# and no extra signing step to remember.
+# A soak is evidence about a set of images, not a fact about a release run.
+# Everything it observes is named by the input key above -- the artifact each
+# combination drove, the driver sources, the harness identity and the durations
+# -- and none of those is a property of the version being cut. A release
+# CONSUMES a soak result and has no reason to produce one, so this is one branch
+# rather than a mode: --soak runs the soak, and every other way of invoking this
+# script requires the record instead.
 #
-# What this chain establishes, and what it does not: the source release's
-# signature, its checksum manifest, its SOAK_KEY payload digest and its evidence
-# index are all verified here, and every reused log is re-validated by the same
-# validate_soak_result the live path uses. Soak logs are bound by their INDEX
-# row -- terminal record and byte size -- rather than by a content digest, so a
-# tampered body of identical length carrying an identical result line would not
-# be caught. Closing that means giving the soak role a payload digest, which is
-# a change to the evidence contract rather than to this feature.
-SOAK_SOURCE=this-run
+# That is also the whole of the fix. Reuse used to be a mode keyed on a
+# PUBLISHED release, which meant only a soak that reached a staged release was
+# reusable, and a run that failed anywhere after the soak took the day with it.
+# There is no search here, no arbitration between candidates and no fallback:
+# one record, one comparison, and a refusal naming which of three things is
+# wrong.
 SOAK_EVIDENCE_COMMIT=$GIT_SHA
-if [ "$REUSE_SOAK" -eq 1 ]; then
-	log "looking for a published release soaked on these exact inputs..."
-	reuse_candidate=""
-	reuse_duration=0
-	for candidate_qualification in "$REPO_ROOT"/release/v*/QUALIFICATION; do
-		[ -f "$candidate_qualification" ] && [ ! -L "$candidate_qualification" ] \
-			&& [ -s "$candidate_qualification" ] || continue
-		candidate_dir=${candidate_qualification%/QUALIFICATION}
-		candidate_version=${candidate_dir##*/}
-		[ "$candidate_version" != "$VERSION" ] || continue
-		candidate_key=$(awk -F= '$1 == "soak_inputs_sha256" { print $2 }' \
-			"$candidate_qualification") || continue
-		[ "$candidate_key" = "$SOAK_INPUTS_SHA256" ] || continue
-		candidate_duration=$(awk -F= '$1 == "soak_duration_ms" { print $2 }' \
-			"$candidate_qualification") || continue
-		[[ "$candidate_duration" =~ ^[1-9][0-9]*$ ]] || continue
-		candidate_mode=$(awk -F= '$1 == "release_mode" { print $2 }' \
-			"$candidate_qualification") || continue
-		# A rehearsal is not evidence. Its own MANIFEST says so.
-		[ "$candidate_mode" != dry-run ] || continue
-		# Longest wins: more soak is strictly better evidence for the same
-		# inputs, and the duration comparison below is >= for the same reason.
-		[ "$candidate_duration" -gt "$reuse_duration" ] || continue
-		reuse_duration=$candidate_duration
-		reuse_candidate=$candidate_dir
-	done
-	if [ -z "$reuse_candidate" ]; then
-		log "no published release carries soak_inputs_sha256=$SOAK_INPUTS_SHA256; soaking."
-	elif [ "$reuse_duration" -lt "$SOAK_DURATION_MS" ]; then
-		log "$(basename "$reuse_candidate") soaked these inputs for ${reuse_duration}ms, short of the ${SOAK_DURATION_MS}ms this mode requires; soaking."
-	else
-		release_reuse_soak_attestation "$reuse_candidate" "$SOAK_INPUTS_SHA256" \
-			"$reuse_duration" "$EVID" "$RELEASE_SOAK_NAMES" \
-			|| die "refusing to reuse the soak recorded by $(basename "$reuse_candidate") (see the diagnostic above)."
-		SOAK_SOURCE=$(basename "$reuse_candidate")
-		# The adopted transcripts keep the seals that release wrote, so every
-		# later check of them has to expect ITS commit, not this run's.
-		SOAK_EVIDENCE_COMMIT=$(awk -F= '$1 == "source_commit" { print $2 }' \
-			"$reuse_candidate/QUALIFICATION") \
-			|| die "could not read the source commit of $(basename "$reuse_candidate")"
-		[[ "$SOAK_EVIDENCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
-			|| die "$(basename "$reuse_candidate") declares no usable source commit"
-		# Record what was actually soaked, not what was asked for. The release
-		# says 24 h because these inputs WERE soaked for 24 h -- in the run that
-		# produced $SOAK_SOURCE, which its signature attests to.
-		SOAK_DURATION_MS=$reuse_duration
-		ok "reusing the soak $SOAK_SOURCE recorded for these inputs (${reuse_duration}ms per combination); its signature and evidence index verify."
-	fi
-fi
-
-hours=$("$AWK" -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
-ncpu=$(nproc 2>/dev/null || echo "?")
-if [ "$SOAK_SOURCE" = this-run ]; then
-	log "launching $NCOMBOS soak combos, up to $JOBS at once (~${hours} h each; this box has $ncpu logical CPUs)."
-	[ "$JOBS" -lt "$NCOMBOS" ] && warn "more combos ($NCOMBOS) than the --jobs cap ($JOBS): total time scales up."
-else
-	log "validating $NCOMBOS adopted soak logs from $SOAK_SOURCE (~${hours} h each, already run)."
-fi
-
 START_EPOCH=$(date +%s)
 declare -A SOAK_PID
-for name in "${SOAK_NAMES[@]}"; do
-	[ "$SOAK_SOURCE" = this-run ] || break
-	# Throttle to JOBS concurrent runs.
-	while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 5; done
-	# Defer a signal only across this launch-and-track critical section. The
-	# pending status is replayed immediately after the PID/process-group ID is in
-	# SOAK_PIDS, so no child can escape cleanup in the `$!` assignment gap.
-	TRACKING_WORKER=1
-	( cd "${SOAK_CWD[$name]}" && exec setsid "${SOAK_BIN[$name]}" ) \
-		>"${SOAK_LOG[$name]}" 2>&1 &
-	SOAK_PID[$name]=$!
-	SOAK_PIDS+=("${SOAK_PID[$name]}")
-	TRACKING_WORKER=0
-	if [ "$PENDING_SIGNAL_STATUS" -ne 0 ]; then
-		pending=$PENDING_SIGNAL_STATUS
-		PENDING_SIGNAL_STATUS=0
-		exit "$pending"
-	fi
-	log "  started $name (pid ${SOAK_PID[$name]})"
-done
+if [ "$SOAK_ONLY" -eq 1 ]; then
+	JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
+		|| die "could not resolve the soak concurrency limit"
+	hours=$("$AWK" -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
+	ncpu=$(nproc 2>/dev/null || echo "?")
+	log "launching $NCOMBOS soak combos, up to $JOBS at once (~${hours} h each; this box has $ncpu logical CPUs)."
+	[ "$JOBS" -lt "$NCOMBOS" ] && warn "more combos ($NCOMBOS) than the --jobs cap ($JOBS): total time scales up."
+	for name in "${SOAK_NAMES[@]}"; do
+		# Throttle to JOBS concurrent runs.
+		while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do sleep 5; done
+		# Defer a signal only across this launch-and-track critical section. The
+		# pending status is replayed immediately after the PID/process-group ID
+		# is in SOAK_PIDS, so no child can escape cleanup in the `$!` gap.
+		TRACKING_WORKER=1
+		( cd "${SOAK_CWD[$name]}" && exec setsid "${SOAK_BIN[$name]}" ) \
+			>"${SOAK_LOG[$name]}" 2>&1 &
+		SOAK_PID[$name]=$!
+		SOAK_PIDS+=("${SOAK_PID[$name]}")
+		TRACKING_WORKER=0
+		if [ "$PENDING_SIGNAL_STATUS" -ne 0 ]; then
+			pending=$PENDING_SIGNAL_STATUS
+			PENDING_SIGNAL_STATUS=0
+			exit "$pending"
+		fi
+		log "  started $name (pid ${SOAK_PID[$name]})"
+	done
+else
+	release_soak_record_require "$SOAK_RECORD_DIR" "$SOAK_INPUTS_SHA256" \
+		"$SOAK_DURATION_MS" "$WORK/soak-key.payload"
+	soak_record_fields=$(release_soak_record_read "$SOAK_RECORD_DIR") \
+		|| die "could not re-read the soak record this release just accepted"
+	# Record what WAS soaked, not what was asked for. These images were soaked
+	# for this long, in the run the record describes, and every later check of
+	# the transcripts -- their terminal records included -- must expect that
+	# duration rather than this mode's floor.
+	SOAK_DURATION_MS=$(printf '%s' "$soak_record_fields" | cut -f2)
+	# The recorded transcripts keep the seals the soak wrote, naming ITS commit.
+	# Replacing them would destroy the binding that makes the record checkable.
+	SOAK_EVIDENCE_COMMIT=$(printf '%s' "$soak_record_fields" | cut -f3)
+	release_soak_record_adopt "$SOAK_RECORD_DIR" "$EVID" "$RELEASE_SOAK_NAMES"
+	# The staged key is the RECORD's, not the one recomputed above. Their
+	# payloads are byte-identical -- that is exactly what the comparison
+	# established -- and only the record's result line states the duration and
+	# the commit the soak actually ran under.
+	cp -p -- "$SOAK_RECORD_DIR/$RELEASE_SOAK_RECORD_KEY" "$WORK/SOAK_KEY" \
+		|| die "could not stage the recorded soak input key"
+	hours=$("$AWK" -v ms="$SOAK_DURATION_MS" 'BEGIN{printf "%.1f", ms/3600000}')
+	log "validating $NCOMBOS recorded soak transcripts (~${hours} h each, already run)."
+fi
 
 forget_soak_pid() {
 	local target=$1 index
@@ -2810,15 +2722,15 @@ validate_soak_result() {
 # must agree; either one alone is insufficient evidence.
 SOAK_FAILS=0
 for name in "${SOAK_NAMES[@]}"; do
-	if [ "$SOAK_SOURCE" = this-run ]; then
+	if [ "$SOAK_ONLY" -eq 1 ]; then
 		if wait "${SOAK_PID[$name]}"; then SOAK_RC[$name]=0; else SOAK_RC[$name]=$?; fi
 		forget_soak_pid "${SOAK_PID[$name]}"
 		unset "SOAK_PID[$name]"
 	else
-		# An adopted log is validated by exactly the same rule a live one is --
-		# reuse skips the EXECUTION, never the check. If an attested log does not
-		# satisfy validate_soak_result at the attested duration, the reuse is
-		# incoherent and the release stops here.
+		# A recorded log is validated by exactly the same rule a live one is --
+		# a release skips the EXECUTION, never the check. If a recorded log does
+		# not satisfy validate_soak_result at the attested duration, the record
+		# is incoherent and the release stops here.
 		SOAK_RC[$name]=0
 	fi
 	if [ "${SOAK_RC[$name]}" -eq 0 ] \
@@ -2835,26 +2747,19 @@ SOAK_WALL=$(( $(date +%s) - START_EPOCH ))
 if [ "$SOAK_FAILS" -ne 0 ]; then
 	die "$SOAK_FAILS soak combo(s) FAILED. No release staged. Logs in $WORK (preserved)."
 fi
-ok "all $NCOMBOS soak combos passed (wall-clock ${SOAK_WALL}s)."
 
 # Seal each soak transcript by SHA-256, exactly as every build transcript is
-# sealed. Until now the soak role carried no payload digest: a log was bound by
-# its index row -- terminal record and byte size -- so a tampered body of
-# identical length carrying an identical SOAK_RESULT satisfied every check. That
-# was harmless while every log came from the run that consumed it, and stopped
-# being harmless when --reuse-soak made a log arrive from a tree this run did
-# not produce.
-#
-# Adopted logs are NOT resealed. They already carry the seal the run that
-# produced them wrote, naming that run's commit, and replacing it would destroy
-# the very binding that makes reuse checkable.
-if [ "$SOAK_SOURCE" = this-run ]; then
+# sealed, so a log is bound by its payload digest rather than only by its size
+# and terminal record. A recorded log arrives already sealed by the run that
+# produced it and is NOT resealed: that seal, naming that run's commit, is the
+# binding this release stands on.
+if [ "$SOAK_ONLY" -eq 1 ]; then
 	for name in "${SOAK_NAMES[@]}"; do
 		seal_evidence_result "${SOAK_LOG[$name]}"
 	done
-	ok "sealed $NCOMBOS soak transcripts by payload digest."
+	ok "all $NCOMBOS soak combos passed (wall-clock ${SOAK_WALL}s); sealed by payload digest."
 else
-	ok "$NCOMBOS adopted soak transcripts keep the seals $SOAK_SOURCE wrote."
+	ok "all $NCOMBOS recorded soak transcripts satisfy the release soak contract."
 fi
 
 current_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
@@ -3163,8 +3068,13 @@ for evidence_base in $RELEASE_EVIDENCE_FILES; do
 	mapfile -t evidence_results < <(grep '^EVIDENCE_RESULT ' "$staged_evidence" || true)
 	[ "${#evidence_results[@]}" -eq 1 ] \
 		|| die "retained evidence carries ${#evidence_results[@]} EVIDENCE_RESULT records: $evidence_base"
+	# Everything the soak record supplied was sealed by the run that produced
+	# it, under that run's commit. Everything else was sealed here. The role
+	# says which, so neither is inferred from a file name.
 	evidence_sealing_commit=$GIT_SHA
-	[ "$evidence_role" != soak ] || evidence_sealing_commit=$SOAK_EVIDENCE_COMMIT
+	case "$evidence_role" in
+		soak|soak-build) evidence_sealing_commit=$SOAK_EVIDENCE_COMMIT ;;
+	esac
 	expected_result=$(expected_evidence_result \
 		"$staged_evidence" "$evidence_base" "$evidence_role" \
 		"$evidence_sealing_commit") \
@@ -3196,7 +3106,7 @@ ok "verified $evidence_bound operation-sealed logs against their payload digests
 release_terminal_record() {
 	local role=$1 path=$2 pattern matches
 	case "$role" in
-		build|final-image-build|initial-image-build|target-test|soak)
+		build|final-image-build|initial-image-build|target-test|soak|soak-build)
 			pattern='^EVIDENCE_RESULT ' ;;
 		test-long)            pattern='^TEST_LONG_RESULT ' ;;
 		resource)             pattern='^RESOURCE_TABLES_RESULT ' ;;
@@ -3254,7 +3164,7 @@ cp -p -- "$WORK/SOAK_KEY" "$OUTPUT_DIR/SOAK_KEY" \
 # sources it), then cross-checks it against the canonical evidence inventory,
 # every terminal soak record, and the human-readable manifest.
 {
-	printf 'format=9\n'
+	printf 'format=10\n'
 	printf 'version=%s\n' "$VERSION"
 	printf 'release_mode=%s\n' "$RELEASE_MODE"
 	printf 'source_commit=%s\n' "$GIT_SHA"
@@ -3263,7 +3173,6 @@ cp -p -- "$WORK/SOAK_KEY" "$OUTPUT_DIR/SOAK_KEY" \
 	printf 'soak_liveness_interval_ms=%s\n' "$SOAK_LIVENESS_INTERVAL_MS"
 	printf 'soak_combination_count=%s\n' "$NCOMBOS"
 	printf 'soak_inputs_sha256=%s\n' "$SOAK_INPUTS_SHA256"
-	printf 'soak_source=%s\n' "$SOAK_SOURCE"
 	printf 'pic12f675_matrix_sha256=%s\n' "$pic12f675_matrix_sha256"
 	printf 'resource_tables_sha256=%s\n' "$resource_tables_sha256"
 	printf 'toolchain_sha256=%s\n' "$toolchain_sha256"
@@ -3285,14 +3194,6 @@ soak_table() {
 
 REL_BANNER=""
 [ "$DRY_RUN" -eq 1 ] && REL_BANNER=$'> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n'
-# An express release is publishable, so its banner must not read as a warning
-# against publication -- it must say precisely which evidence is shorter. The
-# leading sentinel is what scripts/verify-release-qualification.sh and the tag
-# workflow match on, so it is a fixed string; only the hours interpolate.
-# The trailing newline is appended after the substitution, which strips them:
-# the banner is a Markdown blockquote and needs the blank line the dry-run
-# banner also carries, or the paragraph that follows joins the quote.
-[ "$EXPRESS" -eq 1 ] && REL_BANNER="$(printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran %s h per combination instead of 24 h.' "$hours")"$'\n'
 
 : > "$FLASHCMDS"
 {
@@ -3300,9 +3201,6 @@ REL_BANNER=""
 	[ -n "$REL_BANNER" ] && printf '%s\n' "$REL_BANNER"
 	if [ "$DRY_RUN" -eq 1 ]; then
 		printf 'Prebuilt firmware rehearsal images; not fully validated. Verify integrity with\n'
-	elif [ "$EXPRESS" -eq 1 ]; then
-		printf 'Prebuilt firmware images; every release gate passed, with the shortened soak\n'
-		printf 'recorded above and in QUALIFICATION. Verify integrity with\n'
 	else
 		printf 'Prebuilt, fully-validated firmware images. Verify integrity with\n'
 	fi
@@ -3352,12 +3250,8 @@ REL_BANNER=""
 	printf -- '- **Soak input key:** `SOAK_KEY` (SHA-256 `%s`), %d combinations over %d driver sources and %d harnesses\n' \
 		"$SOAK_INPUTS_SHA256" "$SOAK_KEY_COMBINATIONS" "$SOAK_KEY_DRIVERS" \
 		"$SOAK_KEY_HARNESSES"
-	if [ "$SOAK_SOURCE" = this-run ]; then
-		printf -- '- **Soak provenance:** run for this release\n'
-	else
-		printf -- '- **Soak provenance:** reused from `%s`, whose signed record covers the identical soak inputs above\n' \
-			"$SOAK_SOURCE"
-	fi
+	printf -- '- **Soak provenance:** the recorded soak of these exact inputs, run at commit `%s`\n' \
+		"${SOAK_EVIDENCE_COMMIT:0:12}"
 	[ "$GIT_DIRTY" -eq 1 ] && printf -- '- **WARNING:** built from a DIRTY tree (uncommitted changes not captured by the SHA).\n'
 	printf -- '- **Built:** %s by `%s` on `%s`\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${USER:-?}" "$(uname -srm)"
 	release_render_validation "$hours"
@@ -3566,13 +3460,6 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	warn "Re-run WITHOUT --dry-run (full 24-h soak) to produce a publishable release."
 	exit 0
 fi
-# An express release is published like any other, so the recipe below is
-# printed. Say once more what it is, at the point the operator decides to sign.
-if [ "$EXPRESS" -eq 1 ]; then
-	warn "EXPRESS release: the soak ran ${hours} h per combination, not 24 h. Every other gate ran in full."
-	warn "MANIFEST.md carries the express banner and QUALIFICATION records release_mode=express; both are signed by the checksum signature below."
-fi
-
 # Everything below goes to STDOUT: the exact commands for the human to run.
 cat <<EOF
 

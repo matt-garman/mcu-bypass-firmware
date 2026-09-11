@@ -27,6 +27,10 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
 matrix_build="$work/pic12f675-matrix"
 sha=0123456789abcdef0123456789abcdef01234567
+# The commit whose run produced the soak record this release consumed. A
+# release that changed only prose keys identically to the soak and carries a
+# different commit, so the fixture makes the two different by default.
+soak_sha=fedcba9876543210fedcba9876543210fedcba98
 # A well-formed commit that is not the one being released, for the controls
 # that test evidence retained from a different run.
 other_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -805,12 +809,13 @@ EOF
 	soak_key_digest=${soak_key_digest%% *}
 	{
 		cat -- "$release/SOAK_KEY.payload"
+		# The staged key is the one the SOAK wrote, so its commit is the soak's.
 		printf 'SOAK_KEY_RESULT format=2 status=pass combinations=%d drivers=1 harnesses=1 duration_ms=%s inputs_sha256=%s source_commit=%s\n' \
-			"${#soak_names[@]}" "$duration" "$soak_key_digest" "$sha"
+			"${#soak_names[@]}" "$duration" "$soak_key_digest" "$soak_sha"
 	} > "$release/SOAK_KEY"
 	rm -f -- "$release/SOAK_KEY.payload"
 	cat > "$release/QUALIFICATION" <<EOF
-format=9
+format=10
 version=$version
 release_mode=$mode
 source_commit=$sha
@@ -819,7 +824,6 @@ soak_duration_ms=$duration
 soak_liveness_interval_ms=$liveness
 soak_combination_count=${#soak_names[@]}
 soak_inputs_sha256=$soak_key_digest
-soak_source=this-run
 pic12f675_matrix_sha256=$matrix_digest
 resource_tables_sha256=$resource_digest
 toolchain_sha256=$toolchain_digest
@@ -829,8 +833,6 @@ EOF
 		printf '# Firmware release %s\n\n' "$version"
 		[ "$mode" != dry-run ] \
 			|| printf '> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n\n'
-		[ "$mode" != express ] \
-			|| printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.\n\n'
 		printf -- '- **Release mode:** %s\n' "$mode"
 		printf -- '- **Source commit:** `%s`\n' "$sha"
 		printf -- '- **Soak duration per combination:** %s ms\n' "$duration"
@@ -843,7 +845,8 @@ EOF
 			"$index_digest" "${#fixture_role[@]}"
 		printf -- '- **Soak input key:** `SOAK_KEY` (SHA-256 `%s`), %d combinations over 1 driver sources and 1 harnesses\n' \
 			"$soak_key_digest" "${#soak_names[@]}"
-		printf -- '- **Soak provenance:** run for this release\n'
+		printf -- '- **Soak provenance:** the recorded soak of these exact inputs, run at commit `%s`\n' \
+			"${soak_sha:0:12}"
 		printf '\n## Toolchain\n\n'
 		printf -- '| tool | version |\n|---|---|\n'
 		for tool_index in $(seq 1 16); do
@@ -866,8 +869,6 @@ EOF
 		printf '# %s\n\n' "$version"
 		[ "$mode" != dry-run ] \
 			|| printf '> **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.\n\n'
-		[ "$mode" != express ] \
-			|| printf '> **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.\n\n'
 		printf 'Prebuilt firmware for %s. See **MANIFEST.md** for provenance.\n' "$version"
 	} > "$release/README.md"
 	reseal_provenance
@@ -977,19 +978,23 @@ replace_fixture_source_command() {
 # Appends the terminal record to every operation-role log first, because that
 # changes its size and the index records sizes.
 write_evidence_index() {
-	local name role size record lines payload_digest
+	local name role size record lines payload_digest sealing_commit
 	for name in "${!fixture_role[@]}"; do
 		role=${fixture_role[$name]}
 		case "$role" in
-			build|final-image-build|initial-image-build|target-test|soak) ;;
+			build|final-image-build|initial-image-build|target-test|soak|soak-build) ;;
 			*) continue ;;
 		esac
 		grep -q '^EVIDENCE_RESULT ' "$release/evidence/$name" && continue
 		lines=$(wc -l < "$release/evidence/$name")
 		payload_digest=$(sha256sum -- "$release/evidence/$name")
 		payload_digest=${payload_digest%% *}
+		# Everything the soak record supplied was sealed by the run that produced
+		# it; everything else by the release's own run.
+		sealing_commit=$sha
+		case "$role" in soak|soak-build) sealing_commit=$soak_sha ;; esac
 		printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
-			"$role" "$name" "$lines" "$payload_digest" "$sha" \
+			"$role" "$name" "$lines" "$payload_digest" "$sealing_commit" \
 			>> "$release/evidence/$name"
 	done
 	{
@@ -998,7 +1003,7 @@ write_evidence_index() {
 			role=${fixture_role[$name]}
 			size=$(stat -c%s "$release/evidence/$name")
 			case "$role" in
-				build|final-image-build|initial-image-build|target-test|soak)
+				build|final-image-build|initial-image-build|target-test|soak|soak-build)
 					record=$(grep -m1 '^EVIDENCE_RESULT ' "$release/evidence/$name") ;;
 				test-long)
 					record=$(grep -m1 '^TEST_LONG_RESULT ' "$release/evidence/$name") ;;
@@ -1056,13 +1061,13 @@ restate_index_row() {
 reseal_soak_evidence() {
 	local sealing_commit=$1 name lines payload_digest
 	for name in "${!fixture_role[@]}"; do
-		[ "${fixture_role[$name]}" = soak ] || continue
+		case "${fixture_role[$name]}" in soak|soak-build) ;; *) continue ;; esac
 		sed -i '/^EVIDENCE_RESULT /d' "$release/evidence/$name"
 		lines=$(wc -l < "$release/evidence/$name")
 		payload_digest=$(sha256sum -- "$release/evidence/$name")
 		payload_digest=${payload_digest%% *}
-		printf 'EVIDENCE_RESULT format=2 status=pass role=soak evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
-			"$name" "$lines" "$payload_digest" "$sealing_commit" \
+		printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+			"${fixture_role[$name]}" "$name" "$lines" "$payload_digest" "$sealing_commit" \
 			>> "$release/evidence/$name"
 	done
 	refresh_evidence_index
@@ -1224,18 +1229,18 @@ printf 'extra=value\n' >> "$release/QUALIFICATION"
 expect_fail "unknown qualification key" "unknown QUALIFICATION key"
 
 reset_fixture
-printf 'format=9\n' >> "$release/QUALIFICATION"
+printf 'format=10\n' >> "$release/QUALIFICATION"
 expect_fail "duplicate qualification key" "duplicate QUALIFICATION key"
 
-# Format 8 is the superseded pre-soak-provenance contract. It is rejected
-# rather than accepted as a legacy mode because this verifier only runs on a
-# directory being staged or a tag being published.
+# Format 9 is the superseded contract that carried a soak_source field. It is
+# rejected rather than accepted as a legacy mode because this verifier only runs
+# on a directory being staged or a tag being published.
 reset_fixture
-sed -i 's/^format=9$/format=8/' "$release/QUALIFICATION"
+sed -i 's/^format=10$/format=9/' "$release/QUALIFICATION"
 expect_fail "superseded qualification format" "unsupported QUALIFICATION format"
 
 reset_fixture
-sed -i 's/^format=9$/format=2/' "$release/QUALIFICATION"
+sed -i 's/^format=10$/format=2/' "$release/QUALIFICATION"
 expect_fail "obsolete qualification format" "unsupported QUALIFICATION format"
 
 # --- the soak input key ------------------------------------------------------
@@ -1276,7 +1281,7 @@ expect_fail "soak key omitting a combination" \
 	"combinations, not the"
 
 # A payload carrying a duration can only ever match an equally long soak, so an
-# express release could never stand on a production one. Duration belongs on the
+# shorter soak could never stand on a longer one. Duration belongs on the
 # result line, compared with >=.
 reset_fixture
 sed -i '1a duration_ms=86400000' "$release/SOAK_KEY"
@@ -1285,29 +1290,28 @@ expect_fail "duration inside the soak key payload" \
 	"can only ever match an equally long soak"
 
 # --- soak provenance ---------------------------------------------------------
-# A release either ran its soak or stands on a named published one. Both states
-# are disclosed in the human-readable manifest, not only in the machine record.
-reuse_source=$(basename "$(ls -d "$ROOT"/release/v*/ | tail -1)")
-reuse_source=${reuse_source%/}
-
-reuse_commit=$(awk -F= '$1 == "source_commit" { print $2 }' \
-	"$ROOT/release/$reuse_source/QUALIFICATION")
+# A release does not run a soak. It stands on the committed record of one, and
+# the commit whose run produced that record is published on the SOAK_KEY result
+# line and disclosed in the human-readable manifest -- never left to inference.
 reset_fixture
-sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
-sed -i "s|^- \*\*Soak provenance:\*\* run for this release$|- **Soak provenance:** reused from \`$reuse_source\`, whose signed record covers the identical soak inputs above|" \
-	"$release/MANIFEST.md"
-reseal_soak_evidence "$reuse_commit"
-expect_pass "qualification standing on a published soak attestation"
+expect_pass "qualification standing on a recorded soak run at another commit"
 
-# ...and the seals must be the attested release's, not this one's. A release
-# that re-sealed adopted transcripts in its own name would have destroyed the
-# binding that makes the reuse checkable.
+# The seals must be the SOAK's, not this release's. A release that re-sealed the
+# recorded transcripts in its own name would have destroyed the binding that
+# makes the record checkable at all.
 reset_fixture
-sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
-sed -i "s|^- \*\*Soak provenance:\*\* run for this release$|- **Soak provenance:** reused from \`$reuse_source\`, whose signed record covers the identical soak inputs above|" \
-	"$release/MANIFEST.md"
-reseal_provenance
-expect_fail "adopted soak transcripts resealed in this release's name" \
+reseal_soak_evidence "$sha"
+expect_fail "recorded soak transcripts resealed in this release's name" \
+	"payload digest or result metadata does not match its transcript"
+
+# The soak's build transcript arrives from the same run and is sealed the same
+# way. It carries its own role for exactly that reason: every other build
+# transcript is sealed by the release.
+reset_fixture
+sed -i "s/^EVIDENCE_RESULT \(.*\)role=soak-build \(.*\)source_commit=$soak_sha$/EVIDENCE_RESULT \1role=soak-build \2source_commit=$sha/" \
+	"$release/evidence/soak-build.log"
+refresh_evidence_index
+expect_fail "the soak's build transcript resealed in this release's name" \
 	"payload digest or result metadata does not match its transcript"
 
 # The defect the soak seal exists for. Before it, a soak log was bound by its
@@ -1333,25 +1337,28 @@ SUBSTITUTE
 expect_fail "same-length soak payload substituted under an unchanged verdict" \
 	"payload digest or result metadata does not match its transcript"
 
-# The disclosure is not optional. A release that reuses a soak and says it ran
-# one is the single most misleading thing this record could contain.
+# The disclosure is not optional. A release that consumed a soak run elsewhere
+# and does not say where is the single most misleading thing this record could
+# contain.
 reset_fixture
-sed -i "s/^soak_source=this-run$/soak_source=$reuse_source/" "$release/QUALIFICATION"
-reseal_soak_evidence "$reuse_commit"
-expect_fail "undisclosed soak reuse" \
-	"does not disclose that this release reused the soak"
+sed -i "/^- \*\*Soak provenance:\*\*/d" "$release/MANIFEST.md"
+reseal_provenance
+expect_fail "undisclosed soak provenance" \
+	"does not disclose the commit whose run produced the soak"
 
 reset_fixture
-sed -i 's/^soak_source=this-run$/soak_source=v9.9.9/' "$release/QUALIFICATION"
+sed -i "s|^- \*\*Soak provenance:\*\* the recorded soak of these exact inputs, run at commit \`${soak_sha:0:12}\`$|- **Soak provenance:** the recorded soak of these exact inputs, run at commit \`${sha:0:12}\`|" \
+	"$release/MANIFEST.md"
 reseal_provenance
-expect_fail "soak reused from a release this tree does not retain" \
-	"which this tree does not retain"
+expect_fail "soak provenance naming a commit the key does not" \
+	"does not disclose the commit whose run produced the soak"
 
+# The key's own commit must be a commit. A result line that names nothing
+# usable leaves every soak seal with nothing to be checked against.
 reset_fixture
-sed -i 's/^soak_source=this-run$/soak_source=elsewhere/' "$release/QUALIFICATION"
-reseal_provenance
-expect_fail "soak provenance that names neither this run nor a release" \
-	"neither this-run nor a released version"
+sed -i "s/ source_commit=$soak_sha$/ source_commit=elsewhere/" "$release/SOAK_KEY"
+expect_fail "soak key naming no usable commit" \
+	"declares no usable source commit"
 
 reset_fixture
 printf 'changed resource evidence\n' >> "$release/evidence/resource-tables.log"
@@ -1769,29 +1776,10 @@ expect_fail "dirty production qualification" "source_dirty=0"
 reset_fixture production 60000 60000 0
 expect_fail "short production soak" "below 86400000"
 
-# Express is publishable without --allow-dry-run, on its own soak floor, and
-# only while the recorded mode and the human-readable banner say the same thing.
+# The shortened-soak mode is retired, so there is exactly one publishable mode
+# left and nothing that can claim to be publishable under another name.
 reset_fixture express 3600000 60000 0
-expect_pass "express qualification at the 1-h floor"
-
-reset_fixture express 86400000 60000 0
-expect_pass "express qualification above its floor"
-
-reset_fixture express 3599999 60000 0
-expect_fail "short express soak" "below 3600000"
-
-reset_fixture express 3600000 60000 1
-expect_fail "dirty express qualification" "source_dirty=0"
-
-reset_fixture express 3600000 60000 0
-sed -i '/EXPRESS QUALIFICATION -- SHORTENED SOAK/d' "$release/MANIFEST.md"
-expect_fail "express manifest without its banner" "missing its shortened-soak banner"
-
-reset_fixture production 86400000 60000 0
-sed -i '2i > **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.' \
-	"$release/MANIFEST.md"
-expect_fail "production manifest carrying the express banner" \
-	"production MANIFEST.md contains the express banner"
+expect_fail "the retired shortened-soak mode" "invalid release_mode: express"
 
 # --- the per-release README, which nothing read until QUALIFICATION format=4 --
 # It is the first file a recipient opens and it makes the same two claims the
@@ -1812,19 +1800,6 @@ sed -i '1s/.*/# v99.0.1/' "$release/README.md"
 reseal_provenance
 expect_fail "README naming another release" \
 	"README.md heading does not match QUALIFICATION version"
-
-reset_fixture express 3600000 60000 0
-sed -i '/EXPRESS QUALIFICATION -- SHORTENED SOAK/d' "$release/README.md"
-reseal_provenance
-expect_fail "express README without its banner" \
-	"express README.md is missing its shortened-soak banner"
-
-reset_fixture production 86400000 60000 0
-sed -i '2i > **EXPRESS QUALIFICATION -- SHORTENED SOAK.** Every gate below ran in full; the parallel soak ran 1.0 h per combination instead of 24 h.' \
-	"$release/README.md"
-reseal_provenance
-expect_fail "production README carrying the express banner" \
-	"production README.md contains the express banner"
 
 reset_fixture production 86400000 60000 0
 sed -i '2i > **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.' \
@@ -2138,12 +2113,6 @@ reset_fixture
 printf '\nAn amendment nobody sealed.\n' >> "$release/MANIFEST.md"
 expect_fail "manifest gains an unsealed paragraph" \
 	"MANIFEST.md does not hash to the value SHA256SUMS records for it"
-
-reset_fixture express 3600000 60000 0
-sed -i '2i > **DRY RUN -- NOT A VALIDATED RELEASE.** Soak duration was reduced; do not publish.' \
-	"$release/MANIFEST.md"
-expect_fail "express manifest carrying the dry-run banner" \
-	"express MANIFEST.md contains the dry-run banner"
 
 reset_fixture
 sed -i 's/^release_mode=production$/release_mode=turbo/' "$release/QUALIFICATION"
@@ -3020,15 +2989,15 @@ release_render_commit_message v0.9.9 dry-run abc1234 21 24 \
 	> "$rendered_commit"
 grep -Fq 'Non-publishable dry-run rehearsal images for v0.9.9.' "$rendered_commit" \
 	|| fail "rendered dry-run commit message has the wrong release mode"
-# The express message must name its own mode AND carry the real soak hours it
-# was rendered with: the description and the validation list are the same claim.
-release_render_commit_message v0.9.9 express abc1234 21 1.0 \
+# The message must carry the real soak hours it was rendered with: the
+# description and the validation list are the same claim.
+release_render_commit_message v0.9.9 production abc1234 21 24 \
 	> "$rendered_commit"
-grep -Fq 'Prebuilt firmware images, express-qualified (every gate in full, shortened soak) for v0.9.9.' \
-	"$rendered_commit" \
-	|| fail "rendered express commit message has the wrong release mode"
-grep -Fq '+ 1.0-h parallel soak of every release soak combination' "$rendered_commit" \
-	|| fail "rendered express commit message does not carry its actual soak duration"
+grep -Fq '+ 24-h parallel soak of every release soak combination' "$rendered_commit" \
+	|| fail "rendered commit message does not carry its actual soak duration"
+if release_render_commit_message v0.9.9 express abc1234 21 1.0 >/dev/null; then
+	fail "release commit-message renderer still accepts the retired express mode"
+fi
 if release_render_commit_message v0.9.9 invalid abc1234 21 24 >/dev/null; then
 	fail "release commit-message renderer accepted an invalid release mode"
 fi

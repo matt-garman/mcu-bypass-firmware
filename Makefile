@@ -8240,8 +8240,8 @@ origins:
 #   make release-preflight                 # capability check, no build/staging
 #   make release-preflight VERSION=v1.0.0  # require final docs; warn on tag/output state
 #   make release VERSION=v1.0.0
-#   make release VERSION=v1.0.0 RELEASE_ARGS='--express'   # publishable, 1-h soak
-#   make release VERSION=v1.0.0 RELEASE_ARGS='--dry-run'   # skip the 24-h soak
+#   make release VERSION=v1.0.0 RELEASE_ARGS='--dry-run'   # rehearse the staging
+#   make soak                              # the 24-h soak a release requires
 
 # --- the canonical release product set ---------------------------------------
 # THE authoritative answer to "what does a complete release contain?", expressed
@@ -8378,8 +8378,8 @@ override RELEASE_HELPER_MAP := flash-pic12f675.py=scripts/flash-pic12f675.py
 # A recipient who ran the two commands release/README.md gives them --
 # `gpg --verify SHA256SUMS.asc SHA256SUMS` then `sha256sum -c SHA256SUMS` --
 # authenticated the firmware and NOTHING about where it came from: not the
-# source commit, not whether qualification was production or express, not the
-# soak duration, not the PIC12F675 raw-write hazard text. QUALIFICATION,
+# source commit, not whether qualification was a release or a rehearsal, not
+# the soak duration, not the PIC12F675 raw-write hazard text. QUALIFICATION,
 # MANIFEST.md and README.md sat outside the signed list and could be replaced
 # without any verification failing.
 #
@@ -8488,11 +8488,18 @@ override RELEASE_EVIDENCE_FILES := $(RELEASE_FIXED_EVIDENCE_FILES) \
 # Classic AVR phases are intentionally distinct: initial-image-build is the
 # clean source-to-ELF/HEX build, while final-image-build is the post-soak,
 # HEX-only materialization from unchanged validated ELFs.
+#
+# soak-build is distinct from build for the same reason, and a sharper one: a
+# release no longer compiles soak drivers, so that transcript arrives from the
+# soak that produced the record, sealed under THAT run's commit. Every other
+# build transcript is sealed under the release's own. One role per sealing
+# authority is what lets the qualification verifier check both without deriving
+# either from a file name.
 override RELEASE_EVIDENCE_ROLES := \
 	build-avr-classic.log=initial-image-build build-avr-xt.log=build \
 	build-pic10f322.log=build build-pic10f320.log=build \
 	build-pic12f675.log=build final-image-build.log=final-image-build \
-	soak-build.log=build \
+	soak-build.log=soak-build \
 	attiny202-test.log=target-test attiny202-test-target.log=target-test \
 	pic10f322-test.log=target-test \
 	pic10f322-test-target-variants.log=target-test \
@@ -8509,7 +8516,7 @@ override RELEASE_EVIDENCE_ROLES := \
 # that predates this one and is stronger: a digest named in QUALIFICATION, or a
 # terminal record the verifier already matched exactly. Nothing is bound twice.
 override RELEASE_EVIDENCE_RESULT_ROLES := \
-	build final-image-build initial-image-build target-test soak
+	build final-image-build initial-image-build target-test soak soak-build
 
 # --- the immutable production release identity -------------------------------
 # WHAT A RELEASE IS, written as literal text that no caller can move.
@@ -9068,10 +9075,9 @@ help:
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
 	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675, the canonical"
 	@echo "                  RELEASE_IMAGES set (incl. 24-h soak of all 18 combos) + stage release/<ver>/."
-	@echo "                  RELEASE_ARGS='--express' stages a publishable release with a 1-h"
-	@echo "                  soak instead of 24 h (recorded as release_mode=express);"
-	@echo "                  RELEASE_ARGS='--dry-run' rehearses with a 60-s soak; see"
-	@echo "                  scripts/make-release.sh"
+	@echo "                  Requires the soak record; refuses with what changed if it does not"
+	@echo "                  cover the images just built. RELEASE_ARGS='--dry-run' rehearses the"
+	@echo "                  whole path without publishing; see scripts/make-release.sh"
 	@echo "Clean:"
 	@echo "  clean           remove build + test artifacts"
 	@echo "  clean-tests     remove only test binaries"

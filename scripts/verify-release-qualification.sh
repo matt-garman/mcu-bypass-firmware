@@ -9,13 +9,7 @@ LC_ALL=C
 export LC_ALL
 
 MIN_RELEASE_SOAK_MS=86400000
-# An express release is publishable with a shorter soak, and this floor is the
-# only thing that keeps "shorter" from meaning "any". It mirrors
-# MIN_EXPRESS_SOAK_MS in scripts/make-release.sh; the producer and this verifier
-# must agree, or a run that the producer accepted would be unpublishable.
-MIN_EXPRESS_SOAK_MS=3600000
 MAX_SOAK_DURATION_MS=4294967294
-EXPRESS_BANNER='EXPRESS QUALIFICATION -- SHORTENED SOAK'
 allow_dry_run=0
 
 die() {
@@ -71,7 +65,7 @@ declare -A q=()
 required_keys=(format version release_mode source_commit source_dirty \
 	soak_duration_ms soak_liveness_interval_ms soak_combination_count \
 	pic12f675_matrix_sha256 resource_tables_sha256 toolchain_sha256 \
-	evidence_index_sha256 soak_inputs_sha256 soak_source)
+	evidence_index_sha256 soak_inputs_sha256)
 line_no=0
 while IFS= read -r line || [ -n "$line" ]; do
 	line_no=$((line_no + 1))
@@ -107,16 +101,21 @@ done
 # result is VALID FOR -- the driven images, the declared soak driver sources,
 # and the tools that execute a soak -- so a later release can establish that its
 # own inputs are identical instead of re-deriving a result it already has.
-# format=9 adds soak_source: `this-run`, or the published release whose signed
-# attestation this release stands on. A reader must never have to infer whether
-# a soak was executed here.
+# format=9 added soak_source: `this-run`, or the published release whose signed
+# attestation that release stood on. format=10 removes it again. A release no
+# longer runs a soak at all -- it requires the committed record of one, keyed on
+# the images it just built -- so there is only one kind of soak provenance left
+# and a field distinguishing two is a field with nothing to say. Which commit
+# soaked is still published, on the SOAK_KEY result line this release stages
+# verbatim from that record, and it is what the soak transcripts' seals are
+# checked against below.
 #
 # Exactly one format is accepted here. This verifier runs on a freshly staged
 # directory and on the tag CI is publishing, never on a historical release, so
 # a compatibility branch would be unreachable code claiming a capability
 # nothing exercises. verify-release-images.sh, which IS run against published
 # directories, carries the era policy instead.
-[ "${q[format]}" = 9 ] || die "unsupported QUALIFICATION format: ${q[format]}"
+[ "${q[format]}" = 10 ] || die "unsupported QUALIFICATION format: ${q[format]}"
 [ "${q[version]}" = "$expected_version" ] \
 	|| die "QUALIFICATION version ${q[version]} does not match $expected_version"
 [[ "${q[source_commit]}" =~ ^[0-9a-f]{40}$ ]] \
@@ -131,38 +130,10 @@ done
 	|| die "QUALIFICATION toolchain_sha256 is not a lowercase SHA-256"
 [[ "${q[soak_inputs_sha256]}" =~ ^[0-9a-f]{64}$ ]] \
 	|| die "QUALIFICATION soak_inputs_sha256 is not a lowercase SHA-256"
-# Either this run soaked, or a named published release did. There is no third
-# state, and "unknown" is not one of them.
-case "${q[soak_source]}" in
-	this-run) ;;
-	v[0-9]*.[0-9]*.[0-9]*)
-		[ -f "$repo_root/release/${q[soak_source]}/QUALIFICATION" ] \
-			|| die "QUALIFICATION soak_source names ${q[soak_source]}, which this tree does not retain" ;;
-	*) die "QUALIFICATION soak_source is neither this-run nor a released version: ${q[soak_source]}" ;;
-esac
-# Which commit's run produced the soak transcripts this release retains. For an
-# adopted soak that is the attested release, read from the record this tree
-# retains for it rather than taken on trust from the seals being checked.
-if [ "${q[soak_source]}" = this-run ]; then
-	soak_evidence_commit=${q[source_commit]}
-else
-	soak_evidence_commit=$(awk -F= '$1 == "source_commit" { print $2 }' \
-		"$repo_root/release/${q[soak_source]}/QUALIFICATION") \
-		|| die "could not read the source commit of ${q[soak_source]}"
-	[[ "$soak_evidence_commit" =~ ^[0-9a-f]{40}$ ]] \
-		|| die "${q[soak_source]} declares no usable source commit for the soak this release adopted"
-fi
-
 case "${q[release_mode]}" in
 	production)
 		[ "${q[source_dirty]}" = 0 ] \
 			|| die "production qualification must record source_dirty=0"
-		;;
-	express)
-		# Publishable, so it is held to every production rule except the soak
-		# floor checked below -- and it must SAY so where a reader looks.
-		[ "${q[source_dirty]}" = 0 ] \
-			|| die "express qualification must record source_dirty=0"
 		;;
 	dry-run)
 		[ "$allow_dry_run" -eq 1 ] \
@@ -188,12 +159,6 @@ if [ "${q[release_mode]}" = production ] \
 			|| { [ "${#duration}" -eq "${#MIN_RELEASE_SOAK_MS}" ] \
 				&& [[ "$duration" < "$MIN_RELEASE_SOAK_MS" ]]; }; }; then
 	die "production soak_duration_ms is below $MIN_RELEASE_SOAK_MS"
-fi
-if [ "${q[release_mode]}" = express ] \
-		&& { [ "${#duration}" -lt "${#MIN_EXPRESS_SOAK_MS}" ] \
-			|| { [ "${#duration}" -eq "${#MIN_EXPRESS_SOAK_MS}" ] \
-				&& [[ "$duration" < "$MIN_EXPRESS_SOAK_MS" ]]; }; }; then
-	die "express soak_duration_ms is below $MIN_EXPRESS_SOAK_MS"
 fi
 if [ "${#liveness}" -gt "${#duration}" ] \
 		|| { [ "${#liveness}" -eq "${#duration}" ] \
@@ -312,8 +277,8 @@ case " ${identity_parts[*]} " in
 	*) die "PIC12F675_TAG is absent from the reviewed release part set" ;;
 esac
 [ "$(printf '%s\n' "${result_roles[@]}" | sort)" = \
-	$'build\nfinal-image-build\ninitial-image-build\nsoak\ntarget-test' ] \
-	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, soak, and target-test"
+	$'build\nfinal-image-build\ninitial-image-build\nsoak\nsoak-build\ntarget-test' ] \
+	|| die "RELEASE_EVIDENCE_RESULT_ROLES must be exactly build, final-image-build, initial-image-build, soak, soak-build, and target-test"
 
 # The declared role of every retained file. Read from the Makefile rather than
 # from the index being checked: an index that supplied its own role vocabulary
@@ -430,26 +395,14 @@ grep -Fxq -- "- **PIC12F675 qualified matrix:** \`evidence/pic12f675-qualified-m
 	|| die "MANIFEST.md PIC12F675 matrix digest does not match QUALIFICATION"
 grep -Fxq -- "- **Final resource evidence:** \`evidence/resource-tables.log\` (SHA-256 \`${q[resource_tables_sha256]}\`)" "$manifest" \
 	|| die "MANIFEST.md resource evidence digest does not match QUALIFICATION"
-# Each mode carries exactly its own banner, checked in both directions. The
-# recorded mode and the human-readable document are the same claim written
+# The recorded mode and the human-readable document are the same claim written
 # twice, and a reader who sees only one of them must not be misled by it: a
-# production manifest that quietly carries a shortened-soak banner, or an
-# express manifest that carries none, is a mismatch either way.
+# rehearsal whose manifest carries no warning reads exactly like a release.
 case "${q[release_mode]}" in
 	production)
 		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
 			die "production MANIFEST.md contains the dry-run banner"
 		fi
-		if grep -Fq "$EXPRESS_BANNER" "$manifest"; then
-			die "production MANIFEST.md contains the express banner"
-		fi
-		;;
-	express)
-		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest"; then
-			die "express MANIFEST.md contains the dry-run banner"
-		fi
-		grep -Fq "$EXPRESS_BANNER" "$manifest" \
-			|| die "express MANIFEST.md is missing its shortened-soak banner"
 		;;
 	*)
 		grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$manifest" \
@@ -523,8 +476,8 @@ soak_key_payload_digest=$(grep -v '^SOAK_KEY_RESULT ' "$soak_key" | sha256sum) \
 grep -Fxq "SOAK_KEY format=2" "$soak_key" \
 	|| die "SOAK_KEY has no format header record"
 # Duration is on the RESULT line, not in the payload: it is a magnitude rather
-# than an input, so reuse compares it with >= and an equal-duration requirement
-# would stop an express release standing on a production soak.
+# than an input, so a release compares it with >= and an equal-duration
+# requirement would stop a longer soak standing in for a shorter one.
 ! grep -q "^duration_ms=" <(grep -v '^SOAK_KEY_RESULT ' "$soak_key") \
 	|| die "the SOAK_KEY payload carries a duration and can only ever match an equally long soak"
 grep -Fxq "liveness_interval_ms=${q[soak_liveness_interval_ms]}" "$soak_key" \
@@ -541,7 +494,17 @@ soak_key_harnesses=$(grep -c $'^harness\t' "$soak_key") \
 	|| die "could not count the keyed soak harnesses"
 [ "$soak_key_harnesses" -gt 0 ] \
 	|| die "SOAK_KEY names no soak harnesses"
-soak_key_result="SOAK_KEY_RESULT format=2 status=pass combinations=$soak_key_combinations drivers=$soak_key_drivers harnesses=$soak_key_harnesses duration_ms=${q[soak_duration_ms]} inputs_sha256=${q[soak_inputs_sha256]} source_commit=${q[source_commit]}"
+# The staged key is the one the SOAK wrote, so its source commit is the soak's
+# and not this release's. A docs-only release is the ordinary case where the two
+# differ, and that difference is the whole point: the key is identical because
+# the images are, and only the result line records who ran it. This is where the
+# soak's commit enters the verification, and every soak transcript's seal is
+# checked against it below.
+soak_evidence_commit=$(printf '%s\n' "${soak_key_results[0]}" | tr ' ' '\n' \
+	| sed -n 's/^source_commit=//p')
+[[ "$soak_evidence_commit" =~ ^[0-9a-f]{40}$ ]] \
+	|| die "SOAK_KEY declares no usable source commit for the soak this release consumed"
+soak_key_result="SOAK_KEY_RESULT format=2 status=pass combinations=$soak_key_combinations drivers=$soak_key_drivers harnesses=$soak_key_harnesses duration_ms=${q[soak_duration_ms]} inputs_sha256=${q[soak_inputs_sha256]} source_commit=$soak_evidence_commit"
 [ "${soak_key_results[0]}" = "$soak_key_result" ] \
 	|| die "SOAK_KEY has no exact source-bound complete result"
 
@@ -597,19 +560,22 @@ expected_terminal_record() {
 	local role=$1 path=$2 name=$3 pattern matches total_lines payload_lines digest
 	local sealing_commit
 	case "$role" in
-		build|final-image-build|initial-image-build|target-test|soak)
+		build|final-image-build|initial-image-build|target-test|soak|soak-build)
 			[ -z "$(tail -c 1 "$path")" ] || return 1
 			total_lines=$(wc -l < "$path") || return 1
 			[ "$total_lines" -ge 2 ] || return 1
 			payload_lines=$((total_lines - 1))
 			digest=$(head -n "$payload_lines" "$path" | sha256sum) || return 1
 			digest=${digest%% *}
-			# A seal names the commit whose run produced the transcript. For an
-			# adopted soak log that is the attested release, not this one --
-			# resealing it in this release's name would erase the binding that
-			# makes the reuse checkable at all.
+			# A seal names the commit whose run produced the transcript. For
+			# everything the soak record supplied that is the soak's commit, not
+			# this release's -- resealing it in this release's name would erase
+			# the binding that makes the record checkable at all. The role says
+			# which, so neither is inferred from a file name.
 			sealing_commit=${q[source_commit]}
-			[ "$role" != soak ] || sealing_commit=$soak_evidence_commit
+			case "$role" in
+				soak|soak-build) sealing_commit=$soak_evidence_commit ;;
+			esac
 			printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
 				"$role" "$name" "$payload_lines" "$digest" "$sealing_commit"
 			return 0 ;;
@@ -649,7 +615,7 @@ while IFS=$'\t' read -r index_name index_role index_size index_record; do
 	# same-line-count payload substitution leaves member and index agreeing with
 	# each other about the OLD digest; independent rehashing must be what fails.
 	case "$index_role" in
-		build|final-image-build|initial-image-build|target-test|soak)
+		build|final-image-build|initial-image-build|target-test|soak|soak-build)
 			mapfile -t member_results < <(grep '^EVIDENCE_RESULT ' "$member" || true)
 			[ "${#member_results[@]}" -eq 1 ] \
 				|| die "$index_name carries ${#member_results[@]} EVIDENCE_RESULT records, expected 1"
@@ -660,7 +626,7 @@ while IFS=$'\t' read -r index_name index_role index_size index_record; do
 	expected_record=$(expected_terminal_record "$index_role" "$member" "$index_name") \
 		|| die "no single terminal record for $index_name (role $index_role)"
 	case "$index_role" in
-		build|final-image-build|initial-image-build|target-test|soak)
+		build|final-image-build|initial-image-build|target-test|soak|soak-build)
 			[ "${member_results[0]}" = "$expected_record" ] \
 				|| die "$index_name payload digest or result metadata does not match its transcript"
 			;;
@@ -680,16 +646,12 @@ grep -Fxq -- "- **Evidence index:** \`evidence/INDEX\` (SHA-256 \`${q[evidence_i
 	|| die "MANIFEST.md evidence index digest does not match QUALIFICATION"
 grep -Fxq -- "- **Soak input key:** \`SOAK_KEY\` (SHA-256 \`${q[soak_inputs_sha256]}\`), $soak_key_combinations combinations over $soak_key_drivers driver sources and $soak_key_harnesses harnesses" "$manifest" \
 	|| die "MANIFEST.md does not publish the soak input key QUALIFICATION records"
-# A reader must be able to see, in the human-readable document, that a release
-# did not execute its own soak. Recording it only in QUALIFICATION would make
-# the fact machine-discoverable and humanly invisible.
-if [ "${q[soak_source]}" = this-run ]; then
-	grep -Fxq -- "- **Soak provenance:** run for this release" "$manifest" \
-		|| die "MANIFEST.md does not state that this release ran its own soak"
-else
-	grep -Fxq -- "- **Soak provenance:** reused from \`${q[soak_source]}\`, whose signed record covers the identical soak inputs above" "$manifest" \
-		|| die "MANIFEST.md does not disclose that this release reused the soak recorded by ${q[soak_source]}"
-fi
+# A reader must be able to see, in the human-readable document, that the soak
+# was run somewhere other than this release, and where. Recording it only on the
+# SOAK_KEY result line would make the fact machine-discoverable and humanly
+# invisible.
+grep -Fxq -- "- **Soak provenance:** the recorded soak of these exact inputs, run at commit \`${soak_evidence_commit:0:12}\`" "$manifest" \
+	|| die "MANIFEST.md does not disclose the commit whose run produced the soak this release consumed"
 
 # --- the measured resource figures, and the manifest rows they produced -------
 # Until now the release published a flash column the producer derived for itself,
@@ -1250,16 +1212,6 @@ case "${q[release_mode]}" in
 		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$readme"; then
 			die "production README.md contains the dry-run banner"
 		fi
-		if grep -Fq "$EXPRESS_BANNER" "$readme"; then
-			die "production README.md contains the express banner"
-		fi
-		;;
-	express)
-		if grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$readme"; then
-			die "express README.md contains the dry-run banner"
-		fi
-		grep -Fq "$EXPRESS_BANNER" "$readme" \
-			|| die "express README.md is missing its shortened-soak banner"
 		;;
 	*)
 		grep -Fq 'DRY RUN -- NOT A VALIDATED RELEASE' "$readme" \

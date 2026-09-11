@@ -2944,77 +2944,6 @@ checks=$((checks + 1))
 	|| fail "make-release.sh calls the topology scanner; a restated number can stop a release"
 checks=$((checks + 1))
 
-# --- soak reuse --------------------------------------------------------------
-# release_reuse_soak_attestation turns "another release declares my key" into
-# evidence, or refuses. Its accepting path cannot be exercised here: it requires
-# a release directory carrying a SOAK_KEY under a valid detached signature, and
-# this suite has no signing key. The first real exercise is the first release
-# cut after one that recorded a key. What IS testable is that it refuses
-# everything short of that, against the real signed releases this tree retains.
-declare -F release_reuse_soak_attestation >/dev/null \
-	|| fail "the soak-reuse function is missing"
-checks=$((checks + 1))
-
-reuse_scratch="$work/soak-reuse"
-mkdir -p "$reuse_scratch"
-reuse_rc=0
-release_reuse_soak_attestation >"$output" 2>&1 || reuse_rc=$?
-[ "$reuse_rc" -eq 2 ] \
-	|| fail "soak reuse accepted a call with no arguments"
-checks=$((checks + 1))
-
-if release_reuse_soak_attestation "$work/no-such-release" deadbeef 1 \
-		"$reuse_scratch" attiny85_cd4053_simple >"$output" 2>&1; then
-	fail "soak reuse accepted a release directory that does not exist"
-fi
-grep -Fq 'is missing, empty, or not a regular file' "$output" \
-	|| fail "an absent release was refused without its diagnostic: $(<"$output")"
-checks=$((checks + 1))
-
-# Every release published before the key existed is a release with nothing to
-# reuse, and must be refused as such rather than treated as an empty match.
-reuse_legacy=$(ls -d "$ROOT"/release/v*/ | tail -1)
-reuse_legacy=${reuse_legacy%/}
-if [ ! -f "$reuse_legacy/SOAK_KEY" ]; then
-	if release_reuse_soak_attestation "$reuse_legacy" \
-			0000000000000000000000000000000000000000000000000000000000000000 \
-			1 "$reuse_scratch" attiny85_cd4053_simple >"$output" 2>&1; then
-		fail "soak reuse accepted a release that carries no soak key"
-	fi
-	grep -Fq 'SOAK_KEY is missing, empty, or not a regular file' "$output" \
-		|| fail "a release with no soak key was refused without its diagnostic: $(<"$output")"
-	checks=$((checks + 1))
-fi
-
-# The soak role is sealed like every other retained transcript, so an adopted
-# log is bound by its payload digest rather than by its byte size. Before that,
-# a substituted body of identical length carrying an identical SOAK_RESULT
-# satisfied every check reuse made.
-grep -Fq 'carries no payload seal' "$ROOT/scripts/release-provenance.sh" \
-	|| fail "soak reuse does not require an adopted log to carry a payload seal"
-grep -Fq 'does not hash to the payload digest its seal states' \
-	"$ROOT/scripts/release-provenance.sh" \
-	|| fail "soak reuse does not rehash an adopted log against its seal"
-checks=$((checks + 1))
-
-# Sealing is the run's own act, so a reused soak must NOT be resealed: the seal
-# the attested release wrote is the binding this release stands on.
-grep -Fq 'adopted soak transcripts keep the seals' "$RELEASE" \
-	|| fail "make-release.sh reseals adopted soak transcripts"
-checks=$((checks + 1))
-
-# Nothing may be adopted by a refused reuse.
-[ -z "$(ls -A "$reuse_scratch")" ] \
-	|| fail "a refused soak reuse left adopted logs behind: $(ls -A "$reuse_scratch")"
-checks=$((checks + 1))
-
-# The release path must offer the flag, and must never reuse silently.
-grep -Fq -- '--reuse-soak)' "$RELEASE" \
-	|| fail "make-release.sh does not accept --reuse-soak"
-grep -Fq 'SOAK_SOURCE=this-run' "$RELEASE" \
-	|| fail "make-release.sh does not default soak provenance to this run"
-checks=$((checks + 1))
-
 # --- the soak record ---------------------------------------------------------
 # What a release requires instead of running a soak of its own: one record, at a
 # fixed path, keyed on the images it covers. These exercise the three functions
@@ -3062,13 +2991,35 @@ declare -A RELEASE_EVIDENCE_ROLE=([soak-build.log]=build)
 for record_name in "${record_names[@]}"; do
 	RELEASE_EVIDENCE_ROLE[soak-$record_name.log]=soak
 done
+# Sealed the way every operation seals its own transcript: the digest covers
+# every payload byte, and the result line that states it is appended after. A
+# fixture carrying a placeholder digest would pass the size and index checks and
+# never reach the rehash that is the point of the seal.
+write_sealed_transcript() {   # usage: write_sealed_transcript <base> <role>
+	local base=$1 role=$2 path="$record_evid/$1" digest payload_lines combination
+	printf 'transcript body for %s\n' "$base" >"$path"
+	if [ "$role" = soak ]; then
+		combination=${base#soak-}; combination=${combination%.log}
+		printf 'SOAK_RESULT format=1 status=pass combination=%s duration_ms=0\n' \
+			"$combination" >>"$path"
+	fi
+	payload_lines=$(wc -l <"$path") || fail "could not count $base payload lines"
+	digest=$(sha256sum -- "$path") || fail "could not hash the $base payload"
+	printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
+		"$role" "$base" "$payload_lines" "${digest%% *}" "$record_commit" >>"$path"
+}
 for record_base in "${record_bases[@]}"; do
-	printf 'transcript body for %s\n' "$record_base" >"$record_evid/$record_base"
-	printf 'EVIDENCE_RESULT format=2 status=pass role=soak evidence=%s lines=1 payload_sha256=%064d source_commit=%s\n' \
-		"$record_base" 0 "$record_commit" >>"$record_evid/$record_base"
+	write_sealed_transcript "$record_base" "${RELEASE_EVIDENCE_ROLE[$record_base]}"
 done
 record_payload="$record_work/payload"
-printf 'SOAK_KEY format=2\nliveness_interval_ms=60000\n' >"$record_payload"
+{
+	printf 'SOAK_KEY format=2\nliveness_interval_ms=60000\n'
+	for record_name in "${record_names[@]}"; do
+		printf 'combination\t%s\t%064d\n' "$record_name" 0
+	done
+	printf 'driver\ttest/fixture.c\t%064d\n' 0
+	printf 'harness\tfixture-sim\t0.0.1\n'
+} >"$record_payload"
 record_key=$(sha256sum -- "$record_payload") || fail "could not hash the record fixture payload"
 record_key=${record_key%% *}
 write_record_key() {   # usage: write_record_key <duration ms>
@@ -3176,9 +3127,7 @@ checks=$((checks + 1))
 
 # Overwritten in place, with git history as the archive: a second write replaces
 # the first outright rather than accumulating beside it.
-printf 'transcript body for soak-build.log\n' >"$record_evid/soak-build.log"
-printf 'EVIDENCE_RESULT format=2 status=pass role=build evidence=soak-build.log lines=1 payload_sha256=%064d source_commit=%s\n' \
-	0 "$record_commit" >>"$record_evid/soak-build.log"
+write_sealed_transcript soak-build.log build
 printf 'stale member\n' >"$record_dir/soak-attiny202_cd4053_simple.log"
 write_record_key 3600000
 release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
@@ -3188,6 +3137,170 @@ release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
 	|| fail "overwriting the soak record left a member of the previous one behind"
 [ "$(release_soak_record_read "$record_dir" | cut -f2)" = 3600000 ] \
 	|| fail "overwriting the soak record did not replace its attested duration"
+# --- what a release requires, and what it says when it is not there ----------
+# One record, one comparison, a refusal naming which of three things is wrong.
+# There is no search, no arbitration between candidates and no fallback, which
+# is the whole difference from the reuse this replaced.
+write_record_key 86400000
+release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
+	"$record_commit" >"$output" 2>&1 \
+	|| fail "could not rebuild the record fixture: $(<"$output")"
+require_record() {   # usage: require_record <record dir> <key> <duration> <payload>
+	( release_soak_record_require "$@" )
+}
+
+require_record "$record_dir" "$record_key" 86400000 "$record_payload" >"$output" 2>&1 \
+	|| fail "a release refused the record written for its exact inputs: $(<"$output")"
+require_record "$record_dir" "$record_key" 3600000 "$record_payload" >"$output" 2>&1 \
+	|| fail "a release refused a soak longer than it required: $(<"$output")"
+checks=$((checks + 1))
+
+# Absent: nothing has been soaked, and the sentence has to say so plainly
+# enough that the next action is obvious.
+if require_record "$work/no-such-record" "$record_key" 1 "$record_payload" \
+		>"$output" 2>&1; then
+	fail "a release accepted an absent soak record"
+fi
+grep -Fq 'no soak record' "$output" \
+	|| fail "an absent record was refused without its diagnostic: $(<"$output")"
+grep -Fq 'make soak' "$output" \
+	|| fail "an absent record was refused without naming the goal that fixes it: $(<"$output")"
+checks=$((checks + 1))
+
+# Too short: the images are right and the soak is not long enough. Both numbers
+# have to appear, because the operator's next decision depends on the gap.
+write_record_key 3600000
+release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
+	"$record_commit" >/dev/null 2>&1 || fail "could not rewrite the short record fixture"
+if require_record "$record_dir" "$record_key" 86400000 "$record_payload" \
+		>"$output" 2>&1; then
+	fail "a release accepted a soak shorter than it requires"
+fi
+grep -Fq '3600000ms per combination, and this release requires 86400000ms' "$output" \
+	|| fail "a short soak was refused without both durations: $(<"$output")"
+checks=$((checks + 1))
+
+# A different key: the refusal names the combinations that moved, not two
+# digests that differ. A stray rebuild touching one image should say which.
+write_record_key 86400000
+release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
+	"$record_commit" >/dev/null 2>&1 || fail "could not restore the record fixture"
+record_moved="$record_work/payload-one-image-moved"
+sed "s#^combination\t${record_names[0]}\t.*#combination\t${record_names[0]}\t$(printf '%064d' 1)#" \
+	"$record_payload" >"$record_moved"
+record_moved_key=$(sha256sum -- "$record_moved") || fail "could not hash the moved payload"
+record_moved_key=${record_moved_key%% *}
+if require_record "$record_dir" "$record_moved_key" 86400000 "$record_moved" \
+		>"$output" 2>&1; then
+	fail "a release accepted a record that does not cover its images"
+fi
+grep -Fq "changed   ${record_names[0]}" "$output" \
+	|| fail "a moved image was refused without being named: $(<"$output")"
+! grep -Fq "${record_names[1]}" "$output" \
+	|| fail "an unchanged combination was reported as changed: $(<"$output")"
+checks=$((checks + 1))
+
+# Every image matches and the key still differs: what moved is a driver source,
+# a harness version or the liveness interval, and saying "these images changed"
+# there would be a lie.
+record_harness="$record_work/payload-harness-moved"
+sed 's#^harness\tfixture-sim\t.*#harness\tfixture-sim\t0.0.2#' \
+	"$record_payload" >"$record_harness"
+record_harness_key=$(sha256sum -- "$record_harness") || fail "could not hash the harness payload"
+record_harness_key=${record_harness_key%% *}
+if require_record "$record_dir" "$record_harness_key" 86400000 "$record_harness" \
+		>"$output" 2>&1; then
+	fail "a release accepted a record whose harness identity changed"
+fi
+grep -Fq 'a soak driver source, a harness version, or the liveness interval' "$output" \
+	|| fail "a changed harness was refused as if an image had moved: $(<"$output")"
+checks=$((checks + 1))
+
+# The record's two halves must agree with each other: a result line declaring a
+# key its own payload does not hash to is not evidence of anything.
+record_incoherent="$record_work/incoherent"
+rm -rf "$record_incoherent"; cp -R "$record_dir" "$record_incoherent"
+sed 's#^liveness_interval_ms=.*#liveness_interval_ms=30000#' \
+	"$record_dir/$RELEASE_SOAK_RECORD_KEY" >"$record_incoherent/$RELEASE_SOAK_RECORD_KEY"
+if require_record "$record_incoherent" "$record_key" 86400000 "$record_payload" \
+		>"$output" 2>&1; then
+	fail "a release accepted a record whose payload does not hash to its declared key"
+fi
+grep -Fq 'does not hash to the key its own result line declares' "$output" \
+	|| fail "an incoherent record was refused without its diagnostic: $(<"$output")"
+checks=$((checks + 1))
+
+# --- adopting the recorded transcripts ---------------------------------------
+# The record carries no signature, so nothing here appeals to one. What adoption
+# establishes is that the index and the transcripts describe each other.
+adopt_evid="$record_work/adopted"
+adopt_names="${record_names[*]}"
+adopt_record() { ( release_soak_record_adopt "$@" ); }
+
+rm -rf "$adopt_evid"; mkdir -p "$adopt_evid"
+adopt_record "$record_dir" "$adopt_evid" "$adopt_names" >"$output" 2>&1 \
+	|| fail "adoption refused the record just written: $(<"$output")"
+for record_base in "${record_bases[@]}"; do
+	cmp -s "$record_dir/$record_base" "$adopt_evid/$record_base" \
+		|| fail "adoption did not reproduce $record_base byte for byte"
+done
+checks=$((checks + 1))
+
+# A body substituted at identical length, carrying an identical terminal record,
+# satisfies every check except the one that rehashes it. That is the check.
+record_tampered="$record_work/tampered"
+rm -rf "$record_tampered"; cp -R "$record_dir" "$record_tampered"
+record_victim="soak-${record_names[0]}.log"
+{
+	head -n -1 -- "$record_dir/$record_victim" | sed 's/transcript body/TRANSCRIPT BODY/'
+	tail -n 1 -- "$record_dir/$record_victim"
+} >"$record_tampered/$record_victim"
+[ "$(stat -c%s -- "$record_tampered/$record_victim")" \
+	= "$(stat -c%s -- "$record_dir/$record_victim")" ] \
+	|| fail "the tampering fixture changed the transcript length; it proves nothing"
+rm -rf "$adopt_evid"; mkdir -p "$adopt_evid"
+if adopt_record "$record_tampered" "$adopt_evid" "$adopt_names" >"$output" 2>&1; then
+	fail "adoption accepted a transcript body that does not match its own seal"
+fi
+grep -Fq 'does not hash to the payload digest its seal states' "$output" \
+	|| fail "a tampered transcript was refused without its diagnostic: $(<"$output")"
+checks=$((checks + 1))
+
+# Every other way the record can fail to describe itself.
+record_damaged="$record_work/damaged"
+rm -rf "$record_damaged"; cp -R "$record_dir" "$record_damaged"
+rm -f "$record_damaged/$record_victim"
+rm -rf "$adopt_evid"; mkdir -p "$adopt_evid"
+if adopt_record "$record_damaged" "$adopt_evid" "$adopt_names" >"$output" 2>&1; then
+	fail "adoption accepted a record missing one of its transcripts"
+fi
+grep -Fq "the soak record retains no $record_victim" "$output" \
+	|| fail "a missing transcript was refused without its diagnostic: $(<"$output")"
+
+rm -rf "$record_damaged"; cp -R "$record_dir" "$record_damaged"
+grep -v $'\t' "$record_dir/$RELEASE_SOAK_RECORD_INDEX" \
+	>"$record_damaged/$RELEASE_SOAK_RECORD_INDEX"
+rm -rf "$adopt_evid"; mkdir -p "$adopt_evid"
+if adopt_record "$record_damaged" "$adopt_evid" "$adopt_names" >"$output" 2>&1; then
+	fail "adoption accepted a record whose index lists nothing"
+fi
+grep -Fq 'the soak record indexes 0 files' "$output" \
+	|| fail "an empty index was refused without its diagnostic: $(<"$output")"
+
+rm -rf "$record_damaged"; cp -R "$record_dir" "$record_damaged"
+printf 'appended after the seal\n' >>"$record_damaged/$record_victim"
+rm -rf "$adopt_evid"; mkdir -p "$adopt_evid"
+if adopt_record "$record_damaged" "$adopt_evid" "$adopt_names" >"$output" 2>&1; then
+	fail "adoption accepted a transcript extended after its seal"
+fi
+grep -Eq 'is [0-9]+ bytes, not the [0-9]+ its index records' "$output" \
+	|| fail "an extended transcript was refused without its diagnostic: $(<"$output")"
+
+# Nothing may be adopted by a refused adoption.
+[ -z "$(ls -A "$adopt_evid")" ] \
+	|| fail "a refused adoption left transcripts behind: $(ls -A "$adopt_evid")"
+checks=$((checks + 1))
+
 unset RELEASE_EVIDENCE_ROLE SOAK_NAMES
 unset -f die log ok
 checks=$((checks + 1))
@@ -3210,7 +3323,7 @@ run_soak_args() {
 		"$RELEASE" "$@"
 	)
 }
-for soak_conflict in --preflight --dry-run --express --reuse-soak; do
+for soak_conflict in --preflight --dry-run; do
 	if run_soak_args --soak "$soak_conflict" >"$output" 2>&1; then
 		fail "the soak accepted the contradictory mode $soak_conflict"
 	fi
@@ -3222,6 +3335,31 @@ if run_soak_args --soak v1.2.3 >"$output" 2>&1; then
 fi
 grep -Fq 'a soak record attests images, not a release' "$output" \
 	|| fail "a versioned soak was refused without its diagnostic: $(<"$output")"
+# Both retired flags must be gone from the parser, not merely unused. A release
+# that silently ignored --express would read as having honoured it.
+for soak_retired in --express --reuse-soak; do
+	if run_soak_args "$soak_retired" v1.2.3 >"$output" 2>&1; then
+		fail "the release still accepts the retired $soak_retired"
+	fi
+	grep -Fq "unknown option: $soak_retired" "$output" \
+		|| fail "$soak_retired was refused for the wrong reason: $(<"$output")"
+	! grep -rIqF -- "$soak_retired" "$RELEASE" "$SOAK_LIB" \
+		"$ROOT/scripts/release-provenance.sh" \
+		"$ROOT/scripts/verify-release-qualification.sh" \
+		|| fail "$soak_retired still appears in the release scripts"
+done
+checks=$((checks + 1))
+
+# A release compiles no soak harness. The sweep is shared, so the flag that
+# removes the execution half is what keeps a release from paying for eighteen
+# builds it will never run -- and passing the mode is what makes the soak the
+# only caller that does.
+grep -Fq 'release_soak_assemble "$SOAK_DURATION_MS" "$SOAK_LIVENESS_INTERVAL_MS" \' "$RELEASE" \
+	|| fail "the release does not call the shared soak sweep"
+grep -Fq '"$SOAKDIR" "$EVID" "$qualified_pic12f675_matrix_record" "$SOAK_ONLY"' "$RELEASE" \
+	|| fail "the release does not hand the sweep its mode, so it compiles drivers it cannot run"
+grep -Fq '[ "$drivers" -eq 0 ] || seal_evidence_result "$buildlog"' "$SOAK_LIB" \
+	|| fail "the sweep seals a build transcript it did not write"
 checks=$((checks + 1))
 
 # The record is written before the shipped images are regenerated and before any
@@ -4171,25 +4309,6 @@ if run_preflight --dry-run >"$output" 2>&1; then
 fi
 grep -Fq -- '--preflight and --dry-run are mutually exclusive' "$output" \
 	|| fail "preflight/dry-run conflict failed for the wrong reason"
-checks=$((checks + 1))
-
-# --express names what a release IS; --preflight and --dry-run both say it is
-# not a release at all. Either combination would leave the recorded mode
-# ambiguous, so both are refused before anything is built.
-if run_preflight --express >"$output" 2>&1; then
-	fail "preflight accepted the contradictory --express mode"
-fi
-grep -Fq -- '--preflight and --express are mutually exclusive' "$output" \
-	|| fail "preflight/express conflict failed for the wrong reason"
-checks=$((checks + 1))
-
-# The mode-defining pair is refused first, so this reports the express/dry-run
-# contradiction rather than the --preflight this helper always passes.
-if run_preflight --express --dry-run >"$output" 2>&1; then
-	fail "preflight accepted both --express and --dry-run"
-fi
-grep -Fq -- '--express and --dry-run are mutually exclusive' "$output" \
-	|| fail "express/dry-run conflict failed for the wrong reason"
 checks=$((checks + 1))
 
 # Pin both consumers of an absolute venv. Step 0 above dynamically proves the

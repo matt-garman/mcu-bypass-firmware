@@ -119,15 +119,13 @@ validation suite — backs these binaries, through two mechanisms:
    `make pic10f322-test-target-variants`), both PIC10F320 gates (`make pic10f320-test` and
    `make pic10f320-test-target-variants`), both PIC12F675 gates (`make pic12f675-test` and
    `make pic12f675-test-target-variants`), and a **24-hour soak of every release
-   soak combination**. One release mode, and only one, shortens that last item:
-   an **express** release (`RELEASE_ARGS='--express'`) runs every gate above in
-   full and soaks each combination for **1 hour** instead of 24. It is
-   publishable, and it says so where a reader looks — `release_mode=express`
-   and the true `soak_duration_ms` in `QUALIFICATION`, a shortened-soak banner
-   in `MANIFEST.md`, and both under the same checksum signature. The
-   qualification verifier enforces a 1-hour floor for `express` exactly as it
-   enforces 24 hours for `production`, and rejects an `express` record whose
-   manifest omits the banner. Releases `v0.9.0` through `v0.9.5` predate
+   soak combination**. That last item is a prerequisite rather than a phase: the
+   soak is run on its own by `make soak`, which records what it proves under
+   `soak/` in the source tree, and a release requires that record to cover the
+   exact images it has just built. It refuses otherwise, naming which
+   combinations changed. The record is committed, so git history carries every
+   earlier one, and each release copies the record it consumed into its own
+   bundle. Releases `v0.9.0` through `v0.9.5` predate
    `QUALIFICATION` entirely and carry the manifest/evidence contract of their own
    tags instead. Because the gates are long-running, release orchestration
    rechecks both the recorded source `HEAD` and worktree cleanliness immediately
@@ -266,8 +264,8 @@ programming helpers, **and** the release's own provenance: `QUALIFICATION`,
 `MANIFEST.md`, `README.md` and `SOAK_KEY`. <!-- name-contract: exempt -->
 So one `gpg --verify` followed by one
 `sha256sum -c` authenticates both the firmware and the account of where it came
-from — the source commit, whether qualification was production or express, the
-soak duration, and the part-specific programming warnings.
+from — the source commit, the commit whose run produced the soak this release
+consumed, the soak duration, and the part-specific programming warnings.
 
 <!-- name-contract: exempt-begin (SOAK_KEY is a staged release FILENAME,
      like QUALIFICATION and SHA256SUMS, not a Make variable; the underscore is
@@ -306,8 +304,8 @@ separation between the first and the third is enforced rather than conventional.
    `scripts/release-documentation.sh`'s `current_documents` -- and step 0
    validates it and rejects a bounded block written into any other document.
 2. **Production staging.** `scripts/make-release.sh vX.Y.Z` builds every image,
-   runs every gate, soaks every combination for 24 hours (1 hour under
-   `--express`, recorded as such), and stages
+   runs every gate, requires the committed soak record to cover those exact
+   images, and stages
    `release/vX.Y.Z/`. It refuses to start unless step 1 is already committed,
    and it stages without committing anything. Before handing off it re-checks
    the bounded declaration against the inventory it actually staged, so "21
@@ -658,9 +656,9 @@ make pic10f322 && make pic10f320-variants && make pic12f675
 scripts/verify-release-images.sh release/vX.Y.Z $(make -s print-RELEASE_IMAGE_DIRS)
 ```
 
-The qualification verifier checks the retained local validation and the
-mode-required soak evidence: at least 24 hours for production or at least one
-hour for express. The image verifier resolves symlink aliases to physical
+The qualification verifier checks the retained local validation and the soak
+evidence a release requires: at least 24 hours per combination. The image
+verifier resolves symlink aliases to physical
 directory paths and rejects both committed-as-fresh reuse and duplicate fresh
 directories. It copies
 `SHA256SUMS`, the committed images, and all fresh images into private storage
