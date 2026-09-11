@@ -105,7 +105,7 @@ Every item above runs on a host or in a simulator.
 A remaining validation step is a *controlled hardware
 qualification*, i.e. a physical test bench run against a written
 procedure that captures source/image identity, configuration bytes,
-instrument readings and acceptance result(s).  However, the
+instrument readings and acceptance result(s).  Note that the
 firmwares are being deployed in the field, see
 [HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md).
 <!-- qualification-status:end -->
