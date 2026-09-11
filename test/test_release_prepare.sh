@@ -35,6 +35,20 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PREPARE=$ROOT/scripts/release-prepare.sh
 checks=0
 
+# THE ENVIRONMENT THIS RUNS IN. The preparer takes its version from a positional
+# argument or, when none is given, from VERSION in the environment -- that is how
+# `make release-prepare VERSION=vX.Y.Z` reaches it, because the Makefile keeps
+# release arguments out of recipe shell syntax. That export is global and
+# unconditional, so every recipe under `make release VERSION=vX.Y.Z` inherits a
+# populated VERSION, including the one that runs this gate. Left in place it
+# turns the no-version refusal below into a run of the VERSIONED path, which
+# succeeds: the gate then reports a pass for a refusal that never happened, and
+# it does so only during a release, which is the one time nobody is running it by
+# hand. Clear the name once here so every case measures the argument vector it
+# actually passes. Section 6 sets it deliberately for the cases that measure the
+# channel itself. test/test_release_preflight.sh clears it for the same reason.
+unset VERSION
+
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { checks=$((checks + 1)); }
 
@@ -114,9 +128,17 @@ write_fixture() {
 	git -C "$repo" config user.name Fixture
 }
 
+# Unset means "no VERSION in the environment", which is what every case wants
+# except the ones in section 6; set-but-empty is a distinct state there, so the
+# two are distinguished by existence rather than by emptiness.
+unset environment_version
+
 prepare() {
-	( cd "$repo" && ./scripts/release-prepare.sh --images 21 --soaks 18 "$@" ) \
-		>"$output" 2>&1
+	(
+		cd "$repo" || exit 1
+		[ -z "${environment_version+set}" ] || export VERSION="$environment_version"
+		./scripts/release-prepare.sh --images 21 --soaks 18 "$@"
+	) >"$output" 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -335,7 +357,70 @@ assert_refused 'a release/README.md with no bounded block' \
 	'bounded current-release block' v0.9.12
 
 # ---------------------------------------------------------------------------
-# 6. An already-cut version is refused, in both directions.
+# 6. The VERSION environment channel.
+#
+# The channel is a supported entry point: `make release-prepare VERSION=vX.Y.Z`
+# hands the version over in the environment, never as recipe shell syntax, so an
+# untested channel here is an untested half of the documented interface.
+#
+# It is measured for a second reason. The name is exported globally, so every
+# gate run under `make release VERSION=vX.Y.Z` inherits a populated VERSION, and
+# a channel nothing measures is one nothing notices supplying an argument the
+# caller did not pass. That is exactly what happened to the no-version refusal
+# above on the first release that ran this file. The scrub at the top closed it;
+# these cases keep the channel itself from drifting away unmeasured.
+# ---------------------------------------------------------------------------
+write_fixture
+prepare v0.9.12 --date 2026-09-03 \
+	|| fail "the preparer rejected the positional reference run: $(<"$output")"
+cp "$repo/CHANGELOG.md" "$work/positional-CHANGELOG.md"
+cp "$repo/release/README.md" "$work/positional-release-README.md"
+
+# An environment version with no positional argument is an ALIAS for the
+# positional form -- byte for byte, not a second rendering path that happens to
+# agree today.
+write_fixture
+environment_version=v0.9.12
+prepare --date 2026-09-03 \
+	|| fail "the preparer refused a version given through the environment: $(<"$output")"
+cmp -s "$work/positional-CHANGELOG.md" "$repo/CHANGELOG.md" \
+	|| fail "the environment channel wrote a different CHANGELOG.md: $(diff -u "$work/positional-CHANGELOG.md" "$repo/CHANGELOG.md" | head -20)"
+pass
+cmp -s "$work/positional-release-README.md" "$repo/release/README.md" \
+	|| fail "the environment channel wrote a different release/README.md: $(diff -u "$work/positional-release-README.md" "$repo/release/README.md" | head -20)"
+pass
+
+# A positional argument outranks the environment. Both are well-formed here, so
+# nothing but the result says which one the preparer used.
+write_fixture
+environment_version=v9.9.9
+prepare v0.9.12 --date 2026-09-03 \
+	|| fail "the preparer failed with both channels supplied: $(<"$output")"
+cmp -s "$work/positional-CHANGELOG.md" "$repo/CHANGELOG.md" \
+	|| fail "the environment version overrode the positional argument"
+pass
+grep -Fq -- 9.9.9 "$repo/CHANGELOG.md" "$repo/release/README.md" \
+	&& fail "the environment version reached a prepared document"
+pass
+
+# An exported-but-EMPTY VERSION is what a plain `make test-long` hands this gate:
+# the Makefile exports the name whether or not a release goal set it, so the
+# empty value is the ordinary case rather than an edge one. It carries no version
+# and must be refused as though the name were absent.
+write_fixture
+environment_version=
+assert_refused 'an empty VERSION in the environment' 'no <version> given'
+
+# A malformed environment version is held to the positional form's spelling. The
+# channel may not become the loose one.
+environment_version=0.9.12
+assert_refused 'a malformed VERSION in the environment' 'is not vX.Y.Z'
+
+# Back to an environment with no VERSION for the sections below.
+unset environment_version
+
+# ---------------------------------------------------------------------------
+# 7. An already-cut version is refused, in both directions.
 #
 # This is the preparer's one destructive move: preparing a released version
 # rewrites the live declaration BACKWARDS onto it, and every line it writes is
@@ -355,7 +440,7 @@ git -C "$repo" tag v0.9.12 >/dev/null 2>&1
 assert_refused 'a version that is already tagged' 'is already tagged' v0.9.12
 
 # ---------------------------------------------------------------------------
-# 7. The output satisfies the validator that motivated the preparer.
+# 8. The output satisfies the validator that motivated the preparer.
 #
 # Read directly rather than inferred from a successful run: the preparer calls
 # this itself, so a broken call site could otherwise pass by never running.
