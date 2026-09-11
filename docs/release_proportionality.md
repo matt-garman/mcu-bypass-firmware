@@ -5,8 +5,8 @@
 A measurement of what the release path cost between `v0.9.9` and `v0.9.13`,
 and what recovers the confidence-per-hour that `v0.9.9` had without giving up
 any assurance about the firmware. Part 1 is a finding rather than a change --
-the continuous validation it proposed already existed. Parts 2, 3 and 4 have
-landed; Part 5 is proposed. It is a companion to
+the continuous validation it proposed already existed. Parts 2 through 5 have
+all landed. It is a companion to
 [`docs/ci_parity.md`](ci_parity.md): that document closes the gap between what
 runs locally and what runs remotely; this one addresses how much runs at all,
 and when.
@@ -208,42 +208,30 @@ soak is ever started.
 <!-- name-contract: exempt-begin (SOAK_KEY is a staged release FILENAME,
      like QUALIFICATION and SHA256SUMS, not a Make variable; the underscore is
      what makes it look like one) -->
-**Both increments have landed.** `SOAK_KEY` is written and signed before the
-soak, `QUALIFICATION` carries `soak_inputs_sha256` and `soak_source` at
-`format=9`, and `--reuse-soak` adopts a published release's soak when the keys
-match. The attestation is the published release itself rather than a separate
-signed store -- `SHA256SUMS` already covers `SOAK_KEY` and the release signature
-already signs it, so reuse needs no second trust root and no extra signing step.
-The limitation that buys: only a soak that reached a staged release is reusable,
-which is the failure the staging rehearsal in Part 2 exists to prevent. Part 5
-closes it by making the soak a prerequisite rather than a phase.
+**Both increments have landed, and Part 5 has since replaced the reuse half.**
+`SOAK_KEY` is written and signed before the soak, and `QUALIFICATION` carries
+`soak_inputs_sha256`. Reuse first arrived as `--reuse-soak`, which adopted a
+published release's soak when the keys matched. The attestation was the
+published release itself rather than a separate signed store -- `SHA256SUMS`
+already covers `SOAK_KEY` and the release signature already signs it, so reuse
+needed no second trust root and no extra signing step. The limitation that
+bought: only a soak that reached a staged release was reusable, which is the
+failure the staging rehearsal in Part 2 exists to prevent. Part 5 closed it by
+making the soak a prerequisite rather than a phase, and retired the flag.
 
-Reuse skips the execution, never the check: every adopted log is re-validated by
-the same `validate_soak_result` the live path uses, at the attested duration,
-and rehashed against the payload digest its own seal states. Soak transcripts
-are now sealed like every other retained log, which closes the last weak link --
-before it, a log was bound by its evidence-index row, terminal record and byte
-size, so a substituted body of identical length carrying an identical verdict
-would have passed. Adopted transcripts keep the seal the attested release wrote,
-because a seal names the run that produced it.
-<!-- name-contract: exempt-end -->
+Soak transcripts are sealed like every other retained log, which closed the last
+weak link -- before it, a log was bound by its evidence-index row, terminal
+record and byte size, so a substituted body of identical length carrying an
+identical verdict would have passed.
 
 The soak is the only part of the release whose cost is measured in days, and
 the record above shows it has been re-run on unchanged inputs three times in a
-row. A soak result should be a durable, signed statement about a set of inputs
-rather than a fact about one release run.
+row. A soak result should be a durable statement about a set of inputs rather
+than a fact about one release run.
 
-### The attestation
+### The input key
 
-    SOAK_ATTESTATION format=1
-    inputs_sha256=<key>
-    soak_duration_ms=86400000
-    soak_liveness_interval_ms=60000
-    combination_count=18
-    completed_utc=<ISO-8601>
-    source_commit=<informational only>
-
-`inputs_sha256` is taken over a canonical manifest of everything that can
+`soak_inputs_sha256` is taken over a canonical payload of everything that can
 change what the soak observes:
 
 1. the combination names;
@@ -252,32 +240,38 @@ change what the soak observes:
 3. the soak driver sources, including the shared model headers they compile;
 4. simulator and harness identity -- simavr, yasimavr, libgpsim, and the host
    compiler that built the soak binaries;
-5. `soak_duration_ms` and `soak_liveness_interval_ms`.
+5. the liveness interval.
 
 Deliberately absent: the Git commit, `CHANGELOG.md`, `README.md`, anything
 under `docs/`, the version string, and every documentation gate. A release that
 changes only those produces an identical key.
 
-The record is stored under `release/soak-attestations/<key>` with a detached
-signature from the release signing key, alongside the digests of the retained
-soak logs, so an attestation carries the same provenance guarantee as the
-release artifacts themselves.
+The duration is absent for a different reason. It is a magnitude rather than an
+input, so it sits on the key's result line beside the attested combination count
+and the commit the soak ran at, and a consumer compares it with `>=` rather than
+for equality. Folding it into the payload would have meant a soak run for longer
+than a consumer needs failing to match it.
+
+This part first proposed a `SOAK_ATTESTATION` record with a format and a
+detached signature of its own, kept under `release/soak-attestations/`. Neither
+was built, and Part 5 says why: `SOAK_KEY` is a staged release file, so the
+release signature already reaches it, and the local record Part 5 introduced
+never crosses a trust boundary at all.
+<!-- name-contract: exempt-end -->
 
 ### Reuse
 
-A `--reuse-soak` flag recomputes the key at the end of the build phase, looks
-for a matching attestation, verifies its signature, and requires its attested
-duration to be at least what the requested release mode demands. On a hit the
-soak phase is skipped, the attested logs are folded into evidence, and
-`QUALIFICATION` records `soak_provenance=attested` plus the key. On a miss the
-soak runs and *writes* a new attestation.
+Reuse fails closed, and that is the property the flag's retirement had to keep.
+Any change to an image, a driver source, a simulator or the liveness interval
+changes the key, so a soak result can never be silently over-applied and there
+is no invalidation step to remember.
 
-It fails closed. Any change to an image, a driver, a simulator or a duration
-changes the key, so an attestation can never be silently over-applied; there is
-no invalidation step to remember.
-
-`MANIFEST.md` states reuse in prose. A reader must be able to see that a given
-release did not re-soak, and against which attestation it stands.
+Reuse skips the execution, never the check. Every adopted transcript is
+re-validated by the same `validate_soak_result` the live path uses, at the
+attested duration, and rehashed against the payload digest its own seal states.
+Adopted transcripts keep the seal the soak wrote, because a seal names the run
+that produced it. `MANIFEST.md` states the provenance in prose, so a reader can
+see that a given release did not re-soak, and which run it stands on.
 
 ### The honest limit
 
@@ -319,15 +313,15 @@ structural check that the release script never names the new function. A future
 edit restoring that call for symmetry fails in `make test` rather than being
 discovered by an operator who set a day aside.
 
-## Part 5 - the soak is a prerequisite, not a phase (proposed)
+## Part 5 - the soak is a prerequisite, not a phase (done)
 
 Part 3 stopped one step short and named the step: only a soak that reached a
-staged release is reusable. The attestation is the published release, so a run
-that fails anywhere after the soak takes the day with it. Part 2 shrinks that
+staged release was reusable. The attestation was the published release, so a run
+that failed anywhere after the soak took the day with it. Part 2 shrinks that
 window and cannot close it -- a rehearsal reaches the staging class, not every
 refusal a release still carries once its soak is done.
 
-The remaining fix is not another rehearsal. It is to stop running the soak
+The remaining fix was not another rehearsal. It was to stop running the soak
 inside the release at all.
 
 **A soak is evidence about a set of images, not a fact about a release run.**
@@ -342,14 +336,20 @@ One record, at a fixed path in the worktree, overwritten in place and
 committed. Git history is the archive, so an overwritten record is a checkout
 away rather than lost, and the tree carries one live record however many
 releases it has cut. Each release copies the record it consumed into its own
-bundle, exactly as the reuse path already copies adopted logs, so the published
-release format does not change at all.
+bundle, exactly as the reuse path already copied adopted logs, so a published
+release gains no new kind of file.
+
+It lives under `soak/`: the input key as `24HR_SOAK_EVIDENCE`, an evidence
+index, one sealed transcript per combination, and one more for the build that
+produced the images the soak drove. It is written through a staging directory
+and swapped in, so an interrupted run cannot leave a half-record a release would
+then read.
 
 **No new file format.** The record is the three kinds of file the release
-already writes: the soak input key, the evidence index, and the sealed
-transcripts. The key's result line already states the inputs digest, the
-attested duration, the combination count and the commit it ran at, which is the
-whole of what a consumer needs in order to decide whether to accept it.
+already wrote: the soak input key, an evidence index, and sealed transcripts.
+The key's result line already states the inputs digest, the attested duration,
+the combination count and the commit it ran at, which is the whole of what a
+consumer needs in order to decide whether to accept it.
 
 That is where this differs from the store Part 3 first sketched, which gave the
 record a format of its own and a detached signature. Neither is needed. A
@@ -360,12 +360,25 @@ describes. What it needs instead is identity, which comes from the release
 recomputing the key over the images it has just built, and body integrity, which
 the per-transcript seals already carry.
 
+The build transcript is the one genuinely new thing, and it needed a role of its
+own. Every other retained build log is sealed under the commit the *release*
+runs at; this one is sealed under the commit the *soak* ran at, and the two are
+routinely different. One role per sealing authority is what lets the
+qualification verifier check both without deriving either from a file name.
+
 ### Producing it
 
-A standalone goal builds the images, runs the full release combination set, and
-writes the record. It costs a clean build plus the soak rather than the soak
-alone, because the key is taken over image bytes and the images have to exist
-before they can be hashed.
+`make soak` builds the images, runs the full release combination set, and writes
+the record. It costs a clean build plus the soak rather than the soak alone,
+because the key is taken over image bytes and the images have to exist before
+they can be hashed.
+
+It is the release path in a different mode rather than a second script, which is
+what keeps the sweep and the identity resolution single-sourced. The practical
+consequence is better than the saving: `make soak` runs the whole validation
+phase first, so a record is only ever produced from a tree that has already
+passed everything cheap. It refuses a dirty tree, because a record names the
+commit it ran at.
 
 It refuses when the record it would write already attests the images it is about
 to soak. That is the case the record exists to make cheap, and running it anyway
@@ -386,8 +399,26 @@ is wrong.
 | a different key | which combinations changed, by name |
 
 The third is worth building carefully. The key's payload carries a digest per
-combination, so a mismatch can be reported as the images that moved rather than
-as two digests that differ. A stray rebuild touching one image should say which.
+combination, so a mismatch is reported as the images that moved rather than as
+two digests that differ. A stray rebuild touching one image says which. When
+every image matches and the key still differs, the refusal says so and names the
+three remaining candidates: a soak driver source, a harness version, or the
+liveness interval.
+
+What the release then adopts is the record's own key file, not the key it just
+recomputed. The two payloads are byte-identical -- that is what the comparison
+established -- and only the record's result line states the duration and the
+commit the soak actually ran under. Everything downstream, the terminal-record
+checks included, expects the duration that was soaked rather than this mode's
+floor.
+
+`--dry-run` consumes the record on the same terms, at its own reduced duration
+floor. It therefore no longer precedes the first soak of changed images, which
+is the ordering [`docs/ci_parity.md`](ci_parity.md) Part 4 relied on. That
+ordering existed because a failure after the soak cost the day, and it does not
+any more: the record outlives the attempt that failed, so the next one re-uses
+it. A rehearsal after the soak loses nothing a rehearsal before it saved, and
+gains the fidelity of exercising the adoption path a real release takes.
 
 ### What this removes
 
@@ -406,20 +437,21 @@ left to buy. Several published releases were cut under it and say so in their
 own manifests. Those bundles are immutable and this verifier never re-reads
 them, so the mode leaves the producer without a compatibility branch behind it.
 
-The adopted-soak field leaves the qualification record at its next format. It
-exists to tell this run's soak from an inherited one, and afterwards there is
-only one kind.
+The adopted-soak field left the qualification record at `format=10`. It existed
+to tell this run's soak from an inherited one, and afterwards there is only one
+kind.
 
 ### What it costs
 
 The sweep that assembles the combinations is the longest phase of the release
-script, and it must move rather than be copied. The lanes genuinely disagree:
-some drive ELFs, some the shipped HEX, one a derived image that is never
-published. The script already records what a copy of that mapping cost once,
-when a rename updated one spelling and left the other, and the release died an
-hour in asking make for a target that did not exist.
+script, and it moved rather than being copied -- into `scripts/release-soak.sh`,
+which both modes source. The lanes genuinely disagree: some drive ELFs, some the
+shipped HEX, one a derived image that is never published. The script already
+records what a copy of that mapping cost once, when a rename updated one
+spelling and left the other, and the release died an hour in asking make for a
+target that did not exist.
 
-Against that, this adds an entry point and a durable artifact class to register
+Against that, this adds an entry point and a durable artifact class registered
 in the governance authority map and lifecycle table. The net is close to flat,
 and what comes out is modes and searches rather than checks.
 
@@ -432,6 +464,12 @@ regardless of image identity. Making evidence mandatory rather than optional
 makes that question live, because the answer now decides whether a release may
 proceed rather than which flag to pass.
 
+One related choice is deliberately left to the operator. `make soak` warns
+rather than refuses when handed a duration below what a production release
+requires, because a record shorter than a release needs is not a release -- it
+is a record a release will refuse by name, at the top of the run, with both
+durations stated.
+
 ## Sequencing
 
 | # | Increment | Recovers |
@@ -439,20 +477,21 @@ proceed rather than which flag to pass.
 | 1 | current-fact rules split out of the release path (**done**) | a release that cannot be stopped by design prose |
 | 2 | staging rehearsal before the soak (**done**) | the post-soak failure class, at seconds of cost |
 | 3 | soak attestation and reuse (**done**) | the redundant soak; a lost release can re-use its own soak |
-| 4 | the soak leaves the release path (**proposed**) | the day a failed release costs; two modes and a search |
+| 4 | the soak leaves the release path (**done**) | the day a failed release costs; two modes and a search |
 
-The first three have landed. Increment 1 touched one file and removed no
-assurance. Increment 2 was mechanical, and paired with `docs/ci_parity.md`
-Part 4, which carried the same rehearsal past the staging to the artifact commit
-the tag actually names. Increment 3 carried the only real design decision, and
-is the only one that changed what a release attests: a release now records what
-its soak result is valid for.
+Increment 1 touched one file and removed no assurance. Increment 2 was
+mechanical, and paired with `docs/ci_parity.md` Part 4, which carried the same
+rehearsal past the staging to the artifact commit the tag actually names.
+Increment 3 carried the only real design decision, and is the only one that
+changed what a release attests: a release now records what its soak result is
+valid for.
 
-Increment 4 finishes 3 rather than extending it. The record stops being a
-by-product of a release that happened to succeed and becomes the thing a release
-requires, which is what lets the reuse flag and the shortened mode both retire.
-It is the first increment to change how a release is invoked, so it is also the
-first that cannot land silently.
+Increment 4 finished 3 rather than extending it. The record stopped being a
+by-product of a release that happened to succeed and became the thing a release
+requires, which is what let the reuse flag and the shortened mode both retire.
+It is the one increment that changed how a release is invoked, so it could not
+land silently: a release cut from a tree with no record refuses at the end of
+its build phase and says to run `make soak` first.
 
 ## What this does not do
 

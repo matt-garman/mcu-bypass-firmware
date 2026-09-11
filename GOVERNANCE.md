@@ -32,6 +32,7 @@ mean editing two documents, the fact is in the wrong place.
 | Current development status | the `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md) |
 | Release process, trust model, errata, and reproduction | [release/README.md](release/README.md) |
 | Current release contract: version, parts, images, soaks, topology | the one bounded declaration in [release/README.md](release/README.md) |
+| What the current images have been soaked for | the committed soak record under `soak/`, written by `make soak` |
 | Exact per-release source, image, resource, and qualification results | that release's own retained record under [release/](release) |
 | Scoped design decisions and per-part safety records | the topic documents under [docs/](docs) |
 | Historical implementation reasoning | Git history |
@@ -60,6 +61,7 @@ publication as a hosted asset is a distribution fact, not a second lifecycle.
 | Release result record | Source-bound provenance and observed evidence. The tag fixes the original bytes; a current-tree copy may differ only by the registered safety-amendment process in `release/README.md` | `release/<version>/QUALIFICATION`, `release/<version>/MANIFEST.md`, `release/<version>/README.md`, `release/<version>/evidence/*` |
 | Release payload artifact | Firmware and required programming helpers; their signed byte identity is never corrected in place | `release/<version>/*.hex`, `release/<version>/flash-*.py` |
 | Release authentication record | The checksum list and its detached signature; retained byte-for-byte | `release/<version>/SHA256SUMS`, `release/<version>/SHA256SUMS.asc` |
+| Soak evidence record | Overwritten in place when the images it attests change; Git history is the archive, and each release copies the record it consumed into its own bundle | `soak/24HR_SOAK_EVIDENCE`, `soak/INDEX`, `soak/*.log` |
 <!-- document-lifecycle:end -->
 
 Branch-only work plans are not durable authorities. They carry the required

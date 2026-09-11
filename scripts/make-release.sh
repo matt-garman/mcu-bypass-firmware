@@ -1050,6 +1050,13 @@ if [ -n "$GIT_STATUS" ]; then
 		warn "working tree is DIRTY; provenance SHA $(git rev-parse --short HEAD) will not capture uncommitted changes."
 	else
 		git status --short >&2
+		if [ "$SOAK_ONLY" -eq 1 ]; then
+			# A soak record names the commit it ran at, and every consumer
+			# reads that commit back off the key's result line. Soaking a tree
+			# whose contents no commit describes would produce a record that
+			# points at bytes nobody can recover.
+			die "working tree is not clean. A soak record names the commit it ran at; commit or stash everything first."
+		fi
 		die "working tree is not clean. Commit/stash everything before releasing (or --dry-run to rehearse)."
 	fi
 fi

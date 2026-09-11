@@ -139,9 +139,10 @@ release_require_main_branch() {
 		printf 'FATAL: release_require_main_branch requires the repository root and an optional release mode\n' >&2
 		return 2
 	fi
-	# The mode appears only in the diagnostic. Every publishable mode has the
-	# same requirement, so an express run must not be told that "production"
-	# needs main while its own die message names express.
+	# The mode appears only in the diagnostic, so a caller that is not a
+	# production release is not told that "production" needs main. The
+	# parameter outlived the second publishable mode deliberately: the
+	# diagnostic should name the run that was refused, whatever modes exist.
 	local repo_root=$1 branch_ref
 	local release_mode=${2:-production}
 
@@ -169,7 +170,7 @@ release_output_path_is_safe() {
 	local release_root output_abs expected_output
 
 	case "$release_mode" in
-		production|express|dry-run|soak) ;;
+		production|dry-run|soak) ;;
 		*)
 			printf 'FATAL: invalid release output mode: %s\n' "$release_mode" >&2
 			return 1
@@ -194,10 +195,9 @@ release_output_path_is_safe() {
 	}
 	expected_output="$release_root/$version"
 
-	# Every publishable mode stages to exactly one path, the one the artifact
-	# commit and the tag will name. Express differs from production only in soak
-	# hours, never in where the release lands.
-	if [ "$release_mode" = production ] || [ "$release_mode" = express ]; then
+	# The one publishable mode stages to exactly one path, the one the artifact
+	# commit and the tag will name.
+	if [ "$release_mode" = production ]; then
 		if [ "$output_abs" != "$expected_output" ]; then
 			printf 'FATAL: %s output must be exactly %s (found %s)\n' \
 				"$release_mode" "$expected_output" "$output_abs" >&2

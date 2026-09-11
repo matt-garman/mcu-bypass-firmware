@@ -111,6 +111,12 @@ expect_output_path_fail "symlinked dry-run release child" \
 	"dry-run output must not be staged under the repository release tree"
 expect_output_path_fail "invalid release mode" "$work/output" invalid \
 	"invalid release output mode"
+# The retired shortened-soak mode is an invalid mode, not a second publishable
+# one. No caller can produce it, and a guard that still accepted it would treat
+# a spelling the rest of the release path refuses as a release that may stage
+# into the published tree.
+expect_output_path_fail "the retired shortened-soak mode" \
+	"$ROOT/release/v99.0.0" express "invalid release output mode"
 
 tools="$work/tools"
 mkdir -p "$tools"

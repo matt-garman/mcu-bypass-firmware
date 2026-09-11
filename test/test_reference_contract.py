@@ -122,6 +122,9 @@ LIFECYCLE_AUTHORITIES = {
     "release/<version>/flash-*.py": "Release payload artifact",
     "release/<version>/SHA256SUMS": "Release authentication record",
     "release/<version>/SHA256SUMS.asc": "Release authentication record",
+    "soak/24HR_SOAK_EVIDENCE": "Soak evidence record",
+    "soak/INDEX": "Soak evidence record",
+    "soak/*.log": "Soak evidence record",
 }
 
 failures = []

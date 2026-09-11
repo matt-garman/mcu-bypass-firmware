@@ -3375,8 +3375,21 @@ regenerate_line=$(grep -Fn 'regenerating classic AVR HEX from the validated ELFs
 	|| fail "the soak record is written after the release's final image regeneration"
 grep -Fq 'RELEASE_MODE=soak' "$RELEASE" \
 	|| fail "the soak does not record a mode of its own"
-grep -Fq 'production|express|dry-run|soak)' "$ROOT/scripts/release-provenance.sh" \
+grep -Fq 'production|dry-run|soak)' "$ROOT/scripts/release-provenance.sh" \
 	|| fail "the release output-path guard does not know the soak mode"
+# A soak is not a dry run: it must refuse a dirty tree, and say why in its own
+# terms. The record's result line names the commit it ran at, so a record taken
+# from an uncommitted tree points at bytes nobody can recover.
+soak_dirty=$(grep -Fn 'A soak record names the commit it ran at' "$RELEASE" \
+	| head -1 | cut -d: -f1)
+dirty_warn=$(grep -Fn 'working tree is DIRTY; provenance SHA' "$RELEASE" \
+	| head -1 | cut -d: -f1)
+[ -n "$soak_dirty" ] \
+	|| fail "the soak has no dirty-tree diagnostic of its own"
+[ -n "$dirty_warn" ] && [ "$dirty_warn" -lt "$soak_dirty" ] \
+	|| fail "could not locate the dirty-tree branch the soak refusal must sit under"
+grep -Fq 'if [ "$DRY_RUN" -eq 1 ] || [ "$PREFLIGHT" -eq 1 ]; then' "$RELEASE" \
+	|| fail "the dirty-tree warning is no longer limited to the two modes that may warn"
 checks=$((checks + 1))
 
 # The goal exists, is phony against the directory of the same name, and carries

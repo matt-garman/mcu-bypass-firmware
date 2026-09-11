@@ -147,12 +147,13 @@ than merely preserving it.
 `release.yml` is not a fourth variation on the same job -- it runs *different
 work*. It rebuilds every image from the tagged source, re-runs `test-long` with
 the flashing-helper gate pointed at those rebuilt images rather than the
-previous release's shipped HEXes, and deliberately does **not** soak (release
-qualification's soaks belong to `scripts/make-release.sh` and run for their full
-duration before the tag exists; a five-minute smoke here would attest to
-something weaker than the release already claims). So it gets its own goals --
-`release-rebuild`, `release-test-long`, `release-attiny202` -- declared in
-`RELEASE_GOALS`, with `WORKFLOW_GOALS` the union that seeds the recipe edges.
+previous release's shipped HEXes, and deliberately does **not** soak (a
+qualifying soak is `make soak`'s, runs for its full duration before the tag
+exists, and is committed as a record the release consumes; a five-minute smoke
+here would attest to something weaker than the release already claims). So it
+gets its own goals -- `release-rebuild`, `release-test-long`,
+`release-attiny202` -- declared in `RELEASE_GOALS`, with `WORKFLOW_GOALS` the
+union that seeds the recipe edges.
 
 The exception is `ci-pic`, which release invokes directly. Its five commands
 were already *identical* to release's five PIC steps -- the gate proved that by
@@ -367,8 +368,15 @@ copies the staging in, appends the publication registration with the same
 command the handoff prints, commits, and runs Part 3's verifier against it.
 
 The staged *shape* does not depend on soak duration; only the evidence content
-does. So a dry run costs about an hour and can be done BEFORE starting the real
-soak. Both `v0.9.12` failures would have surfaced there, with nothing spent.
+does. So a dry run costs about an hour rather than a day, and both `v0.9.12`
+failures would have surfaced there with nothing spent. It originally ran before
+the soak, because a failure after the soak cost the day.
+[`docs/release_proportionality.md`](release_proportionality.md) Part 5 removed
+that cost and with it the reason for the ordering: the soak became a
+prerequisite of every release mode, a dry run included, and its record outlives
+the attempt that failed. So the rehearsal now runs after the soak rather than
+before it, loses nothing it used to save, and gains the fidelity of consuming
+exactly what a real release consumes.
 
 The verifier needed a mode for this, because two things a real artifact commit
 has are things a dry run cannot have: the staging carries the DRY RUN banner,
@@ -421,7 +429,7 @@ shape.
 | 2 | `ci-local.sh` reads the sequence from Make (**done**) | a CI goal with no local counterpart; a local handler for a gate CI retired |
 | 3 | `test-ci-parity` in `make test` (**done**, inside `test-workflow-syntax`: one file already parses both workflows) | a workflow step with no local counterpart; a dropped pin; a gate reached outside a goal; a local release that does not cover the tagged one |
 | 4 | `verify-release-artifact-commit.sh` + recipe hard refusal (**done**) | every post-staging failure, at zero cost; a gate dispatched outside the declared goal; a pin handed to gates that do not read it |
-| 5 | `--dry-run` builds the artifact-commit shape (**done**) | the same, before the soak rather than after |
+| 5 | `--dry-run` builds the artifact-commit shape (**done**) | the same, for an hour rather than a day |
 
 Increment 4 was the highest value per line and did not depend on 1-3, so it
 landed first; its goal-composition half waited for Part 1, as noted above.

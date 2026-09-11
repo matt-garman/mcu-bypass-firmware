@@ -60,6 +60,24 @@ the same release at different lengths.
 
 ### Changed
 
+- **The 24-hour soak is a prerequisite of a release rather than a phase of
+  one.** `make soak` runs the full release combination set on its own and
+  commits what it proves under `soak/`: the soak input key, an evidence index,
+  and a sealed transcript per combination plus one for the build the soak drove.
+  A release recomputes the key over the images it has just built, requires the
+  record to cover exactly those images for at least the duration its own mode
+  demands, and copies the record it consumed into its bundle. A release cut from
+  a tree with no usable record refuses at the end of its build phase and says
+  which of three things is wrong: nothing is soaked, the record is too short, or
+  the record covers different images -- named by combination. The soak is
+  therefore paid once per image change rather than once per release attempt, and
+  a run that fails after staging no longer costs the day.
+  `soak/24HR_SOAK_EVIDENCE` is overwritten in place, with Git history as its
+  archive; `GOVERNANCE.md` owns its lifecycle and
+  [`docs/release_proportionality.md`](docs/release_proportionality.md) records
+  the measurement behind the change. **Operator action:** run `make soak` before
+  `make release`, on a clean tree, and commit the record it writes.
+
 - **`README.md` addresses its two audiences separately.** Flashing a released
   image and building from source are peer sections, and the file closes with a
   signpost naming every other document and what it is for.
@@ -76,6 +94,20 @@ the same release at different lengths.
   narrative around it goes to Git history, reachable through each section's
   compare link. Signed tags are untouched, so a tag and this file may describe
   the same release at different lengths.
+
+### Removed
+
+- **`--reuse-soak` and `--express` are retired.** Reuse stopped being a mode and
+  became the only way a soak reaches a release, so the flag, the scan across
+  published releases and the arbitration between candidates went with it.
+  Retiring that scan removed the last reader of a historical release's
+  `QUALIFICATION`, which is what lets the verifier keep accepting exactly one
+  format. The shortened-soak mode bought a publishable release for an hour while
+  the release path was under repair; it worked around the cost of a failed
+  attempt, and that cost is what the change above removes. Published releases
+  cut under either mode are untouched and still say so in their own manifests.
+  `QUALIFICATION` is at `format=10` and no longer carries `soak_source`, which
+  existed only to tell this run's soak from an inherited one.
 
 ### Fixed
 
