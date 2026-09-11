@@ -95,7 +95,7 @@ What it takes to add a row is the last section of this document.
 
 ### How to read it
 
-Three techniques survive A1–A3, and none costs the author a word:
+Three techniques are in use, and none costs the author a word:
 
 | # | Technique | What it holds | Author may freely change |
 |---:|---|---|---|
@@ -112,8 +112,8 @@ A term group is an alternation matched case-insensitively on whole words, over
 the block's text with markup flowed away. A single word is just a keyword, so
 keyword sets and form families share one implementation. The two techniques the
 project used to rely on — requiring a verbatim sentence, and requiring a
-verbatim line — are **retired**: A1 made the derived release lines machine-
-written, A2 converted the prose pins, A3 took the last one.
+verbatim line — are **retired**: the derived release lines are machine-written
+now, and every pinned sentence became a fenced claim.
 
 **Adding a row to the ban table has a catch.** This document is durable, so
 every ban below is enforced *against this document too*. A branch-only working
@@ -138,7 +138,7 @@ one fail identically, and both name the marker.
 | `pic12f675-helper-required` | `README.md`, `FLASHING.md` | the part needs the release helper because per-device factory calibration must be preserved **and verified** | a raw programmer write destroys the part's only copy of its factory trim — a hardware hazard, not bookkeeping |
 | `pic12f675-helper-status` | `README.md`, `FLASHING.md`, `release/README.md` | the `ipecmd` route is published **and** software-tested **and** not hardware-qualified | `FLASHING.md` published the procedure while `README.md` and `TOOLCHAIN.adoc` denied one existed; a reader believing either was misled about the other |
 | `pic12f675-disposition` | `DESIGN_DOCUMENTATION.adoc` | release-supported from `v0.9.9`, not hardware-qualified, deferred to `T3-pic12f675-bench` | the gate anchored on the opening words *"A third PIC, the PIC12F675,"*; `4d85ad7` rewrote the paragraph and silently emptied the scan |
-| `pic10f320-flash-overrun` | `DESIGN_DOCUMENTATION.adoc` | the modular architecture overruns the 256-word ceiling, measured not assumed | A3 — the passage was byte-pinned, and its provenance clause was itself the mitigation for a measurement sitting in durable prose |
+| `pic10f320-flash-overrun` | `DESIGN_DOCUMENTATION.adoc` | the modular architecture overruns the 256-word ceiling, measured not assumed | the passage was byte-pinned, and its provenance clause was itself the mitigation for a measurement sitting in durable prose |
 | `pic10f320-recorded-omission` | `DESIGN_DOCUMENTATION.adoc` | which context check was left out, and that the reason was capacity | the part ships a general defence its 256 words could not hold; without the reason the omission reads as an oversight to fix |
 | `pic10f320-assurance-seam` | `DESIGN_DOCUMENTATION.adoc` | what the assurance package does **not** establish | losing it turns a hand-inlined part's behavioural argument into a byte-identity claim it never made |
 | `image-attestation` | `release/README.md` | what reproducing an image publicly attests | reproduction proves bytes match tested source; it does not qualify firmware, and this block is the only thing between the two claims |
@@ -153,22 +153,22 @@ rewrap or an adjective swap does not evade it.
 | Ban | Scope | Defect that motivated it |
 |---|---|---|
 | attributive `hardware-qualified <noun>` | every durable document, **while the sentinel stands** | the predicate cannot be banned: every true sentence here *is* its negation. Adjective-plus-noun has no negated spelling, which is what makes it decidable. A floor, not a proof — and it lifts by itself when the sentinel goes |
-| a blanket denial that any `ipecmd` procedure has been published — described here rather than quoted, because quoting it *is* making it | durable documents | the B6 contradiction. Deliberately still permits a claim **scoped to a route**, which is true of the Make-based goals and must stay sayable |
+| a blanket denial that any `ipecmd` procedure has been published — described here rather than quoted, because quoting it *is* making it | durable documents | the same contradiction the `pic12f675-helper-status` row records, in its other direction: a blanket denial stood in one document while the helper published a route in another. Deliberately still permits a claim **scoped to a route**, which is true of the Make-based goals and must stay sayable |
 | three retired programming claims | durable documents | *"Needs only a programmer and its CLI"*, *"needs no toolchain at all"* — each false once the helper became required |
 | raw-writer `ipecmd` commands | **command contexts only** — fenced, listing, literal, indented, inline spans | a published raw write destroys factory calibration. Prose *mentioning* a tool is not a published command, so the scan reads contexts, not sentences |
 | current release topology | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | part/image/soak counts with two owners drift; the bounded declaration in `release/README.md` is the single owner |
 | unbound measurements | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | results that change when the source changes have no stable owner in a hand-edited document |
-| dates and source revisions | `DESIGN_DOCUMENTATION.adoc` | A3 — pinning provenance is the mitigation a misplaced measurement asks for, so removing the measurement has to close that door behind it |
-| release topology stated outside its declaration — the part, image, soak-combination, modular-target and shell-source counts | every durable document except the owner and the changelog | C1 — `README.md` published how many firmware images a release contains and nothing objected. The rule this replaces was a denylist naming two documents, and a denylist only refuses the spellings someone thought of. These numbers are **derived from the canonical build sets rather than typed**, so adding a part moves the patterns with them |
+| dates and source revisions | `DESIGN_DOCUMENTATION.adoc` | pinning provenance is the mitigation a misplaced measurement asks for, so removing the measurement has to close that door behind it |
+| release topology stated outside its declaration — the part, image, soak-combination, modular-target and shell-source counts | every durable document except the owner and the changelog, less one fenced region the rule names | `README.md` published how many firmware images a release contains and nothing objected. The rule this replaces was a denylist naming two documents, and a denylist only refuses the spellings someone thought of. These numbers are **derived from the canonical build sets rather than typed**, so adding a part moves the patterns with them. The one exemption — the growth table in `docs/release_proportionality.md`, whose rows are measurements at two named tags rather than a current restatement — is a fence in that document rather than a name in a list alone: it is visible where it applies, it fails like any other fence when absent or malformed, and it exempts nothing else in the file |
 
 ### 3. Structural and derived
 
 | Rule | Property | Defect that motivated it |
 |---|---|---|
 | bounded current-release declaration | exactly one, in `release/README.md`, agreeing with the canonical inventory | a second declaration elsewhere — even one that agrees today |
-| declared topology agrees with the build | the bounded declaration states every derived count | the declaration's three topology words are still literals inside the renderer that writes it. Nothing compared them to anything until C1, so adding a part would have shipped a declaration that quietly undercounted |
-| derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | A1 — seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
-| root document allowlist | any root-level document, in either markup this project writes documents in, outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed. D1 — restricting the walk to Markdown was that same mistake in a second dimension: an AsciiDoc working document reached a release unseen, while the live-tree sweeps, which have always read both markups, held it to the very bans a working document exists to be exempt from |
+| declared topology agrees with the build | the bounded declaration states every derived count | the declaration's three topology words are still literals inside the renderer that writes it. Nothing compared them to anything until this rule landed, so adding a part would have shipped a declaration that quietly undercounted |
+| derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
+| root document allowlist | any root-level document, in either markup this project writes documents in, outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed. Restricting the walk to Markdown was that same mistake in a second dimension: an AsciiDoc working document reached a release unseen, while the live-tree sweeps, which have always read both markups, held it to the very bans a working document exists to be exempt from |
 | branch-only banner | declared working documents must be deleted and de-referenced before a release cut | a release is cut from main; none may survive there |
 | GCC floor agreement | each of the three publishing documents states the enforced number beside a host `gcc` mention | the enforced floor and the published floor must not drift. Stated as one form family rather than two accepted sentences: the cross-compiler is excluded because the floor is the host's, and a bumped floor fails rather than matching a version that merely contains it |
 | design contract (14 ordered patterns) | safety-relevant numbers keep every figure and every part association | one pin broke when a `.` became a `;`. Negative coverage is generated from the table: delete the span a rule matches and it must stop matching |
@@ -207,9 +207,9 @@ the obligations at the end of this document.
 > find the property in this register. If the property is wrong, change it here
 > first and say why. If the property is right, the document is what changes.
 
-That sentence is the whole point of A5. Every pin this branch retired was
-retired because an author hit a gate, could not tell what it was protecting, and
-had no cheaper repair available than editing the rule.
+That sentence is the whole point of this register. Every pin the project
+retired was retired because an author hit a gate, could not tell what it was
+protecting, and had no cheaper repair available than editing the rule.
 
 ## Proof obligations for a new gate
 

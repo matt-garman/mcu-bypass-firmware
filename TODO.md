@@ -49,11 +49,10 @@ section still editable: there is no `v0.9.14` tag and no `release/v0.9.14/`, so
 the policy's carve-out for historical records does not cover it yet and will the
 moment the release is cut.
 
-**The edit belongs on `main`.** That is where the section was written and where
-it will be tagged. This branch carries it only because it sits on top of `main`,
-and this branch's own work is scheduled for `0.9.15`, which lands after the
-`v0.9.14` tag has already frozen the section. Making the edit here would arrive
-too late to matter.
+**The edit belongs on `main`, before the tag.** That is where the section was
+written and where it will be tagged. The work that follows it is scheduled for
+`0.9.15`, which lands after the `v0.9.14` tag has already frozen the section, so
+an edit that waits for the next release arrives too late to matter.
 
 The excess is the material the policy names as belonging elsewhere --
 implementation narrative, the chronology of how each gate came to be wired, and
@@ -993,8 +992,8 @@ equally distant. Two are out of order that way:
     and is wrong, so what remains is implementation and one confirmation.
 
 One item is also time-boxed rather than merely urgent: `T2-changelog-0914` stops
-being possible when the `v0.9.14` tag freezes the section it edits, and it is an
-edit to `main` rather than to this branch.
+being possible when the `v0.9.14` tag freezes the section it edits, so it has to
+land on `main` before that tag is cut.
 
 The stable ID in each row matches exactly one open section above.
 
