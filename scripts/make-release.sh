@@ -94,6 +94,15 @@
 #   options:
 #     --preflight              run every release capability/precondition check,
 #                              then exit before cleaning, building, or staging
+#     --soak                   run the soak ALONE and write the record a release
+#                              then requires: clean build, the full validation
+#                              gates, every release combination for the full
+#                              duration, then soak/24HR_SOAK_EVIDENCE beside its
+#                              sealed transcripts. Takes no version and stages
+#                              no release. Refuses when the record it would
+#                              write already attests the images it would soak --
+#                              deleting the record is how to ask for another
+#                              sample of the same inputs.
 #     --dry-run                rehearse the whole pipeline with a SHORT soak,
 #                              including the artifact COMMIT the tag will name,
 #                              built in a scratch clone and put through the same
@@ -167,6 +176,7 @@ PREFLIGHT=0
 DRY_RUN=0
 EXPRESS=0
 REUSE_SOAK=0
+SOAK_ONLY=0
 RELEASE_MODE=production
 # Independent local-release policy pins. These intentionally do not come from
 # Make, so an unintended production-policy mismatch fails qualification.
@@ -210,6 +220,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--preflight)          PREFLIGHT=1; shift ;;
 		--dry-run)            DRY_RUN=1; shift ;;
+		--soak)               SOAK_ONLY=1; shift ;;
 		--express)            EXPRESS=1; shift ;;
 		--reuse-soak)         REUSE_SOAK=1; shift ;;
 		--soak-duration-ms)   SOAK_DURATION_MS="${2:?--soak-duration-ms needs a value}"
@@ -238,6 +249,17 @@ done
 	|| die "--preflight and --express are mutually exclusive"
 [ "$REUSE_SOAK" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
 	|| die "--reuse-soak is meaningless with --preflight: preflight exits before the soak"
+# --soak names what the run is just as firmly: it produces the evidence the
+# other three consume, and stages no release at all. Every pairing is refused
+# for the same reason theirs are.
+[ "$SOAK_ONLY" -eq 0 ] || [ "$PREFLIGHT" -eq 0 ] \
+	|| die "--soak and --preflight are mutually exclusive"
+[ "$SOAK_ONLY" -eq 0 ] || [ "$DRY_RUN" -eq 0 ] \
+	|| die "--soak and --dry-run are mutually exclusive"
+[ "$SOAK_ONLY" -eq 0 ] || [ "$EXPRESS" -eq 0 ] \
+	|| die "--soak and --express are mutually exclusive"
+[ "$SOAK_ONLY" -eq 0 ] || [ "$REUSE_SOAK" -eq 0 ] \
+	|| die "--soak and --reuse-soak are mutually exclusive"
 if [ "$VERSION_WAS_SUPPLIED" -eq 0 ] && [ -n "$MAKE_VERSION" ]; then
 	# GNU Make exports command-line variables to recipes. Reading VERSION from
 	# that environment keeps arbitrary bytes out of the recipe's shell syntax;
@@ -245,12 +267,19 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 0 ] && [ -n "$MAKE_VERSION" ]; then
 	VERSION=$MAKE_VERSION
 	VERSION_WAS_SUPPLIED=1
 fi
+# A soak is evidence about a set of images, not a fact about a release run, and
+# nothing it writes carries a version. Accepting one would invite the reading
+# that a record belongs to the release it names.
+[ "$SOAK_ONLY" -eq 0 ] || [ "$VERSION_WAS_SUPPLIED" -eq 0 ] \
+	|| die "--soak takes no version: a soak record attests images, not a release"
 if [ -z "$VERSION" ]; then
-	[ "$PREFLIGHT" -eq 1 ] \
+	[ "$PREFLIGHT" -eq 1 ] || [ "$SOAK_ONLY" -eq 1 ] \
 		|| die "no <version> given (e.g. v1.0.0). Try --help."
-	# Capability checks need a safe prospective staging path, but not a release
-	# number. A caller that wants tag/output-state warnings can still supply one.
+	# Capability checks and soaks need a safe prospective staging path, but not a
+	# release number. A caller that wants tag/output-state warnings can still
+	# supply one to --preflight.
 	VERSION=v0.0.0-preflight
+	[ "$SOAK_ONLY" -eq 0 ] || VERSION=v0.0.0-soak
 fi
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 	|| die "version '$VERSION' is not vX.Y.Z (optionally -suffix)"
@@ -369,7 +398,17 @@ if [ "$EXPRESS" -eq 1 ]; then
 	# downgraded into the very short run the flag exists to allow.
 	[ "$SOAK_DURATION_WAS_SUPPLIED" -eq 1 ] || SOAK_DURATION_MS=$MIN_EXPRESS_SOAK_MS
 fi
-if [ "$DRY_RUN" -eq 0 ] && [ "$EXPRESS" -eq 0 ] \
+if [ "$SOAK_ONLY" -eq 1 ]; then
+	RELEASE_MODE=soak
+fi
+# The soak's own floor is the release's, and it is not enforced here. A record
+# shorter than a release needs is not a release, it is a record a release will
+# refuse by name, which is the diagnostic that belongs to the consumer. Leaving
+# the producer open is what makes the whole path rehearsable in minutes.
+if [ "$SOAK_ONLY" -eq 1 ] && [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
+	warn "this soak runs ${SOAK_DURATION_MS}ms per combination, short of the ${MIN_RELEASE_SOAK_MS}ms a release requires; the record it writes will not qualify one."
+fi
+if [ "$DRY_RUN" -eq 0 ] && [ "$EXPRESS" -eq 0 ] && [ "$SOAK_ONLY" -eq 0 ] \
 		&& [ "$SOAK_DURATION_MS" -lt "$MIN_RELEASE_SOAK_MS" ]; then
 	die "production releases require --soak-duration-ms >= $MIN_RELEASE_SOAK_MS (24 h); use --express for a 1-h publishable release, or --dry-run for a short rehearsal"
 fi
@@ -1037,9 +1076,12 @@ mkdir -p "$EVID" "$SOAKDIR" \
 	|| die "could not initialize release scratch directories under $WORK"
 
 # Where to stage. A real release lands in the repo at release/<version>; a dry
-# run lands in the auto-scratch WORK (kept, never littering the repo).
+# run lands in the auto-scratch WORK (kept, never littering the repo). A soak
+# stages nothing, and is given a scratch path so every staging-capability check
+# below still has something real to answer about.
 if [ -n "$OUTPUT_DIR" ]; then :;
 elif [ "$DRY_RUN" -eq 1 ]; then OUTPUT_DIR="$WORK/release/$VERSION"; KEEP_WORK=1
+elif [ "$SOAK_ONLY" -eq 1 ]; then OUTPUT_DIR="$WORK/release/$VERSION"
 else OUTPUT_DIR="release/$VERSION"
 fi
 release_output_path_is_safe "$REPO_ROOT" "$OUTPUT_DIR" "$RELEASE_MODE" "$VERSION"
@@ -1070,7 +1112,9 @@ fi
 # Tag availability is publishing state, not host capability. Check and warn in
 # preflight when a real prospective version was supplied; with no version there
 # is intentionally nothing meaningful to query.
-if [ "$PREFLIGHT" -eq 1 ] && [ "$VERSION_WAS_SUPPLIED" -eq 0 ]; then
+if [ "$SOAK_ONLY" -eq 1 ]; then
+	: # A soak publishes nothing and reserves no name; there is no tag to check.
+elif [ "$PREFLIGHT" -eq 1 ] && [ "$VERSION_WAS_SUPPLIED" -eq 0 ]; then
 	warn "no release version supplied; tag availability was not checked."
 else
 	if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null 2>&1; then
@@ -1340,6 +1384,8 @@ PIC10F320_CLK_MHZ=$("$AWK" -v h="${PIC10F320_XTAL//[!0-9]/}" 'BEGIN{printf (h%10
 PIC12F675_CLK_MHZ=$("$AWK" -v h="${PIC12F675_XTAL//[!0-9]/}" 'BEGIN{printf (h%1000000?"%.1f":"%d"), h/1000000}')
 if [ "$PREFLIGHT" -eq 1 ]; then
 	ok "all required release tools, headers, imports and staging-path capabilities are present."
+elif [ "$SOAK_ONLY" -eq 1 ]; then
+	ok "working tree clean @ $GIT_SHORT; all tools present. No release will be staged."
 elif [ "$GIT_DIRTY" -eq 1 ]; then
 	# Only a dry run reaches here with a dirty tree; every publishable mode
 	# already died in section 0. This line used to report the tree as clean
@@ -2615,6 +2661,25 @@ current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 release_soak_input_key "$SOAK_DURATION_MS" "$SOAK_LIVENESS_INTERVAL_MS" \
 	"$WORK/soak-key.payload" "$WORK/SOAK_KEY" "$GIT_SHA"
 
+SOAK_RECORD_DIR="$REPO_ROOT/$RELEASE_SOAK_RECORD_DIR"
+# The self-check, and the first thing this mode can say that saves a day. The
+# record is keyed on the images, so if it already carries this key for at least
+# this long then every input the soak observes is the one it observed last time
+# and a second run buys one more sample of a stochastic test. Deleting the
+# record is how to ask for that sample, and it states the intent better than a
+# flag would.
+if [ "$SOAK_ONLY" -eq 1 ] \
+		&& release_soak_record_attests "$SOAK_RECORD_DIR" \
+			"$SOAK_INPUTS_SHA256" "$SOAK_DURATION_MS"; then
+	soak_record_fields=$(release_soak_record_read "$SOAK_RECORD_DIR") \
+		|| die "could not re-read the soak record that just matched"
+	die "$RELEASE_SOAK_RECORD_DIR/$RELEASE_SOAK_RECORD_KEY already attests these exact images.
+      key       $SOAK_INPUTS_SHA256
+      soaked    $(printf '%s' "$soak_record_fields" | cut -f2) ms per combination, at commit $(printf '%s' "$soak_record_fields" | cut -f3 | cut -c1-12)
+      Nothing the key covers has changed, so another run would add one sample to
+      a stochastic test at the cost of a day. Delete the record to ask for it."
+fi
+
 JOBS=$(release_jobs_cap "$JOBS" "$NCOMBOS") \
 	|| die "could not resolve the release soak concurrency limit"
 # ----------------------------------------------------------------------------
@@ -2815,6 +2880,34 @@ current_xt_elf_hashes=$(hash_xt_image_set "${XT_ELFS[@]}")
 { [ "$current_xt_image_hashes" = "$validated_xt_image_hashes" ] \
 	&& [ "$current_xt_elf_hashes" = "$validated_xt_elf_hashes" ]; } \
 	|| die "an ATtiny202 image or ELF changed while its soak was running"
+
+# ============================================================================
+# 3b. RECORD THE SOAK -- --soak only, and the end of that mode
+# ============================================================================
+# Everything a release needs from a soak now exists and nothing has moved since
+# the key was taken. Write the record and stop: this mode stages no release,
+# regenerates no shipped image, and commits nothing.
+if [ "$SOAK_ONLY" -eq 1 ]; then
+	section "3b. record the soak"
+	release_soak_record_write "$SOAK_RECORD_DIR" "$WORK/SOAK_KEY" "$EVID" "$GIT_SHA"
+	cat <<EOF
+
+The soak is recorded. A release built from these exact images will now find its
+evidence instead of running its own; one built from different images will refuse
+and name what changed.
+
+  # 1. review what changed, then commit the record
+  git status
+  git add $RELEASE_SOAK_RECORD_DIR
+  git commit
+
+  # 2. cut the release whenever the source is ready
+  make release VERSION=vX.Y.Z
+
+EOF
+	ok "done. Nothing was staged, committed, tagged, or pushed."
+	exit 0
+fi
 
 # Validation and soak rebuild classic ELFs, invalidating their paired HEX files.
 # Re-materialize HEX from those exact, just-tested ELFs without compiling again.

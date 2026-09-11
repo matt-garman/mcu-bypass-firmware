@@ -354,3 +354,131 @@ release_soak_input_key() {
 		|| die "could not seal the soak input key"
 	ok "soak input key: $SOAK_INPUTS_SHA256 ($SOAK_KEY_COMBINATIONS combinations, $SOAK_KEY_DRIVERS driver sources, $SOAK_KEY_HARNESSES harnesses)."
 }
+
+# ----------------------------------------------------------------------------
+# The record: what the current images have been soaked for.
+# ----------------------------------------------------------------------------
+# One record, at a fixed path in the worktree, overwritten in place and
+# committed. Git history is the archive, so an overwritten record is a checkout
+# away rather than lost, and the tree carries one live record however many
+# releases it has cut.
+#
+# It is not a new file format. It is the three kinds of file a release already
+# writes -- the soak input key, the evidence index, and the sealed transcripts
+# -- under names a reader can find. There is no signature, and that is
+# deliberate: a signature establishes that a directory came from who it claims
+# to, which matters for a release because a release is consumed by other people.
+# This never crosses that boundary. Anyone who can rewrite it can rewrite the
+# images it describes. What it needs instead is IDENTITY, which comes from a
+# release recomputing the key over the images it has just built, and BODY
+# INTEGRITY, which the per-transcript seals already carry.
+RELEASE_SOAK_RECORD_DIR=soak
+RELEASE_SOAK_RECORD_KEY=24HR_SOAK_EVIDENCE
+RELEASE_SOAK_RECORD_INDEX=INDEX
+
+# Read the record's result line. Echoes, tab separated: the inputs digest, the
+# attested per-combination duration in ms, the commit whose run produced it, and
+# the number of combinations it covers. Returns 1 when there is no record, or
+# when what is there does not parse -- the caller decides which sentence to say.
+release_soak_record_read() {
+	if [ "$#" -ne 1 ]; then
+		printf 'FATAL: release_soak_record_read requires a record directory\n' >&2
+		return 2
+	fi
+	local record_dir=$1 keyfile="$1/$RELEASE_SOAK_RECORD_KEY"
+	local result key duration commit combinations
+	[ -f "$keyfile" ] && [ ! -L "$keyfile" ] && [ -s "$keyfile" ] || return 1
+	result=$(grep '^SOAK_KEY_RESULT ' -- "$keyfile") || return 1
+	[ "$(printf '%s\n' "$result" | wc -l)" -eq 1 ] || return 1
+	[ "$(tail -n 1 -- "$keyfile")" = "$result" ] || return 1
+	key=$(printf '%s\n' "$result" | tr ' ' '\n' | sed -n 's/^inputs_sha256=//p')
+	duration=$(printf '%s\n' "$result" | tr ' ' '\n' | sed -n 's/^duration_ms=//p')
+	commit=$(printf '%s\n' "$result" | tr ' ' '\n' | sed -n 's/^source_commit=//p')
+	combinations=$(printf '%s\n' "$result" | tr ' ' '\n' | sed -n 's/^combinations=//p')
+	[[ "$key" =~ ^[0-9a-f]{64}$ ]] || return 1
+	[[ "$duration" =~ ^[1-9][0-9]*$ ]] || return 1
+	[[ "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+	[[ "$combinations" =~ ^[1-9][0-9]*$ ]] || return 1
+	printf '%s\t%s\t%s\t%s\n' "$key" "$duration" "$commit" "$combinations"
+}
+
+# Does the record already attest these exact inputs, for at least this long?
+# Duration compares with >= because it is a magnitude rather than an input: a
+# 24-hour soak of these images subsumes a 1-hour one.
+release_soak_record_attests() {
+	if [ "$#" -ne 3 ]; then
+		printf 'FATAL: release_soak_record_attests requires a record directory, key and duration\n' >&2
+		return 2
+	fi
+	local record_dir=$1 key=$2 duration=$3 fields
+	fields=$(release_soak_record_read "$record_dir") || return 1
+	[ "$(printf '%s' "$fields" | cut -f1)" = "$key" ] || return 1
+	[ "$(printf '%s' "$fields" | cut -f2)" -ge "$duration" ]
+}
+
+# Write the record for a soak that has just passed: the input key computed
+# before it started, and every transcript it produced, each already sealed by
+# its own payload digest.
+#
+# usage: release_soak_record_write RECORD_DIR KEYFILE EVID COMMIT
+#
+# Built beside the record and swapped in, so an interrupted write leaves either
+# the previous record or none. None is the fail-closed direction: a release
+# that finds no record says to soak first.
+release_soak_record_write() {
+	if [ "$#" -ne 4 ]; then
+		printf 'FATAL: release_soak_record_write requires a record directory, key file, evidence dir and commit\n' >&2
+		return 2
+	fi
+	local record_dir=$1 keyfile=$2 evid=$3 commit=$4
+	local staging="$record_dir.staging"
+	local name base role size record members=0
+	local -a bases=()
+
+	[ "${#RELEASE_EVIDENCE_ROLE[@]}" -gt 0 ] \
+		|| die "the soak record cannot be written without the declared evidence role map"
+	# The build transcript belongs to the record for the same reason the
+	# transcripts do: after this change nothing else produces it, so a release
+	# that retains it has to get it from here.
+	bases=(soak-build.log)
+	for name in "${SOAK_NAMES[@]}"; do bases+=("soak-$name.log"); done
+
+	rm -rf -- "$staging" || die "could not clear the soak record staging directory"
+	mkdir -p "$staging" || die "could not create the soak record staging directory"
+	cp -p -- "$keyfile" "$staging/$RELEASE_SOAK_RECORD_KEY" \
+		|| die "could not record the soak input key"
+	for base in "${bases[@]}"; do
+		[ -f "$evid/$base" ] && [ ! -L "$evid/$base" ] && [ -s "$evid/$base" ] \
+			|| die "soak transcript is missing, empty, or not a regular file: $base"
+		cp -p -- "$evid/$base" "$staging/$base" \
+			|| die "could not record soak transcript $base"
+	done
+	# The same index shape a release writes, rendered from the Makefile's role
+	# map rather than from the directory, so a member that went missing is a row
+	# nothing can satisfy instead of a row that was never written.
+	{
+		printf 'EVIDENCE_INDEX format=2 source_commit=%s\n' "$commit"
+		for base in $(printf '%s\n' "${bases[@]}" | sort); do
+			role=${RELEASE_EVIDENCE_ROLE[$base]:-}
+			[ -n "$role" ] \
+				|| die "soak record member has no declared evidence role: $base"
+			size=$(stat -c%s -- "$staging/$base") \
+				|| die "could not size soak record member: $base"
+			record=$(grep '^EVIDENCE_RESULT ' -- "$staging/$base") \
+				|| die "soak record member carries no evidence result: $base"
+			[ "$(printf '%s\n' "$record" | wc -l)" -eq 1 ] \
+				|| die "soak record member carries more than one evidence result: $base"
+			printf '%s\t%s\t%s\t%s\n' "$base" "$role" "$size" "$record"
+			members=$((members + 1))
+		done
+		printf 'EVIDENCE_INDEX_RESULT format=2 status=pass members=%d source_commit=%s\n' \
+			"$members" "$commit"
+	} > "$staging/$RELEASE_SOAK_RECORD_INDEX" \
+		|| die "could not write the soak record index"
+	[ "$members" -eq "${#bases[@]}" ] \
+		|| die "the soak record index lists $members members, not the ${#bases[@]} written"
+
+	rm -rf -- "$record_dir" || die "could not replace the previous soak record"
+	mv -- "$staging" "$record_dir" || die "could not install the soak record"
+	ok "soak record written: $record_dir ($members files, ${#SOAK_NAMES[@]} combinations)."
+}

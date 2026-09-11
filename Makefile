@@ -21,7 +21,7 @@ endif
 # every later gate compares against, so an identity-changing override would be
 # baked into the document rather than rejected -- the same defect the build
 # goals are guarded against, one document earlier.
-RELEASE_CONFIG_GOALS := release release-preflight release-prepare
+RELEASE_CONFIG_GOALS := release release-preflight release-prepare soak
 
 # Release configuration queries and the release goals must reach the release
 # guards without first executing the selected cross-compiler through parse-time
@@ -246,7 +246,7 @@ _make_shell_quote = '$(subst ','"'"',$(1))'
 # holds. It goes through the ordinary serialized path instead, which costs it a
 # recursive pass and is affordable because it builds nothing -- it rewrites two
 # documents and exits.
-_MAKE_RELEASE_DIRECT := $(if $(filter release release-preflight,$(MAKECMDGOALS)),$(if $(word 2,$(MAKECMDGOALS)),,1))
+_MAKE_RELEASE_DIRECT := $(if $(filter release release-preflight soak,$(MAKECMDGOALS)),$(if $(word 2,$(MAKECMDGOALS)),,1))
 _MAKE_SERIAL_LOCK_WAS_HELD := $(if $(filter $(_MAKE_SERIAL_WORKTREE_ID),$(_MAKE_SERIAL_LOCK_HELD)),1,0)
 ifeq ($(_MAKE_RELEASE_DIRECT),1)
 ifeq ($(_MAKE_SERIAL_LOCK_WAS_HELD),0)
@@ -8715,7 +8715,7 @@ override RELEASE_DANGEROUS_MAKE_FLAGS := $(sort \
 	$(call _release_ignore_errors_short_flags,$(_RELEASE_REQUESTED_MAKE_FLAGS)) \
 	$(call _release_ignore_errors_compact_flags,$(_RELEASE_REQUESTED_COMPACT_MAKE_FLAGS)))
 
-.PHONY: release release-preflight
+.PHONY: release release-preflight soak
 # Keep release arguments in the recipe environment, never in shell source. The
 # script validates VERSION and safely splits the documented RELEASE_ARGS words.
 # `value` captures command-line text without expanding embedded GNU Make
@@ -8751,7 +8751,7 @@ endif
 # what protect release-prepare, and they are the ones that matter to it: they
 # reject an override that would change the counts it writes into the bounded
 # declaration. Widening this rule instead would refuse the goal outright.
-ifneq ($(filter release release-preflight print-RELEASE_CONTRACT_VALID,$(MAKECMDGOALS)),)
+ifneq ($(filter release release-preflight soak print-RELEASE_CONTRACT_VALID,$(MAKECMDGOALS)),)
 ifneq ($(origin MAKEFILES),default)
 $(error refusing production release configuration under unsupported release overrides: MAKEFILES injects $(MAKEFILES))
 endif
@@ -8835,6 +8835,13 @@ release-prepare:
 
 release-preflight:
 	./scripts/make-release.sh --preflight
+
+# The 24-hour soak, run on its own and recorded. A release does not soak: it
+# reads what this wrote and refuses unless the record covers the exact images it
+# has just built. The goal is phony against the directory of the same name,
+# which is where the record lives.
+soak:
+	./scripts/make-release.sh --soak
 
 release:
 	./scripts/make-release.sh
@@ -9055,6 +9062,9 @@ help:
 	@echo "                  RELEASE_PREPARE_ARGS=--check reports staleness and writes nothing."
 	@echo "  release-preflight  check every release prerequisite without cleaning, building or staging"
 	@echo "                     (VERSION=vX.Y.Z requires final docs; tag/output state remains warnings)"
+	@echo "  soak            run the 24-h soak of all 18 combos on its own and record it under"
+	@echo "                  soak/. A release reads that record instead of soaking; refuses when"
+	@echo "                  the record already covers the images it would soak. Takes no VERSION."
 	@echo "  release         VERSION=vX.Y.Z: build+validate every release image -- AVR Classic"
 	@echo "                  + ATtiny202 + PIC10F322 + PIC10F320 + PIC12F675, the canonical"
 	@echo "                  RELEASE_IMAGES set (incl. 24-h soak of all 18 combos) + stage release/<ver>/."

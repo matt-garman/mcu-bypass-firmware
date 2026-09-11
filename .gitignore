@@ -72,3 +72,7 @@ coverage/
 
 # python byte-compiled files
 __pycache__/
+
+# A crashed soak-record write leaves its staging directory beside the record.
+# The record itself is committed; the half-written one never is.
+/soak.staging/

@@ -77,6 +77,8 @@ done < <(compgen -e || true)
 unset inherited_name input_pattern
 # shellcheck source=scripts/release-provenance.sh
 source "$ROOT/scripts/release-provenance.sh"
+# shellcheck source=scripts/release-soak.sh
+source "$SOAK_LIB"
 # shellcheck source=scripts/release-documentation.sh
 source "$RENDER"
 if ! declare -F release_hash_classic_avr_images >/dev/null \
@@ -3011,6 +3013,246 @@ grep -Fq -- '--reuse-soak)' "$RELEASE" \
 	|| fail "make-release.sh does not accept --reuse-soak"
 grep -Fq 'SOAK_SOURCE=this-run' "$RELEASE" \
 	|| fail "make-release.sh does not default soak provenance to this run"
+checks=$((checks + 1))
+
+# --- the soak record ---------------------------------------------------------
+# What a release requires instead of running a soak of its own: one record, at a
+# fixed path, keyed on the images it covers. These exercise the three functions
+# that write it, read it back, and decide whether it already answers the
+# question -- the accepting path included, which soak reuse could never test
+# here because it needed a signature this suite has no key for.
+for soak_fn in release_soak_require_host release_soak_assemble \
+		release_soak_input_key release_soak_record_read \
+		release_soak_record_attests release_soak_record_write; do
+	declare -F "$soak_fn" >/dev/null \
+		|| fail "the soak library does not define $soak_fn"
+done
+checks=$((checks + 1))
+
+# The library takes its output and failure vocabulary from the orchestrator that
+# sources it. Supply the same three here, scoped to this section, so the record
+# functions can be exercised without one.
+die() { printf 'FATAL %s\n' "$*" >&2; exit 1; }
+log() { printf '%s\n' "$*" >&2; }
+ok()  { printf 'OK   %s\n' "$*" >&2; }
+
+record_rc=0
+release_soak_record_read >"$output" 2>&1 || record_rc=$?
+[ "$record_rc" -eq 2 ] || fail "the soak record reader accepted a call with no arguments"
+record_rc=0
+release_soak_record_attests "$work/nothing" deadbeef >"$output" 2>&1 || record_rc=$?
+[ "$record_rc" -eq 2 ] || fail "the soak record test accepted two arguments"
+record_rc=0
+release_soak_record_write "$work/nothing" >"$output" 2>&1 || record_rc=$?
+[ "$record_rc" -eq 2 ] || fail "the soak record writer accepted one argument"
+checks=$((checks + 1))
+
+# A record is a directory of files a release stages verbatim, so the fixture is
+# built the way the producer builds it rather than by hand-writing an index.
+record_work="$work/soak-record"
+record_evid="$record_work/evidence"
+mkdir -p "$record_evid"
+record_commit=$(printf 'a%.0s' {1..40})
+record_names=(attiny85_cd4053_simple pic12f675_tq2_l2_5v_relay)
+record_bases=(soak-build.log)
+for record_name in "${record_names[@]}"; do
+	record_bases+=("soak-$record_name.log")
+done
+declare -A RELEASE_EVIDENCE_ROLE=([soak-build.log]=build)
+for record_name in "${record_names[@]}"; do
+	RELEASE_EVIDENCE_ROLE[soak-$record_name.log]=soak
+done
+for record_base in "${record_bases[@]}"; do
+	printf 'transcript body for %s\n' "$record_base" >"$record_evid/$record_base"
+	printf 'EVIDENCE_RESULT format=2 status=pass role=soak evidence=%s lines=1 payload_sha256=%064d source_commit=%s\n' \
+		"$record_base" 0 "$record_commit" >>"$record_evid/$record_base"
+done
+record_payload="$record_work/payload"
+printf 'SOAK_KEY format=2\nliveness_interval_ms=60000\n' >"$record_payload"
+record_key=$(sha256sum -- "$record_payload") || fail "could not hash the record fixture payload"
+record_key=${record_key%% *}
+write_record_key() {   # usage: write_record_key <duration ms>
+	{
+		cat -- "$record_payload"
+		printf 'SOAK_KEY_RESULT format=2 status=pass combinations=%d drivers=1 harnesses=6 duration_ms=%s inputs_sha256=%s source_commit=%s\n' \
+			"${#record_names[@]}" "$1" "$record_key" "$record_commit"
+	} >"$record_work/SOAK_KEY" || fail "could not write the record fixture key"
+}
+write_record_key 86400000
+
+SOAK_NAMES=("${record_names[@]}")
+record_dir="$record_work/soak"
+release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
+	"$record_commit" >"$output" 2>&1 \
+	|| fail "the soak record writer refused a complete soak: $(<"$output")"
+for record_base in "$RELEASE_SOAK_RECORD_KEY" "$RELEASE_SOAK_RECORD_INDEX" \
+		"${record_bases[@]}"; do
+	[ -f "$record_dir/$record_base" ] && [ ! -L "$record_dir/$record_base" ] \
+		&& [ -s "$record_dir/$record_base" ] \
+		|| fail "the soak record is missing $record_base"
+done
+[ ! -e "$record_dir.staging" ] \
+	|| fail "the soak record writer left its staging directory behind"
+checks=$((checks + 1))
+
+# The index is the release's evidence index in the same format, so a reader that
+# can check one can check the other.
+grep -q "^EVIDENCE_INDEX format=2 source_commit=$record_commit\$" \
+	"$record_dir/$RELEASE_SOAK_RECORD_INDEX" \
+	|| fail "the soak record index carries no source-bound header"
+grep -q "^EVIDENCE_INDEX_RESULT format=2 status=pass members=${#record_bases[@]} source_commit=$record_commit\$" \
+	"$record_dir/$RELEASE_SOAK_RECORD_INDEX" \
+	|| fail "the soak record index does not conclude with its member count"
+record_rows=$(grep -c $'\t' "$record_dir/$RELEASE_SOAK_RECORD_INDEX") \
+	|| fail "could not count soak record index rows"
+[ "$record_rows" -eq "${#record_bases[@]}" ] \
+	|| fail "the soak record index lists $record_rows members, not ${#record_bases[@]}"
+grep -q $'^soak-build.log\tbuild\t' "$record_dir/$RELEASE_SOAK_RECORD_INDEX" \
+	|| fail "the soak record index does not carry the build transcript under its declared role"
+checks=$((checks + 1))
+
+# Read back exactly what was declared, and answer the one question a release
+# asks: are these the images, and were they soaked for long enough?
+record_fields=$(release_soak_record_read "$record_dir") \
+	|| fail "the soak record just written does not read back"
+[ "$(printf '%s' "$record_fields" | cut -f1)" = "$record_key" ] \
+	|| fail "the soak record reports a different key than it was written with"
+[ "$(printf '%s' "$record_fields" | cut -f2)" = 86400000 ] \
+	|| fail "the soak record reports a different duration than it was written with"
+[ "$(printf '%s' "$record_fields" | cut -f3)" = "$record_commit" ] \
+	|| fail "the soak record reports a different commit than it was written with"
+release_soak_record_attests "$record_dir" "$record_key" 86400000 \
+	|| fail "the soak record does not attest the inputs and duration it was written with"
+release_soak_record_attests "$record_dir" "$record_key" 3600000 \
+	|| fail "a 24-hour soak does not subsume a shorter requirement"
+! release_soak_record_attests "$record_dir" "$record_key" 172800000 \
+	|| fail "a 24-hour soak attested a 48-hour requirement"
+! release_soak_record_attests "$record_dir" \
+	0000000000000000000000000000000000000000000000000000000000000000 1 \
+	|| fail "the soak record attested inputs it does not name"
+! release_soak_record_attests "$work/no-such-record" "$record_key" 1 \
+	|| fail "an absent soak record attested something"
+checks=$((checks + 1))
+
+# A record that has been damaged is not a record. Each of these is the whole
+# difference between "soak first" and a release standing on nothing.
+record_broken="$record_work/broken"
+rm -rf "$record_broken"; cp -R "$record_dir" "$record_broken"
+grep -v '^SOAK_KEY_RESULT ' "$record_dir/$RELEASE_SOAK_RECORD_KEY" \
+	>"$record_broken/$RELEASE_SOAK_RECORD_KEY"
+! release_soak_record_read "$record_broken" >/dev/null 2>&1 \
+	|| fail "a record with no result line read back as valid"
+cp -- "$record_dir/$RELEASE_SOAK_RECORD_KEY" "$record_broken/$RELEASE_SOAK_RECORD_KEY"
+printf 'trailing junk\n' >>"$record_broken/$RELEASE_SOAK_RECORD_KEY"
+! release_soak_record_read "$record_broken" >/dev/null 2>&1 \
+	|| fail "a record whose result line is not last read back as valid"
+sed 's/inputs_sha256=[0-9a-f]*/inputs_sha256=nothex/' \
+	"$record_dir/$RELEASE_SOAK_RECORD_KEY" >"$record_broken/$RELEASE_SOAK_RECORD_KEY"
+! release_soak_record_read "$record_broken" >/dev/null 2>&1 \
+	|| fail "a record with a malformed key read back as valid"
+sed 's/duration_ms=[0-9]*/duration_ms=0/' \
+	"$record_dir/$RELEASE_SOAK_RECORD_KEY" >"$record_broken/$RELEASE_SOAK_RECORD_KEY"
+! release_soak_record_read "$record_broken" >/dev/null 2>&1 \
+	|| fail "a record claiming a zero-length soak read back as valid"
+checks=$((checks + 1))
+
+# An unsealed transcript must not reach the record. The writer aborts through
+# the host's die, so the attempt is made where an exit cannot take this suite
+# with it, and the previous record must survive untouched.
+cp -- "$record_dir/$RELEASE_SOAK_RECORD_KEY" "$record_work/previous-key"
+printf 'unsealed body\n' >"$record_evid/soak-build.log"
+if (
+	die() { printf 'FATAL %s\n' "$*" >&2; exit 1; }
+	release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" \
+		"$record_evid" "$record_commit"
+) >"$output" 2>&1; then
+	fail "the soak record writer accepted a transcript carrying no evidence result"
+fi
+grep -Fq 'carries no evidence result' "$output" \
+	|| fail "an unsealed transcript was refused without its diagnostic: $(<"$output")"
+cmp -s "$record_work/previous-key" "$record_dir/$RELEASE_SOAK_RECORD_KEY" \
+	|| fail "a refused record write damaged the record already in place"
+checks=$((checks + 1))
+
+# Overwritten in place, with git history as the archive: a second write replaces
+# the first outright rather than accumulating beside it.
+printf 'transcript body for soak-build.log\n' >"$record_evid/soak-build.log"
+printf 'EVIDENCE_RESULT format=2 status=pass role=build evidence=soak-build.log lines=1 payload_sha256=%064d source_commit=%s\n' \
+	0 "$record_commit" >>"$record_evid/soak-build.log"
+printf 'stale member\n' >"$record_dir/soak-attiny202_cd4053_simple.log"
+write_record_key 3600000
+release_soak_record_write "$record_dir" "$record_work/SOAK_KEY" "$record_evid" \
+	"$record_commit" >"$output" 2>&1 \
+	|| fail "the soak record writer refused to overwrite an existing record: $(<"$output")"
+[ ! -e "$record_dir/soak-attiny202_cd4053_simple.log" ] \
+	|| fail "overwriting the soak record left a member of the previous one behind"
+[ "$(release_soak_record_read "$record_dir" | cut -f2)" = 3600000 ] \
+	|| fail "overwriting the soak record did not replace its attested duration"
+unset RELEASE_EVIDENCE_ROLE SOAK_NAMES
+unset -f die log ok
+checks=$((checks + 1))
+
+# --- the soak as its own goal ------------------------------------------------
+# The producer is a mode of this script and a goal of its own, and it must never
+# be able to masquerade as a release: it takes no version, stages nothing, and
+# contradicts every other mode.
+grep -Fq -- '--soak)               SOAK_ONLY=1; shift ;;' "$RELEASE" \
+	|| fail "make-release.sh does not accept --soak"
+# Every refusal below is decided in argument parsing, before the first Make
+# query, tool probe or scratch directory, so the script is invoked directly
+# rather than through the preflight harness -- which would prepend a --preflight
+# of its own and report the wrong contradiction.
+run_soak_args() {
+	(
+		unset VERSION RELEASE_ARGS MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEOVERRIDES MAKELEVEL
+		export TMPDIR="$work"
+		export _MAKE_SERIAL_LOCK_HELD="$lock_id"
+		"$RELEASE" "$@"
+	)
+}
+for soak_conflict in --preflight --dry-run --express --reuse-soak; do
+	if run_soak_args --soak "$soak_conflict" >"$output" 2>&1; then
+		fail "the soak accepted the contradictory mode $soak_conflict"
+	fi
+	grep -Fq -- "--soak and $soak_conflict are mutually exclusive" "$output" \
+		|| fail "--soak/$soak_conflict conflict failed for the wrong reason: $(<"$output")"
+done
+if run_soak_args --soak v1.2.3 >"$output" 2>&1; then
+	fail "the soak accepted a release version"
+fi
+grep -Fq 'a soak record attests images, not a release' "$output" \
+	|| fail "a versioned soak was refused without its diagnostic: $(<"$output")"
+checks=$((checks + 1))
+
+# The record is written before the shipped images are regenerated and before any
+# staging, and that ordering is the contract: a soak must be unable to reach the
+# phase that produces a release.
+soak_record_line=$(grep -Fn 'release_soak_record_write "$SOAK_RECORD_DIR"' "$RELEASE" \
+	| head -1 | cut -d: -f1)
+regenerate_line=$(grep -Fn 'regenerating classic AVR HEX from the validated ELFs' "$RELEASE" \
+	| head -1 | cut -d: -f1)
+[ -n "$soak_record_line" ] && [ -n "$regenerate_line" ] \
+	|| fail "could not locate the soak record write and the final image regeneration"
+[ "$soak_record_line" -lt "$regenerate_line" ] \
+	|| fail "the soak record is written after the release's final image regeneration"
+grep -Fq 'RELEASE_MODE=soak' "$RELEASE" \
+	|| fail "the soak does not record a mode of its own"
+grep -Fq 'production|express|dry-run|soak)' "$ROOT/scripts/release-provenance.sh" \
+	|| fail "the release output-path guard does not know the soak mode"
+checks=$((checks + 1))
+
+# The goal exists, is phony against the directory of the same name, and carries
+# the same production-identity guards every other release goal does.
+grep -Eq '^\.PHONY:.*[[:space:]]soak([[:space:]]|$)' "$ROOT/Makefile" \
+	|| fail "the Makefile does not declare soak phony"
+# Asked for from the clean environment an operator actually has: this gate runs
+# inside a Make recipe, and the release guards correctly refuse the MAKE and
+# lock variables that recipe exports around it.
+soak_goal_recipe=$(env -i PATH="$PATH" HOME="$HOME" TMPDIR="$work" \
+	make -s --no-print-directory -C "$ROOT" -n soak 2>&1) \
+	|| fail "make -n soak failed: $soak_goal_recipe"
+printf '%s\n' "$soak_goal_recipe" | grep -Fq -- 'make-release.sh --soak' \
+	|| fail "the soak goal does not run the release script in soak mode: $soak_goal_recipe"
 checks=$((checks + 1))
 
 # --- the staging rehearsal ---------------------------------------------------

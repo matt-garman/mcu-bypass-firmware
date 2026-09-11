@@ -275,7 +275,7 @@ release_output_path_is_safe() {
 	local release_root output_abs expected_output
 
 	case "$release_mode" in
-		production|express|dry-run) ;;
+		production|express|dry-run|soak) ;;
 		*)
 			printf 'FATAL: invalid release output mode: %s\n' "$release_mode" >&2
 			return 1
@@ -312,10 +312,13 @@ release_output_path_is_safe() {
 		return 0
 	fi
 
+	# Neither remaining mode publishes. A rehearsal stages a whole release it
+	# must not be mistaken for, and a soak stages nothing at all; both are held
+	# out of the release tree by the same rule.
 	case "$output_abs" in
 		"$release_root"|"$release_root"/*)
-			printf 'FATAL: dry-run output must not be staged under the repository release tree: %s\n' \
-				"$output_abs" >&2
+			printf 'FATAL: %s output must not be staged under the repository release tree: %s\n' \
+				"$release_mode" "$output_abs" >&2
 			return 1
 			;;
 	esac
