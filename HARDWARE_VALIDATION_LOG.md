@@ -1,15 +1,12 @@
 
 # Hardware Validation Log
 
-Two kinds of hardware evidence exist for this firmware, and they are not the
-same kind of claim. This file keeps them apart, because conflating them is how a
-project talks itself into believing a design is qualified when it is only
-popular.
+Two kinds of hardware evidence exist for this firmware:
 
 **Field-use reports** (section 1) are builds by other people, reported publicly:
 someone flashed a released image onto a part, put it in a pedal, and said it
-worked. That is real evidence — the firmware has executed on real parts, in real
-circuits, outside this repository — and it is why "this design has never touched
+worked. That is real evidence - the firmware has executed on real parts, in real
+circuits, outside this repository - and it is why "this design has never touched
 a chip" would be the wrong thing to say. It is also self-reported and
 uncontrolled, and it retains none of the identity, procedure or measurement data
 that would let anyone reproduce or audit it. The linked reports were not opened
@@ -50,17 +47,17 @@ rows are combinations with no known report, not combinations known to fail.
 | ATtiny85  | CD4053 Simple   |                  |       |
 | ATtiny85  | CD4053 Muting   |                  |       |
 | ATtiny85  | TQ2-L2-5V Relay |                  |       |
-| ATtiny202 | CD4053 Simple   |                  |       |
-| ATtiny202 | CD4053 Muting   |                  |       |
+| ATtiny202 | TMUX4053 Simple |                  |       |
+| ATtiny202 | TMUX4053 Muting |                  |       |
 | ATtiny202 | TQ2-L2-5V Relay |                  |       |
 | PIC10F320 | CD4053 Simple   |                  |       |
 | PIC10F320 | CD4053 Muting   | v0.9.7           | [Build report](https://forum.pedalpcb.com/threads/25-year-pollinator-one-control-silver-bee-hamishr-mod.30010/) |
 | PIC10F320 | TQ2-L2-5V Relay |                  |       |
 | PIC10F322 | CD4053 Simple   |                  |       |
-| PIC10F322 | CD4053 Muting   |                  |       |
+| PIC10F322 | CD4053 Muting   |                  | [Build report](https://forum.pedalpcb.com/threads/plague-doctor-custom-proco-fat-rat.30299/)      |
 | PIC10F322 | TQ2-L2-5V Relay |                  |       |
 | PIC12F675 | CD4053 Simple   |                  |       |
-| PIC12F675 | CD4053 Muting   |                  |       |
+| PIC12F675 | CD4053 Muting   | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/warp-south-custom-greer-lightspeed-southland.30298/)      |
 | PIC12F675 | TQ2-L2-5V Relay |                  |       |
 
 <!-- field-reports:end -->
