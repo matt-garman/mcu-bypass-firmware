@@ -22,6 +22,7 @@ RELEASE_README="$ROOT/release/README.md"
 TEST_README="$ROOT/test/README.md"
 MATRIX_TOOL="$ROOT/test/pic/pic12f675_matrix_evidence.py"
 RELEASE=${RELEASE:-$ROOT/scripts/make-release.sh}
+SOAK_LIB=${SOAK_LIB:-$ROOT/scripts/release-soak.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-qualification.XXXXXX")
 release="$work/release"
 matrix_build="$work/pic12f675-matrix"
@@ -786,7 +787,7 @@ EOF
 	write_evidence_index
 	index_digest=$(sha256sum -- "$release/evidence/INDEX")
 	index_digest=${index_digest%% *}
-	# The soak input key, in the exact shape make-release.sh seals: a payload that
+	# The soak input key, in the exact shape release-soak.sh seals: a payload that
 	# names each combination's driven image, the declared driver sources and the
 	# tools that execute a soak, then a terminal result carrying the payload's own
 	# digest. Nothing in the payload identifies the release, which is the property
@@ -2371,8 +2372,8 @@ for wiring in \
 	'PIC10F320_SOAK_COMBINATION_NAME="$name"' \
 	'PIC12F675_SOAK_COMBINATION_NAME="$name"' \
 	'ATTINY202_SOAK_COMBINATION_NAME=%q'; do
-	grep -Fq "$wiring" "$RELEASE" \
-		|| fail "release producer is missing soak identity wiring: $wiring"
+	grep -Fq "$wiring" "$SOAK_LIB" \
+		|| fail "soak sweep is missing soak identity wiring: $wiring"
 done
 # MANIFEST.md is published verbatim as the GitHub Release body, where a
 # repo-relative link does not resolve. Pin all three properties of the fix --
@@ -2406,11 +2407,16 @@ grep -Fq 'a staged classic AVR image differs from the final HEX regenerated from
 	|| fail "release producer does not bind staged classic AVR images to validated ELFs"
 for wiring in \
 	'make pic12f675-test pic12f675-test-target-variants \' \
-	'python3 "$PIC12F675_MATRIX_EVIDENCE" verify-release \' \
-	'make --old-file=_pic12f675-build-soak "$bin"'; do
+	'python3 "$PIC12F675_MATRIX_EVIDENCE" verify-release \'; do
 	grep -Fq "$wiring" "$RELEASE" \
 		|| fail "release producer omits one-matrix PIC12F675 wiring: $wiring"
 done
+# The soak lane's half of that wiring moved to the shared sweep when the soak
+# gained a second caller. It is the same requirement -- the harness compiles
+# from the matrix already qualified, never a later build -- so it is asserted
+# where the code now lives rather than dropped.
+grep -Fq 'make --old-file=_pic12f675-build-soak "$bin"' "$SOAK_LIB" \
+	|| fail "soak sweep omits the one-matrix PIC12F675 wiring"
 checks=$((checks + 1))
 
 # Render and execute the generated reproduction recipe with paths containing

@@ -22,6 +22,7 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
+SOAK_LIB="$ROOT/scripts/release-soak.sh"
 RENDER="$ROOT/scripts/release-documentation.sh"
 MUTATION="$ROOT/test/run_mutation_tests.sh"
 lock_id=$(stat -Lc '%d:%i' "$ROOT") || { printf 'FAIL: could not identify the worktree lock\n' >&2; exit 1; }
@@ -3453,6 +3454,7 @@ shadow_root="$work/stale-release-root"
 mkdir -p "$shadow_root/scripts"
 cp -R "$documentation_root/." "$shadow_root/"
 cp "$ROOT/scripts/release-provenance.sh" \
+	"$ROOT/scripts/release-soak.sh" \
 	"$ROOT/scripts/release-documentation.sh" \
 	"$ROOT/scripts/release-signing-policy.sh" \
 	"$ROOT/scripts/flash-pic12f675.py" "$shadow_root/scripts/"
@@ -3953,7 +3955,7 @@ checks=$((checks + 1))
 # later paths that previously prepended the repository root to it.
 grep -Fq 'export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"' "$RELEASE" \
 	|| fail "ATtiny202 target qualification does not preserve an absolute yasimavr venv"
-grep -Fq 'printf '\''  %q %q %q\n'\'' "$YASIMAVR_PY_ABS"' "$RELEASE" \
+grep -Fq 'printf '\''  %q %q %q\n'\'' "$YASIMAVR_PY_ABS"' "$SOAK_LIB" \
 	|| fail "ATtiny202 release soak wrapper does not execute the absolute yasimavr interpreter"
 checks=$((checks + 1))
 

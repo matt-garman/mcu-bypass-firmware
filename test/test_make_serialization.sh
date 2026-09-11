@@ -51,6 +51,7 @@ mkdir -p "$repo/scripts"
 cp "$ROOT/Makefile" "$repo/Makefile"
 cp "$ROOT/scripts/make-release.sh" "$repo/scripts/make-release.sh"
 cp "$ROOT/scripts/release-provenance.sh" "$repo/scripts/release-provenance.sh"
+cp "$ROOT/scripts/release-soak.sh" "$repo/scripts/release-soak.sh"
 chmod +x "$repo/scripts/make-release.sh"
 : > "$log"
 
