@@ -1,0 +1,7 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.14-release'
+=== PIC10F322 build + flash-budget (512 words) ===
+OK:   cd4053_simple -> build_pic10f322/bypass-pic10f322-cd4053_simple.hex : 476 words (93.0%) of 512
+OK:   cd4053_with_mute -> build_pic10f322/bypass-pic10f322-cd4053_with_mute.hex : 502 words (98.0%) of 512
+OK:   tq2_l2_5v_relay -> build_pic10f322/bypass-pic10f322-tq2_l2_5v_relay.hex : 493 words (96.3%) of 512
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware-v0.9.14-release'
+EVIDENCE_RESULT format=2 status=pass role=build evidence=build-pic10f322.log lines=6 payload_sha256=8bf5e37a661f871d21930a8b768adbe463f66f0e5007dd538eb5550e2be284db source_commit=2dec51d72b24e7a0acca7ec4c49d864881b15f16

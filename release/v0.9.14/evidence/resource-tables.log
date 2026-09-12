@@ -1,0 +1,43 @@
+resource tables: 223 checks, 0 failures (21 of 21 canonical images measured; complete candidate required)
+RESOURCE_IMAGE format=1 image=bypass-attiny13a-cd4053_simple.hex part=attiny13a unit=bytes used=838 ceiling=921 capacity=1024 free=83 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny13a-cd4053_with_mute.hex part=attiny13a unit=bytes used=878 ceiling=921 capacity=1024 free=43 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny13a-tq2_l2_5v_relay.hex part=attiny13a unit=bytes used=868 ceiling=921 capacity=1024 free=53 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny202-cd4053_simple.hex part=attiny202 unit=bytes used=968 ceiling=2048 capacity=2048 free=1080 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny202-cd4053_with_mute.hex part=attiny202 unit=bytes used=1008 ceiling=2048 capacity=2048 free=1040 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny202-tq2_l2_5v_relay.hex part=attiny202 unit=bytes used=1040 ceiling=2048 capacity=2048 free=1008 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny45-cd4053_simple.hex part=attiny45 unit=bytes used=864 ceiling=4096 capacity=4096 free=3232 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny45-cd4053_with_mute.hex part=attiny45 unit=bytes used=904 ceiling=4096 capacity=4096 free=3192 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny45-tq2_l2_5v_relay.hex part=attiny45 unit=bytes used=894 ceiling=4096 capacity=4096 free=3202 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny85-cd4053_simple.hex part=attiny85 unit=bytes used=864 ceiling=8192 capacity=8192 free=7328 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny85-cd4053_with_mute.hex part=attiny85 unit=bytes used=904 ceiling=8192 capacity=8192 free=7288 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-attiny85-tq2_l2_5v_relay.hex part=attiny85 unit=bytes used=894 ceiling=8192 capacity=8192 free=7298 method=elf-alloc-sections
+RESOURCE_IMAGE format=1 image=bypass-pic10f320-cd4053_simple.hex part=pic10f320 unit=words used=220 ceiling=256 capacity=256 free=36 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic10f320-cd4053_with_mute.hex part=pic10f320 unit=words used=241 ceiling=256 capacity=256 free=15 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic10f320-tq2_l2_5v_relay.hex part=pic10f320 unit=words used=242 ceiling=256 capacity=256 free=14 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic10f322-cd4053_simple.hex part=pic10f322 unit=words used=476 ceiling=512 capacity=512 free=36 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic10f322-cd4053_with_mute.hex part=pic10f322 unit=words used=502 ceiling=512 capacity=512 free=10 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic10f322-tq2_l2_5v_relay.hex part=pic10f322 unit=words used=493 ceiling=512 capacity=512 free=19 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic12f675-cd4053_simple.hex part=pic12f675 unit=words used=548 ceiling=1024 capacity=1024 free=476 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic12f675-cd4053_with_mute.hex part=pic12f675 unit=words used=574 ceiling=1024 capacity=1024 free=450 method=hex-program-words
+RESOURCE_IMAGE format=1 image=bypass-pic12f675-tq2_l2_5v_relay.hex part=pic12f675 unit=words used=585 ceiling=1024 capacity=1024 free=439 method=hex-program-words
+RESOURCE_STATIC format=1 part=attiny13a unit=bytes static=5 ceiling=16 free=11 images=3 method=elf-alloc-sections
+RESOURCE_STATIC format=1 part=attiny202 unit=bytes static=5 ceiling=16 free=11 images=3 method=elf-alloc-sections
+RESOURCE_STATIC format=1 part=attiny45 unit=bytes static=5 ceiling=16 free=11 images=3 method=elf-alloc-sections
+RESOURCE_STATIC format=1 part=attiny85 unit=bytes static=5 ceiling=16 free=11 images=3 method=elf-alloc-sections
+RESOURCE_STACK format=1 part=attiny13a unit=bytes method=simavr-canary-high-water observations=3 deepest_sp=0x07F used=33 free=26 static=5 sram=64 floor=8
+RESOURCE_STACK format=1 part=attiny45 unit=bytes method=simavr-canary-high-water observations=3 deepest_sp=0x13F used=33 free=218 static=5 sram=256 floor=8
+RESOURCE_STACK format=1 part=attiny85 unit=bytes method=simavr-canary-high-water observations=3 deepest_sp=0x23F used=33 free=474 static=5 sram=512 floor=8
+RESOURCE_STACK_BOUND format=1 part=attiny202 unit=bytes method=gcc-stack-usage-per-frame reports=3 ceiling=32
+RESOURCE_DATA format=1 part=pic12f675 variant=cd4053_simple unit=bytes method=xc8-data-budget used=40 ceiling=48 capacity=64 free=8
+RESOURCE_DATA format=1 part=pic12f675 variant=cd4053_with_mute unit=bytes method=xc8-data-budget used=40 ceiling=48 capacity=64 free=8
+RESOURCE_DATA format=1 part=pic12f675 variant=tq2_l2_5v_relay unit=bytes method=xc8-data-budget used=40 ceiling=48 capacity=64 free=8
+RESOURCE_RETURN_STACK format=1 part=pic10f320 variant=cd4053_simple unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic10f320 variant=cd4053_with_mute unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic10f320 variant=tq2_l2_5v_relay unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic10f322 variant=cd4053_simple unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic10f322 variant=cd4053_with_mute unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic10f322 variant=tq2_l2_5v_relay unit=levels method=gpsim-peak-depth peak=4 reserve=2 spare=2 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic12f675 variant=cd4053_simple unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic12f675 variant=cd4053_with_mute unit=levels method=gpsim-peak-depth peak=3 reserve=2 spare=3 depth=8
+RESOURCE_RETURN_STACK format=1 part=pic12f675 variant=tq2_l2_5v_relay unit=levels method=gpsim-peak-depth peak=5 reserve=2 spare=1 depth=8
+RESOURCE_TABLES_RESULT format=1 status=pass source_commit=2dec51d72b24e7a0acca7ec4c49d864881b15f16 images=21 avr_static=12 classic_stack=9 pic_data=6 pic_stack=9 records=41
