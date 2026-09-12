@@ -25,6 +25,25 @@ HOSTCC=${HOSTCC:-cc}
 HOSTCXX=${HOSTCXX:-c++}
 checks=0
 
+# THE ENVIRONMENT THIS RUNS IN. The Makefile exports VERSION unconditionally, so
+# it reaches this gate as an exported name whatever goal is running. The release
+# script then inherits that name already marked for export, and every mode that
+# was given no version assigns its own placeholder into it -- v0.0.0-preflight,
+# or v0.0.0-soak under --soak. Bash keeps the export attribute across that
+# assignment, so the placeholder is republished to every child the script starts,
+# including the `make test-long` that runs this file.
+#
+# The soak case below then hands `--soak` an argument vector containing no
+# version and is refused for supplying one, because --soak reads the name from
+# the environment exactly as the positional form does. That refusal is correct
+# and the case measuring it was wrong: it measured a vector it did not pass, and
+# only ever during a soak or a release, which is the one time nobody is running
+# this file by hand. Clear the name once here so every case measures what it
+# hands over. test/test_release_prepare.sh and test/test_release_preflight.sh
+# clear it for the same reason. The channel itself is measured deliberately by
+# expect_soak_environment_version_reject below.
+unset VERSION
+
 fail() {
 	printf 'FAIL: %s\n' "$*" >&2
 	exit 1
@@ -87,6 +106,24 @@ expect_soak_short_warning() {
 		|| fail "the soak refused a short duration instead of warning: $output"
 	[[ "$output" == *"short of the ${MIN_RELEASE_SOAK_MS:-86400000}ms a release requires"* ]] \
 		|| fail "a short soak ran without its warning: $output"
+	checks=$((checks + 1))
+}
+
+# --soak takes no version through EITHER channel. The positional refusal is
+# measured by expect_release_version_reject's siblings; this is the environment
+# half, and it is the half that has a live supplier. The Makefile exports the
+# name, so a soak started as `make soak VERSION=vX.Y.Z` reaches the script with a
+# version it must still refuse, and so does every child of a running soak. An
+# untested channel here is one nothing notices carrying an argument the caller
+# did not pass.
+expect_soak_environment_version_reject() {
+	local value=$1 output rc=0 sandbox
+	sandbox=$(mktemp -d) || fail "could not create the soak sandbox"
+	output=$( cd "$sandbox" && VERSION="$value" "$RELEASE" --soak 2>&1 ) || rc=$?
+	rmdir "$sandbox" || fail "the soak wrote into a directory it was only passing through"
+	[ "$rc" -ne 0 ] || fail "the soak accepted a version through the environment: $value"
+	[[ "$output" == *"--soak takes no version"* ]] \
+		|| fail "the soak rejected an environment version for the wrong reason: $output"
 	checks=$((checks + 1))
 }
 
@@ -585,6 +622,7 @@ expect_release_reject -1 "positive base-10 integer"
 expect_release_reject malformed "positive base-10 integer"
 expect_release_reject 60000 "a release requires --soak-duration-ms"
 expect_soak_short_warning 60000
+expect_soak_environment_version_reject v99.0.0
 expect_release_reject 4294967295 "must not exceed"
 expect_release_reject 9999999999999999999999999999999999999999 "must not exceed"
 expect_release_version_reject v99.0.0.rc1

@@ -152,6 +152,22 @@ die()     { printf '%sFATAL%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 # ----------------------------------------------------------------------------
 MAKE_VERSION=${VERSION-}
 MAKE_RELEASE_ARGS=${RELEASE_ARGS-}
+# Both names arrive EXPORTED. The Makefile exports them unconditionally so that
+# release arguments reach a recipe through the environment rather than through
+# recipe shell syntax, and the re-exec above carries that environment across
+# unchanged. Their values are captured now, so what is left of the export is only
+# its attribute -- and bash keeps that attribute across every assignment below,
+# including the placeholder version this script invents for a mode that was given
+# none. A soak therefore handed VERSION=v0.0.0-soak to every child it started,
+# `make test-long` among them, and a gate asking the release CLI what it does
+# with no version was answered about one it never passed. That is how the first
+# standalone soak failed, in a check that had no way to see what it was holding.
+#
+# Drop the attribute here rather than scrub the name in each consumer. Nothing
+# downstream reads either name out of the environment: the sourced units share
+# this shell, and every child that needs the version is handed it as a positional
+# argument. So the export has no remaining reader, only unintended ones.
+export -n VERSION RELEASE_ARGS
 VERSION=""
 VERSION_WAS_SUPPLIED=0
 PREFLIGHT=0
