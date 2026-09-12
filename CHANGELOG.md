@@ -30,11 +30,13 @@ journals, exhaustive test inventories, review chronology, current resource
 measurements, and duplicated design rationale in Git history or their dedicated
 design, test, and release records instead. `0.9.11` is the first section written
 under this policy. Earlier sections are being brought to it one at a time, which
-reverses the original decision to leave them at the depth of their time: what
-the list above says to record is kept, and the implementation narrative around
-it goes to Git history, reachable through each section's compare link. The
-signed tag for each release is unchanged, so a tag and this file may describe
-the same release at different lengths.
+reverses the original decision to leave them at the depth of their time, and
+`0.9.14` is brought to it for the opposite reason, having been written after the
+policy without following it. In either case what the list above says to record
+is kept, and the implementation narrative around it goes to Git history,
+reachable through each section's compare link. The signed tag for each release
+is unchanged, so a tag and this file may describe the same release at different
+lengths.
 
 > **On the PIC10F320's version history.** The PIC10F320 target was developed in a
 > separate repository and merged into this one in `v0.9.6` below. That
@@ -87,13 +89,15 @@ the same release at different lengths.
   protecting that ownership now derives those values from the Makefile's
   canonical sets rather than hand-written copies, so it refuses any spelling of
   a restatement rather than the ones someone thought to list.
-- **Earlier `CHANGELOG.md` sections are being rewritten under the concise-entry
+- **`CHANGELOG.md` sections are being rewritten under the concise-entry
   policy.** `0.9.11` was the first section written under it. Rather than leave
   the sections before it at the depth of their time, each is brought to the
   policy in turn: what the policy says to record is kept, and the implementation
   narrative around it goes to Git history, reachable through each section's
-  compare link. Signed tags are untouched, so a tag and this file may describe
-  the same release at different lengths.
+  compare link. `0.9.14` is brought to it on the same terms for the opposite
+  reason -- it was written after the policy and did not follow it. Signed tags
+  are untouched, so a tag and this file may describe the same release at
+  different lengths.
 
 ### Removed
 
@@ -119,557 +123,156 @@ the same release at different lengths.
 
 ## [0.9.14] - 2026-09-08
 
+All 21 firmware images are byte-identical to `v0.9.13`. This release changes
+what a release records about itself, how it is qualified, and the PIC12F675
+flashing helper.
+
 ### Added
 
-- **A release now records what its soak result is valid for.** Published images
-  were byte-identical across `v0.9.10`, `v0.9.11`, `v0.9.12` and `v0.9.13`, and
-  no soak driver changed over that span, so three consecutive releases re-ran
-  the same binaries under the same harness in the same simulators. Nothing
-  recorded that, so each paid the full duration to re-derive a result it already
-  had. `SOAK_KEY` is a new signed provenance file naming every input that can
-  change what a soak observes: the exact artifact each of the 18 combinations
-  drove -- ELF, shipped HEX, or for the PIC12F675 the derived simcal image it
-  actually runs -- the soak driver sources each lane declares in the Makefile,
-  and the identity of every tool that executes a soak. `QUALIFICATION` gains
-  `soak_inputs_sha256` (`format=8`) and `MANIFEST.md` publishes it.
-
-  Its payload deliberately carries no version, date or commit, because a
-  release that changes only prose must produce the *same* key; the producing
-  commit sits on the result line, outside the hashed payload, and the verifier
-  refuses a payload that binds itself to a release identity. Equally
-  deliberately, the image-producing compilers are not in the key -- the images
-  are hashed directly, so naming XC8 and avr-gcc again would only invalidate
-  soaks when an unrelated toolchain row moved. Nothing consumes the key yet;
-  this records it. [`docs/release_proportionality.md`](docs/release_proportionality.md)
-  Part 3 is the design.
-
-- **`CI_GOALS` names the gates each CI job runs.** Parity between the local path
-  and the hosted runner was an assertion in a comment: `scripts/ci-local.sh`
-  reconstructed `ci.yml`'s jobs from a prose header, `release.yml` kept its own
-  list and `test/README.md` a third, and nothing machine-checked that the local
-  path covered the remote one. `ci-verify`, `ci-stress`, `ci-pic`, `ci-mutation`
-  and `ci-attiny202` are exact wrappers of the commands those jobs run today,
-  owning gate composition and fixed policy -- `STRICT_TOOLS`,
-  `MUTATION_ALLOW_SKIP`, the image assertion and the soak's PASS-count check
-  that were loose shell in a `run:` block no local run executed. They
-  deliberately do not own the host paths or the independent CI pins, and a goal
-  refuses to run when a pin it names was not supplied on the command line:
-  `$(origin)` distinguishes a caller's pin from this file's default, so a
-  workflow that dropped one fails instead of silently agreeing with the default
-  it was meant to be checked against.
-
-  The `verify` and `stress` jobs now invoke `ci-verify` and `ci-stress`, and
-  `scripts/ci-local.sh`'s pull-request path invokes the same `ci-verify` the
-  hosted job does rather than an equivalent spelling. Wiring a job is not
-  separable from the gate that checks it: `test/test_workflow_syntax.sh` locates
-  each job's step by its literal command and anchors seven ordering assertions
-  to whatever it finds, so the goal, the detection, and the policy assertions
-  the step used to satisfy all move together -- the last against the goal's
-  recipe, through a new `ci_goal_recipe()`, or they would retire silently. The
-  remaining jobs (the mutation gate, `attiny202`, `build-matrix`) follow the
-  same pattern; [`docs/ci_parity.md`](docs/ci_parity.md) records it.
-
-  The `pic` job followed: five steps became one `make ci-pic`, and
-  `scripts/ci-local.sh` runs that same goal rather than five equivalent
-  spellings of it. The five-process boundary -- each PIC aggregate in its own
-  Make graph, with the PIC12F675 pair sharing the last one so its retained
-  matrix is qualified once -- is now described in one place and asserted
-  against the recipe, so both surfaces are held to the same description. Two
-  hazards surfaced that inspection would not have: a goal *invokes* its gates
-  rather than depending on them, so recipe commands are invisible to Make's
-  prerequisite database and every reachability check asked through a wrapper
-  passes vacuously unless the edge set is seeded with them; and an assertion
-  that locates a workflow step by its `name:` goes quiet, not red, when that
-  step is folded away. Both are fixed structurally and recorded in the design
-  doc.
-
-  The mutation gate followed, and those seeded edges paid for themselves. The
-  rule that exactly one normal-CI path may run mutants was a match against the
-  literal goal names `test-mutation` and `test-long`; it is now a reachability
-  question -- which invocations can reach `test-mutation` at all -- which also
-  catches a second wrapper rather than only a second literal. The fail-closed
-  policy itself (`MUTATION_ALLOW_SKIP=0`, so a mutant that skips for want of a
-  toolchain fails instead of passing green) moved into `ci-mutation` with the
-  reasoning beside it. Both replacements were checked against deliberately
-  broken trees rather than assumed: a stray second mutation path and a deleted
-  `MUTATION_ALLOW_SKIP=0` are each reported by name.
-
-  The `attiny202` job showed that one job does not always mean one goal. It has
-  two out-of-apt inputs with different jobs -- the vendored ATtiny_DFP
-  *compiles* the image, the patched yasimavr venv *runs* it -- and the workflow
-  provisions them in that order, caching the DFP once the images are proven and
-  only then paying for a simulator build. Folding its four gate steps into one
-  goal would have destroyed that: a broken image would be found after the venv
-  build rather than before it. It converts to two goals,
-  `ci-attiny202-build` and `ci-attiny202-target`, split where the toolchain
-  boundary already sat, with the gate asserting the build half runs first.
-
-  Both assertions that job carried as loose shell -- that every declared image
-  was actually built, and that the soak reported one PASS per supported variant
-  -- moved into the goals and are now themselves checked; nothing had been
-  watching them before. Each was verified by deletion. `scripts/ci-local.sh`
-  loses its own copy of the soak count, which is the point: a local count that
-  could drift from the hosted one is the failure this work exists to prevent.
-  The soak transcript now lands under `build_avr_xt/`, gitignored and removed
-  by `make clean`, so running the goal locally no longer dirties the tree.
-
-  Running the goal for real found a defect that had been shipped, dormant, in
-  the `CI_GOALS` commit: the soak lane used `set -o pipefail`, which is a
-  bashism, and Make recipes run under `/bin/sh`. It had worked as a workflow
-  `run:` block only because GitHub Actions runs those under bash. The soak is
-  now redirected rather than piped, so the sub-make's own exit status governs
-  and the Makefile keeps the POSIX-shell recipes it has everywhere else. This
-  is the argument for executing a new goal rather than reading it: the goal
-  parsed, passed every structural check, and could not have run.
-
-  `build-matrix` completes the set, and is the first conversion that bought
-  coverage rather than preserving it. Its rows selected work through workflow
-  expressions (`make ${{ matrix.build }}`) that literal command parsing cannot
-  resolve, so the gate pinned a reviewed list of `{mcu, build, size}` triples --
-  a second hand-kept copy of what the Makefile already knew, checked against a
-  third copy in the test. A row now carries only the part name;
-  `ci-build-classic` derives the build and size targets from a pin it validates
-  against `CI_CLASSIC_PARTS`, which is itself derived from the `TINYX5` list
-  that generates those targets. So the question the gate asks is whether the
-  workflow covers the parts *Make* declares. Adding a classic AVR part to the
-  Makefile now fails the gate until the matrix covers it; before, the two lists
-  could quietly agree to be stale. `scripts/ci-local.sh` reads the same list
-  instead of naming the three parts, and its per-part size report lands under
-  `build_avr_classic/` rather than the repo root.
-
-  **The release workflow now shares CI's PIC gate outright.** `release.yml`
-  runs different work from CI, not the same work differently: it rebuilds every
-  image from the tagged source, re-runs `test-long` with the flashing-helper
-  gate pointed at those rebuilt images rather than the previous release's
-  shipped HEXes, and deliberately does not soak -- qualification soaks belong to
-  `scripts/make-release.sh` and run for their full duration before the tag
-  exists. So it gets `release-rebuild`, `release-test-long` and
-  `release-attiny202`, declared in a new `RELEASE_GOALS`.
-
-  The exception is the PIC gate. Release's five PIC steps were already
-  byte-for-byte the same commands `ci-pic` runs -- the workflow contract proved
-  it by checking both against one shared tuple. Release now invokes `ci-pic`,
-  which turns "these two lists match" into "there is one list": the public
-  attestation re-runs the identical gate normal CI runs, by construction rather
-  than by coincidence. Eight steps became three.
-
-  Two things the goals now hold that no check previously watched: that
-  `release-rebuild` starts from `make clean` (a reproducibility claim is about a
-  build from nothing -- a rebuild that skipped the clean would compare committed
-  images against whatever was on disk), and that it covers the parts
-  `CI_CLASSIC_PARTS` declares rather than a list of its own. Both were verified
-  by deletion.
-
-  **The local mirror now executes the inventory instead of describing it.** The
-  last hand-kept copy was `scripts/ci-local.sh`'s CI-JOB MAPPING header: a prose
-  block naming each `ci.yml` job, which this gate checked for set-equality with
-  the workflow's job ids. That proved someone had typed each job's name into a
-  comment. It never proved anything ran, and the script's actual sequence was a
-  hardcoded list of steps beside it.
-
-  The Makefile now declares `CI_LOCAL_SEQUENCE` -- the goals the script invokes,
-  in the order a serial run needs them -- and the script reads it and dispatches
-  each entry to a handler. A local push does not invoke every CI goal: it covers
-  `verify`, `stress` and the mutation gate with one `make test-long`, since
-  those three re-aggregate one shared host suite. So the sequence has a declared
-  complement, `CI_LOCAL_FOLDED`, and the two must PARTITION `CI_GOALS`. Deriving
-  the folded half as "whatever is left over" would have been the wrong default:
-  it silently assumes a NEW goal is already covered, which is the drift being
-  removed. The Makefile refuses to PARSE when the partition fails -- a refusal
-  rather than a check, because the script reads both lists through
-  `make print-...`, so it cannot run, or even ask, while the claim is false.
-
-  The `make test-long` fold is no longer a comment either. Each folded goal's
-  target must be *covered* by `test-long` -- not reachable from it, which it is
-  not and must not be, since `test` and `test-long` are sibling aggregates over
-  overlapping gate sets rather than one built on the other. The check asks
-  whether everything the folded target pulls in is also pulled in by
-  `test-long`; a gate `test` runs and `test-long` does not would be a gate CI
-  runs and a local push silently never does.
-
-  Both directions of the handler correspondence are load-bearing, and both were
-  confirmed by deletion. Without the forward check, a sequence naming a goal
-  with no handler runs every other gate first and dies an hour later on a bare
-  `command not found`; without the reverse, a handler outlives the goal it
-  served and nothing calls it. Both run before the toolchain preflight, for the
-  same reason the preflight was hoisted ahead of the jobs: a mirror that is
-  incoherent about what it will do should say so in the first second.
-
-  Five prose-mapping checks retired. What replaced them is a chain that is
-  strictly stronger: every `ci.yml` job must invoke a non-empty subset of
-  `CI_GOALS` (so a job reaching a gate directly is caught), the goals `ci.yml`
-  invokes must equal `CI_GOALS` exactly, that must partition into the two local
-  lists, and every sequenced goal must have a handler. A job added to `ci.yml`
-  can no longer exist without a local counterpart, where before it only had to
-  be mentioned in a comment.
-
-  **The artifact-commit verifier dispatches through a declared goal.** The last
-  gate composition in the release path that lived in a shell script was
-  `scripts/verify-release-artifact-commit.sh`'s `make $gates STRICT_TOOLS=1
-  <pins>`, assembled at run time and therefore readable by nothing. It is now
-  `release-artifact-gates`: which gates (`RELEASE_ARTIFACT_GATES`, by name, so
-  the two cannot diverge), what policy (`STRICT_TOOLS=1`, the whole of what the
-  goal owns), and a refusal to run at all on an empty inventory rather than
-  proving a release publishable by running nothing.
-
-  It is the one declared goal no workflow invokes, and none can -- the artifact
-  commit does not exist until an operator has committed by hand, after
-  `make-release.sh` has finished -- so it lives in a new `RELEASE_PATH_GOALS`
-  rather than `RELEASE_GOALS`, which keeps meaning "what `release.yml` runs" and
-  stays checkable against that file.
-
-  Moving the composition found what reading it would not have. The script handed
-  those gates `release.yml`'s three independent pins, and not one of the eight
-  reads any of them -- not in its recipe, not in the script it runs. What they
-  did do was arrive at the gates' own nested Makes as *environment* origin,
-  which is unreviewed build input by the release guard's own definition;
-  `test-release-preflight`, a member of the list, scrubs inherited build-input
-  names before its first case for exactly that reason. So the goal takes no
-  pins, the script no longer parses `release.yml` at all, and that emptiness is
-  asserted from both ends: the goal must require no pin, and the script must
-  hand none over. A pin no consumer reads is not strictness -- it is a value to
-  keep in step for nothing. Its behavioural suite drops the three checks that
-  guarded the pin plumbing and gains the assertion that no pin reaches the
-  gates; it also stops skipping when PyYAML is absent, because the parse that
-  needed PyYAML is gone.
-
-  One harvester defect surfaced on the way. `test-makefile-name-contract` treats
-  a quote directly after a `print-<VAR>` query as the start of a shell expansion
-  -- correct for `mkv part_"$n"`, wrong for a Python argv list like
-  `"print-CI_GOALS", override`, which it reported as a name it could not expand.
-  A quote now counts only when the expansion it was supposed to introduce
-  actually follows, so those two queries are checked as the literal names they
-  are, and a negative case pins the distinction from both sides.
-
-  **Nothing reaches a gate except through a declared goal.** Every check above
-  asks whether the right goals run, in the right order, with the right pins;
-  none asked the prior question, of both files at once: is there anything
-  *else*? `release.yml` had no rule at all -- a step could have run `make test`
-  beside the four declared ones and every assertion would still have passed.
-  Both workflows are now read at each command POSITION rather than at the start
-  of a line, so `cd x && make ...`, `out=$(make ...)` and `... | make ...` are
-  visible, and every invocation must name exactly one declared goal and pass
-  exactly the pins that goal declares. No step may run a suite under `test/`
-  directly. Two of those are new coverage rather than preserved coverage: a
-  dispatch may carry no Make flags, since `-k` or `-i` turns a failing gate into
-  a passing job and `-j` changes the serialisation the gates are written for;
-  and the pin set must EQUAL the goal's declared pins, because a variable no
-  goal declares reaches every nested Make as command-line input nobody
-  reviewed.
-
-  **The local release pipeline must cover the public attestation.**
-  `scripts/ci-local.sh` mirrors `ci.yml` before a push; the release half of that
-  claim had no counterpart, and it is the expensive one -- `release.yml` runs on
-  a tag, and a tag cannot be re-cut. Every gate the workflow reaches through its
-  four goals must also be reached by `scripts/make-release.sh`. Coverage rather
-  than an inventory comparison, for the same reason the `make test-long` fold is
-  coverage: the workflow names goals while the script names each consumer
-  directly and deliberately, resolving a toolchain path per command and teeing
-  each gate to its own evidence log.
-
-  That question needed the goal graph to see through a list dispatch.
-  `release-rebuild` runs `$(CI_CLASSIC_PARTS)` and `release-artifact-gates` runs
-  `$(RELEASE_ARTIFACT_GATES)`; an unexpanded `$(...)` is a node with no edges, so
-  coverage asked through one is answered by the empty set and passes. The seeded
-  edges now expand it, and a check of its own proves they did, because nothing
-  else would notice.
-
-  **A dry run now rehearses the artifact commit, not just the pipeline.**
-  `scripts/make-release.sh --dry-run` proved the pipeline runs and produced a
-  staging directory. It did not produce the shape that fails: no artifact
-  commit, no registry append, no `HEAD` for the gates to read. That shape is
-  what cost `v0.9.12` its tag -- the release was qualified, tagged, pushed, and
-  reproduced bit for bit on the clean runner, and then failed re-running the
-  gates on the tag's own tree, because a continuity declaration only becomes
-  owed once `release/v0.9.12/` exists on disk.
-
-  `scripts/rehearse-artifact-commit.sh` builds that tree. It clones the
-  repository into a throwaway directory, checks out the commit the staged
-  `QUALIFICATION` records -- not the branch tip, which may have moved -- copies
-  the staging in, appends the publication registration with the same command
-  the handoff prints, commits, and runs
-  `scripts/verify-release-artifact-commit.sh` against it. A dry run's soak is
-  minutes, and the staged SHAPE does not depend on soak duration, so the whole
-  failure class is now reachable an hour into a release instead of a day. The
-  repository itself is untouched: every Git write is inside the clone.
-
-  Two things a real artifact commit has, a dry run cannot: the staging carries
-  the DRY RUN banner, and `SHA256SUMS.asc` does not exist, because signing is
-  the operator's own step and no release path signs on their behalf. The
-  verifier's new `--allow-dry-run` relaxes exactly those two -- the clean tree,
-  the absent tag, the required files, the history shape and all eight gates run
-  unchanged -- and it REQUIRES the banner it permits, so it can only accept what
-  the publishable mode refuses outright. It prints no tag or push command.
-
-  Building it found which gate that leaves. `test-published-release-immutability`
-  is the only artifact gate that reads the release directory on disk, and it
-  requires all four files a release signs for itself, so an unsigned staging
-  failed it every time -- on precisely the gate whose `IMAGE_CONTINUITY` check
-  is the `v0.9.12` failure. It now exempts a banner-marked, UNTAGGED directory
-  from the signature requirement alone. Both conditions carry weight: the banner
-  is what makes a directory unpublishable everywhere else, and the absent tag is
-  what makes the claim checkable from the repository rather than from the file's
-  own say-so, so a published release still owes the signature it was published
-  with however its manifest is later edited.
-
-  `test-release-rehearsal` is the new gate over the assembly, and the exemption
-  is pinned from both sides in `test-release-history`, which already builds
-  synthetic published releases to exercise the immutability gate.
-
-- **Soak transcripts are sealed by payload digest, like every other retained
-  log.** The `soak` evidence role never carried one: a log was bound by its
-  `evidence/INDEX` row -- terminal record and byte size -- so a substituted body
-  of identical length still carrying an identical `SOAK_RESULT` satisfied every
-  check. That was harmless while every log came from the run that consumed it,
-  and stopped being harmless when `--reuse-soak` made a log arrive from a tree
-  the current run did not produce. `soak` joins `RELEASE_EVIDENCE_RESULT_ROLES`,
-  each transcript is sealed after the run has a verdict, and its index row
-  carries the seal.
-
-  Adopted transcripts are deliberately **not** resealed. The seal names the
-  commit whose run produced it, so a release that re-sealed adopted logs in its
-  own name would destroy the binding that makes the reuse checkable at all. Both
-  the qualification verifier and the staging re-derivation therefore expect the
-  attested release's commit for soak evidence, read from the record this tree
-  retains for it; `release_reuse_soak_attestation` rehashes each adopted payload
-  against the seal before adopting it. The controls include the defect itself --
-  a same-length, same-verdict payload substitution, now refused by name.
-
-- **The toolchain record is written before the soak, not after it.** Every
-  `TC_*` capture it prints is taken in phase 0, so it never depended on a soak
-  result -- yet it was written after one. That is exactly what cost `v0.9.12`
-  its first attempt: the run died in staging on an unstaged `toolchain.txt`, 24
-  hours after the last input to it stopped changing. A gate asserts the new
-  position.
-
-- **The required non-image artifacts are staged in the rehearsal too.** Staging
-  them is now a function taking a destination, so a helper that is missing,
-  unreadable, or not byte-identical to its tracked source fails in the first
-  minutes rather than after the soak. With this and the command table, the
-  staging phase is down from 65 refusal points to 36; what remains is either
-  soak-bound by definition or bound to evidence this run produces, chiefly
-  `evidence/INDEX`, which lists the 18 soak logs and so cannot be built before
-  they exist.
-
-- **The staged programming commands and image facts are rehearsed before the
-  soak.** The staging phase carried 65 refusal points and almost none of them
-  read a soak result: the programming-command table, the per-image facts and the
-  resource rows are functions of the image set, the Makefile and evidence
-  measured before the soak. Evaluating them a day later is how `v0.9.12` died in
-  staging, on an unstaged `toolchain.txt`, after a full soak had been paid for.
-  `flash_row`, `img_row`, `release_producer_source_command_valid` and
-  `check_flash_commands` now live before the soak phase and run twice: once
-  against the built images with the output discarded, and once for real at
-  staging, which requires the two command tables to be byte-identical. A defect
-  in this material now fails in the first minutes, with nothing spent.
-
-  Two indirections make the double run possible and are the only behavioural
-  change from the move: the command table is appended to `$FLASHCMDS` rather
-  than one hardcoded path, and `img_row` reads image digests from
-  `$IMAGE_SUMS_FILE` rather than from the staged checksum list, which does not
-  exist at rehearsal time. Position is the contract, so a gate asserts it: the
-  generators and the rehearsal must precede the soak section, and staging must
-  compare against the rehearsed table.
+- **Every release publishes `SOAK_KEY`, a signed record of what its soak result
+  is valid for.** It names each of the 18 combinations by the exact artifact
+  soaked -- ELF, shipped HEX, or for the PIC12F675 the derived simcal image --
+  the soak driver sources, and the identity of every tool that executed a soak.
+  `QUALIFICATION` carries its payload digest as `soak_inputs_sha256` and
+  `MANIFEST.md` publishes it; `SHA256SUMS` covers the file and the detached
+  signature covers `SHA256SUMS`, so it needs no second trust root. The payload
+  carries no version, date or commit, so a release that changes only prose
+  produces the same key.
+  [`docs/release_proportionality.md`](docs/release_proportionality.md) is the
+  design.
 
 - **`--reuse-soak` stands a release on a published soak instead of repeating
   it.** When a published release already carries this run's
-  `soak_inputs_sha256`, the soak is adopted rather than executed. The
-  attestation is that release itself: `SHA256SUMS` covers its `SOAK_KEY` and
-  `QUALIFICATION`, and the detached signature signs `SHA256SUMS`, so reuse needs
-  no separate store, no second trust root and no extra signing step. Before
-  adopting, the signature, the checksum manifest, the `SOAK_KEY` payload digest
-  and the evidence index are all verified, the attested duration must be at
-  least what the requested mode demands, and every adopted log is re-validated
-  by the same `validate_soak_result` the live path uses -- reuse skips the
-  execution, never the check. `QUALIFICATION` records `soak_source`
-  (`format=9`), `MANIFEST.md` discloses reuse in prose, and the verifier refuses
-  a release that reuses a soak without saying so.
+  `soak_inputs_sha256`, the soak is adopted rather than executed, and that
+  release's own signature is the attestation. Its signature, checksum manifest,
+  `SOAK_KEY` payload digest and evidence index are verified first, the attested
+  duration must meet what the requested mode demands, and every adopted log is
+  re-validated by the same check the live path uses. `QUALIFICATION` records
+  `soak_source`, `MANIFEST.md` discloses reuse in prose, and the verifier
+  refuses a release that reuses a soak without saying so. Adopted transcripts
+  are not resealed, so each keeps the commit whose run produced it.
 
-  Duration moved out of the `SOAK_KEY` payload onto its result line
-  (`SOAK_KEY format=2`), because it is a magnitude rather than an input: a
-  24-hour soak of given inputs subsumes a 1-hour one, so reuse compares it with
-  `>=`. Leaving it in the payload would have meant an express release could
-  never stand on a production soak. The liveness interval stays in the payload,
-  since it changes what the soak checks rather than how long for. The key is
-  also now computed before the soak rather than after it, which is what makes it
-  able to decide whether the soak runs at all.
+- **Soak transcripts are sealed by payload digest.** A soak log had been bound
+  only by its `evidence/INDEX` row -- terminal record and byte size -- so a
+  substituted body of identical length carrying an identical result line
+  satisfied every check. That was harmless while every log came from the run
+  that consumed it, and stopped being so once a log could arrive from another
+  tree.
 
-  One limit, stated plainly: soak logs are bound by their evidence-index row --
-  terminal record and byte size -- not by a content digest, so a tampered body
-  of identical length carrying an identical result line would not be caught.
-  Closing that means giving the soak evidence role a payload digest, which is a
-  change to the evidence contract rather than to this feature.
+- **`evidence/toolchain.txt` records yasimavr.** Three of the 21 published
+  images are ATtiny202 images and yasimavr is the only thing that executes them.
+  A version string would not be enough, since 0.1.6 reports 0.1.6 with or
+  without the vendored patches that make the ATtiny202 soak trustworthy, so the
+  release records the venv build stamp: version, upstream sdist digest,
+  patch-set digest. A venv with no stamp refuses the release.
 
-- **`test-release-provenance` counts thirteen fail-closed tool probes, not
-  eleven.** The two host C++ compilers that build the PIC soak harnesses are
-  named in the soak input key, so a release that could not identify them could
-  not say what its soak result is valid for. The yasimavr build-stamp probe is
-  pinned by name alongside them.
+- **`make-release.sh --dry-run` rehearses the artifact commit.** It clones the
+  repository, checks out the commit the staged `QUALIFICATION` records, applies
+  the staging and the publication-registry append, and runs the artifact-commit
+  verifier against the result. That is the shape that cost `v0.9.12` its tag,
+  and it is now reachable an hour into a release rather than a day. Every Git
+  write happens inside the clone; a dry run signs nothing and prints no tag or
+  push command.
 
-- **`evidence/toolchain.txt` records yasimavr.** It named gpsim and libsimavr
-  but not yasimavr, even though three of the 21 published images are ATtiny202
-  images and yasimavr is the only thing that ever executes them. A version
-  string alone would not have been enough: 0.1.6 reports 0.1.6 with or without
-  the vendored patches that make the ATtiny202 soak trustworthy, so the release
-  records the venv build stamp `scripts/fetch_yasimavr.sh` already maintains --
-  version, upstream sdist digest, patch-set digest. A venv with no stamp, an
-  empty stamp, or one carrying a tab refuses the release.
+- **The soak-independent staging work runs before the soak.** The toolchain
+  record, the programming-command table, the per-image facts, the resource rows
+  and the required non-image artifacts are all fixed before a soak starts, yet
+  were evaluated a day after it finished, which is how `v0.9.12` died in staging
+  on an unstaged `toolchain.txt` with a full soak already paid for. They are now
+  rehearsed in the first minutes and compared byte for byte at staging. The
+  staging phase is down from 65 refusal points to 36, and what remains is
+  soak-bound by definition.
+
+- **CI and the release workflow reach their gates only through declared Make
+  goals.** `CI_GOALS`, `RELEASE_GOALS` and `RELEASE_PATH_GOALS` name each job's
+  gate set, its fixed policy and its pins, and `scripts/ci-local.sh` invokes
+  those same goals rather than equivalent spellings of them. A workflow step
+  that reaches a gate directly, passes a pin no goal declares, or carries a Make
+  flag such as `-k` or `-j` now fails the workflow contract. This replaces three
+  hand-kept inventories that could agree with one another while agreeing with
+  nothing that runs. No gate's behaviour changed;
+  [`docs/ci_parity.md`](docs/ci_parity.md) records the design.
 
 - **The first execution of the shipped programming path against real silicon is
-  on the record.** `HARDWARE_VALIDATION_LOG.md` carries a dated 2026-09-07 entry
-  under its outstanding-runs section: the part, the programmer, the device pack,
-  the image digest, the helper digest -- marked as deliberately not a released
-  helper's -- and the result digest, plus what was re-derived from the retained
-  exports independently of the helper's own arithmetic. 574 of 574 supplied
-  words programmed exactly, 449 of 449 unsupplied words erased, 1024 of 1024
-  words covered, `OSCCAL` `0x3424` unchanged and still a valid `RETLW`, and
-  `CONFIG` `0x11CC` exactly `(image & ~BG) | factory BG`.
-
-  It is recorded as field use, not as a controlled qualification, and section 2
-  of that file still declares that no controlled hardware-qualification record
-  exists for any part. The file's own definition is what decides that: no
-  written procedure exists to execute, the helper was locally modified so its
-  release checksum binding was bypassed, the part sat on a breadboard with no
-  board or output stage fitted, and nothing was measured with an instrument. A
-  run missing any required field is a field-use report however careful it was.
-
-  Two entries in the outstanding list were not merely unproven but wrong, and
-  are corrected in place rather than quietly dropped: the read and export return
-  no numeric device ID for this part under any option, and `ipecmd` does not
-  accept the image as a sealed-copy descriptor.
+  on the record.** `HARDWARE_VALIDATION_LOG.md` carries a dated 2026-09-07
+  PIC12F675 entry: 574 of 574 supplied words programmed exactly, 449 of 449
+  unsupplied words erased, 1024 of 1024 words covered, `OSCCAL` `0x3424`
+  unchanged and still a valid `RETLW`, and `CONFIG` `0x11CC` exactly
+  `(image & ~BG) | factory BG`. It is recorded as **field use, not a controlled
+  qualification**: no written procedure exists to execute, the helper was
+  locally modified, the part sat on a breadboard with no output stage fitted,
+  and nothing was measured with an instrument. Section 2 of that file still
+  declares that no controlled hardware-qualification record exists for any part.
+  Two entries in its outstanding list were wrong rather than merely unproven and
+  are corrected in place: the tool returns no numeric device ID for this part,
+  and `ipecmd` does not accept the image as a sealed-copy descriptor.
 
 ### Changed
 
-- **Design prose can no longer stop a release.** Six of the rules inside the
-  bounded-claim contract were not claim boundaries at all: they reject prose in
-  `DESIGN_DOCUMENTATION.adoc` and `TOOLCHAIN.adoc` that restates release
-  topology `release/README.md` owns, carries a measurement bound to nothing, or
-  pins durable design prose to a date or a revision. Each is a real drift this
-  project has had, and none of them is a defect in a release -- but they were
-  enforced by refusing to cut one. They now live in
-  `release_validate_current_fact_rules`, which runs on every commit and which
-  `scripts/make-release.sh` does not call; a gate asserts that it does not, so
-  the split cannot quietly collapse. No rule was weakened: the same six
-  patterns, the same diagnostics, the same live-tree assertion, plus a control
-  proving a current-fact violation no longer reaches the release path. The six
-  fenced claim blocks -- what no part has completed, what the PIC10F320
-  assurance package does not establish, what reproducing an image proves --
-  keep their release-time enforcement, because a release must not publish a
-  claim stronger than the evidence it ships.
-  [`docs/release_proportionality.md`](docs/release_proportionality.md) records
-  the reasoning.
-
-- **Live-tree documentation assertions read the version the tree declares.**
-  The two PIC12F675 contract checks that run against the checked-in tree passed
-  hardcoded versions -- `v0.9.11`, two releases stale, and a fictional
-  `v1.2.3`. Both now derive it from `release/README.md` through a new
-  `release_current_contract_version`, which `release_validate_development_state`
-  also uses in place of its own copy of the parse.
+- **Design prose can no longer stop a release.** Six rules inside the
+  bounded-claim contract reject prose that restates release topology
+  `release/README.md` owns, carries a measurement bound to nothing, or pins
+  durable design prose to a date or a revision. Each is a real drift this
+  project has had and none is a defect in a release, yet each was enforced by
+  refusing to cut one. They now run on every commit and outside the release
+  path, with the same patterns and the same diagnostics. The fenced claims about
+  what no part has completed, what the PIC10F320 assurance package does not
+  establish and what reproducing an image proves keep their release-time
+  enforcement, because a release must not publish a claim stronger than the
+  evidence it ships.
 
 ### Fixed
 
 - **The PIC12F675 flashing helper works against a real MPLAB X 6.20 and a
   powered part.** `scripts/flash-pic12f675.py` ships in every release, and until
   this bench run no part of it had been executed against an installed `ipecmd`
-  or real silicon. Every lane passed because both fakes were modelled on the
-  helper rather than on the tool. Five defects surfaced, in the order the bench
-  hit them.
+  or real silicon; every lane passed because both fakes were modelled on the
+  helper rather than on the tool. Five defects surfaced.
 
-  - **The version pin rejected every real `ipecmd` in existence.**
-    `probe_version()` harvested version tokens only from output lines carrying
-    the token `MPLAB`, which real `ipecmd -?` never prints: it identifies itself
-    in a header and a usage line, and states its version exactly once, as a bare
-    `Version v6.20` trailer, before exiting 50. Provenance and version are now
-    two checks instead of one, so a JVM stack trace naming the
-    `com.microchip.mplab.ipecmd` class cannot be read as the tool having run.
+  - The version pin rejected every real `ipecmd` in existence, harvesting
+    version tokens only from output lines carrying `MPLAB`, which the tool never
+    prints. Provenance and version are now two checks instead of one.
+  - The sealed `memfd` handed to `ipecmd` is not a pathname a JVM can open.
+    Handed the jar it broke startup; handed the image it cost a write that
+    erased nothing and programmed nothing. Both are now named under a real
+    directory descriptor.
+  - `-P` spelled the part in a form `ipecmd` rejects, because the tool supplies
+    the family prefix itself. The argument now spells `12F675`; `FLASHING.md`
+    had already documented the quirk for the PIC10F322.
+  - A board supplying no Vdd of its own could not be read at all. `--power tool`
+    now adds `-W`, fixed for the whole transaction and recorded in the
+    reservation, so a baseline read and a write cannot happen under different
+    electrical arrangements. `external` stays the default and the right answer
+    for a populated board.
+  - A transaction that succeeded completely was refused for want of a device ID
+    the tool never prints. The numeric identity now comes from `DEVID` at word
+    `0x2006` in the full-device export, beside the `CONFIG` word the transaction
+    already reads from there.
 
-  - **A sealed `memfd` is not a pathname a JVM can open.** A JVM canonicalises
-    the pathname it is handed, and a memfd canonicalises to `/memfd:<name>
-    (deleted)`. Handed the jar, that broke startup: real `ipecmd.jar` is a
-    manifest stub whose `Class-Path` names about two hundred sibling jars, and
-    that canonical path has no directory to resolve them against. Handed the
-    image, it cost a write -- the first real attempt erased nothing, programmed
-    nothing, and published a correct FAIL whose entire transcript was `Hex file
-    not found.` Both are now named under a real directory descriptor, the way
-    the three device reads that did succeed always were.
-
-  - **`-P` spelled the part in a form `ipecmd` rejects.** It supplies the family
-    prefix itself, so the argument now spells `12F675` through a separate
-    `PART_ARG`, while `PART` goes on naming the part in full for the evidence
-    record and for transcript matching. `FLASHING.md` already documented the
-    quirk for the PIC10F322; the PIC12F675 route had inherited the command shape
-    without the note.
-
-  - **A board that supplies no Vdd of its own could not be read at all.** The
-    helper constructed no power option and refused `--power` outright, so
-    `ipecmd` aborted on an undetectable target voltage before touching the part.
-    `--power tool` now adds `-W`, fixed for the whole transaction and recorded
-    in the reservation, so a baseline read and a write cannot happen under
-    different electrical arrangements; `external` stays the default and stays
-    the right answer for a populated board. `-W` cannot select a voltage: every
-    VDD/VPP option `ipecmd` 6.20 exposes is marked PM3-only, and a PICkit 3
-    derives that rail from USB.
-
-  - **A transaction that succeeded completely was refused for want of a device
-    ID the tool never prints.** `ipecmd` 6.20 driving a PICkit 3 prints no
-    numeric device ID for this part under any option, `-I` included. The numeric
-    identity now comes out of the full-device export, where `DEVID` sits at word
-    `0x2006` beside the `CONFIG` word the transaction already reads from there
-    -- device memory rather than tool prose, and no third spelling to guess at.
-    An export that omits the word is recorded as such rather than refused.
-
-  `--show-commands` also reported a healthy export path as `<unresolvable>`,
-  because only the descriptor component of a path under a directory descriptor
-  is a symlink. It is resolved on its own now and the remainder re-attached, and
-  the test requires every printed descriptor to resolve rather than merely that
-  an arrow appears.
-
-  One property is given up, and named where it is given up: the image can no
+  **One property is given up, and named where it is given up.** The image can no
   longer be made unsubstitutable between its final digest and the erase, because
-  `ipecmd` has to be able to open the file. A substitution still cannot pass --
-  the device is evaluated against the bytes recorded in the durable reservation,
-  never against the file on disk -- so `image_pinning` now reports
-  `evidence-snapshot` rather than claiming a seal the writer never sees.
+  `ipecmd` has to be able to open the file. A substitution still cannot pass,
+  since the device is evaluated against the bytes recorded in the durable
+  reservation rather than against the file on disk, but `image_pinning` now
+  reports `evidence-snapshot` rather than claiming a seal the writer never sees.
 
-- **A rewritten commit no longer costs a 24-hour soak to discover.** The release
-  binds its provenance to the commit it started from and re-checks it before
-  staging, and that check used to run only there. `v0.9.14`'s first attempt paid
-  the full price: 18 combinations soaked for 24 hours, all 18 PASS, and the
-  release was then refused because HEAD no longer named that commit. The commit
-  had been amended 83 seconds into the run -- the message, nothing else -- so the
-  two commits carried a byte-identical tree and every hour of that soak had
-  validated exactly the right bytes.
-
-  Refusing is still right: a release names a commit, and a rewritten commit is a
-  different release however identical its content. What was wrong was when. The
-  check now also runs at the validation and soak phase boundaries, so the same
-  refusal costs the phase that just started rather than the whole run, and the
-  end-of-run check stays as the only one that can see a rewrite made *during* the
-  soak. Its diagnostic also compares the two trees now, because an identical tree
-  means the validation is sound and only the provenance is not -- which is safe
-  to re-run immediately -- while a changed tree means the gates measured
-  something else.
+- **A rewritten commit no longer costs a 24-hour soak to discover.** This
+  release's first attempt soaked every combination for 24 hours, all PASS, and
+  was then refused because `HEAD` no longer named the commit it started from:
+  amended 83 seconds into the run, message only, byte-identical tree. Refusing
+  is still right, because a release names a commit and a rewritten commit is a
+  different release however identical its content. The provenance check now also
+  runs at the validation and soak phase boundaries, so the refusal costs the
+  phase that just started, and its diagnostic compares the two trees so an
+  identical one can be re-run immediately.
 
 - **The artifact-commit gates no longer inherit build inputs from whoever
-  started them.** `release-artifact-gates` passes its gates nothing but
-  `STRICT_TOOLS=1`, and that was true of the goal and false of the run: GNU Make
-  re-passes every command-line variable to its sub-makes through `MAKEFLAGS`, so
-  the two policy pins `make-release.sh` puts on its own `make test-long` line
-  reached those gates as command-line origin from three levels up -- the origin
-  that beats the Makefile's own value everywhere.
+  started them.** GNU Make re-passes every command-line variable to its
+  sub-makes through `MAKEFLAGS`, so policy pins set three levels up reached
+  those gates as command-line origin, which beats the Makefile's own value.
   `scripts/verify-release-artifact-commit.sh` now clears the inherited Make
   environment before it dispatches, which also drops `-j` and `-k`, neither of
-  which a serially-written fail-closed gate set survives. The first real
-  `--dry-run` is what found it, in the gate that exists to check exactly this.
-
-  The fixture that missed it probed two variables by name, so an inherited value
-  was indistinguishable from a passed pin and a pin nobody had thought of was
-  invisible. It reports the *names* of every command-line-origin variable now,
-  through `$(origin)`. `test_workflow_syntax.sh` had the same shape of hole: it
-  lists `env` as a command prefix it sees through and then stopped on `env`'s own
-  options, so `env -u X make ci-verify` matched no rule at all rather than
-  failing one -- as `env -u X bash test/test_x.sh` would have walked past the
-  check on suites reached outside a goal.
+  which a serially-written fail-closed gate set survives.
 
 ## [0.9.13] - 2026-09-06
 
