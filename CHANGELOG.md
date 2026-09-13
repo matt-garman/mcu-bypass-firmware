@@ -52,6 +52,8 @@ lengths.
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-09-13
+
 ### Added
 
 - **`GOVERNANCE.md`**, owning how this project's documentation is authored,
@@ -1563,7 +1565,8 @@ to six parts and 18 images.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.14...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.15...HEAD
+[0.9.15]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.11...v0.9.12
