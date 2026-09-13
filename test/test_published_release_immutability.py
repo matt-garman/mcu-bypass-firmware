@@ -153,6 +153,12 @@ IMAGE_CONTINUITY = {
     "v0.9.13": (21, 0, "a release-tooling and documentation release: nothing "
                        "under src/ changed at all, so all 21 images were "
                        "republished byte for byte"),
+    "v0.9.14": (21, 0, "a release-process release: the soak gained its own "
+                       "signed input key, and the PIC12F675 flashing helper "
+                       "was corrected against a real programmer and a powered "
+                       "part. Neither reaches an image -- nothing under src/ "
+                       "changed at all -- so all 21 were republished byte for "
+                       "byte"),
 }
 
 
