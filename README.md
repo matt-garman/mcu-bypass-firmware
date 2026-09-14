@@ -33,17 +33,19 @@ maintained in [release/README.md](release/README.md).
 
 ## Targets
 
-    1. AVR Classic
-        - ATtiny13A
-        - ATtiny45
-        - ATtiny85
-    2. AVR XT
-        - ATtiny202
-    3. PIC Enhanced Midrange
-        - PIC10F320
-        - PIC10F322
-    4. PIC Classic Midrange
-        - PIC12F675
+The following microcontrollers are currently supported:
+
+  1. AVR Classic
+      - ATtiny13A
+      - ATtiny45
+      - ATtiny85
+  2. AVR XT
+      - ATtiny202
+  3. PIC Enhanced Midrange
+      - PIC10F320
+      - PIC10F322
+  4. PIC Classic Midrange
+      - PIC12F675
 
 The firmware uses a *pure* implementation of the debounce and
 state-management algorithm (`src/bypass_pure.c`); it is hardware

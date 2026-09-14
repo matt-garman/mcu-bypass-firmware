@@ -54,7 +54,7 @@ rows are combinations with no known report, not combinations known to fail.
 | PIC10F320 | CD4053 Muting   | v0.9.7           | [Build report](https://forum.pedalpcb.com/threads/25-year-pollinator-one-control-silver-bee-hamishr-mod.30010/) |
 | PIC10F320 | TQ2-L2-5V Relay |                  |       |
 | PIC10F322 | CD4053 Simple   |                  |       |
-| PIC10F322 | CD4053 Muting   |                  | [Build report](https://forum.pedalpcb.com/threads/plague-doctor-custom-proco-fat-rat.30299/)      |
+| PIC10F322 | CD4053 Muting   | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/plague-doctor-custom-proco-fat-rat.30299/)      |
 | PIC10F322 | TQ2-L2-5V Relay |                  |       |
 | PIC12F675 | CD4053 Simple   |                  |       |
 | PIC12F675 | CD4053 Muting   | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/warp-south-custom-greer-lightspeed-southland.30298/)      |
