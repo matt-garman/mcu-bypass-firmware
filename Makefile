@@ -782,6 +782,16 @@ SIM_DEFS  ?= $(FAST_SIM_DEFS)
 # that really contains avr/io.h. Result: a verified real path, or empty (the
 # $(if ...) guards below then omit the -I and the analyzers fail loudly on the
 # missing include rather than parsing garbage).
+#
+# The empty translation unit this probe preprocesses arrives from /dev/null, NOT
+# from `echo |`. Metadata-only callers pass CC=: (scripts/verify-release-qualification.sh),
+# and `:` exits without reading stdin -- so a feeding `echo` races the closing
+# pipe. Losing that race is silent where SIGPIPE is fatal, but the hosted CI
+# runner leaves SIGPIPE IGNORED and every child inherits it: there the write
+# returns EPIPE and the shell reports "echo: I/O error" on stderr, which failed
+# the tool-independent-path gate that requires that stderr to be empty. A
+# redirect has no writer to strand, so the probe is quiet under either
+# disposition. The -dM probe below already takes stdin the same way.
 ifneq ($(_RELEASE_NO_TOOL_PARSE),)
 AVR_IO_HEADER      :=
 AVR_LIBC_INCLUDE   :=
@@ -789,7 +799,7 @@ AVR_GCC_INCLUDE    :=
 AVR_ARCH           :=
 else
 AVR_IO_HEADER      := $(shell $(CC) -print-file-name=avr/io.h)
-AVR_LIBC_INCLUDE   := $(shell echo | $(CC) -xc -E -Wp,-v - 2>&1 | grep -oE '^ /[^ ]+' | tr -d ' ' | while read d; do if [ -f "$$d/avr/io.h" ]; then realpath "$$d" 2>/dev/null || echo "$$d"; break; fi; done)
+AVR_LIBC_INCLUDE   := $(shell $(CC) -xc -E -Wp,-v - < /dev/null 2>&1 | grep -oE '^ /[^ ]+' | tr -d ' ' | while read d; do if [ -f "$$d/avr/io.h" ]; then realpath "$$d" 2>/dev/null || echo "$$d"; break; fi; done)
 AVR_GCC_INCLUDE    := $(shell $(CC) -print-file-name=include)
 AVR_ARCH           := $(shell $(CC) -mmcu=$(ATTINY13A_MCU) -dM -E - < /dev/null | awk '/__AVR_ARCH__/ { print $$3; exit }')
 endif
