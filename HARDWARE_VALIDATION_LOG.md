@@ -48,7 +48,7 @@ rows are combinations with no known report, not combinations known to fail.
 | ATtiny85  | CD4053 Muting   |                  |       |
 | ATtiny85  | TQ2-L2-5V Relay |                  |       |
 | ATtiny202 | TMUX4053 Simple |                  |       |
-| ATtiny202 | TMUX4053 Muting |                  |       |
+| ATtiny202 | TMUX4053 Muting | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/nashville-nobility-custom-nobels-odr-1bc.30339/)      |
 | ATtiny202 | TQ2-L2-5V Relay |                  |       |
 | PIC10F320 | CD4053 Simple   |                  |       |
 | PIC10F320 | CD4053 Muting   | v0.9.7           | [Build report](https://forum.pedalpcb.com/threads/25-year-pollinator-one-control-silver-bee-hamishr-mod.30010/) |
