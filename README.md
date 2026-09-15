@@ -204,6 +204,23 @@ High-level source overview:
   - `bypass_config.h` - defines `RELEASE_THRESH` and `PRESSED_THRESH`, as well as some (compile-guarded) hardware-specific constants
 
 
+## Credit (appreciated, not required)
+
+Licensing terms are in [LICENSE](LICENSE); this section is a request,
+not a license condition.
+
+If you use this firmware in something you build, and especially in
+something you sell, a shout-out would be much appreciated.  A line in
+your manual, product page, or "About" screen is perfect.  For example:
+
+> Footswitch firmware: [mcu-bypass-firmware](https://github.com/matt-garman/mcu-bypass-firmware)
+> by Matt Garman.
+
+You have my permission to use my name this way to credit this
+project.  Please don't word it in a way that suggests I endorse, or
+was involved with, your product.
+
+
 ## Where to Read Next
 
   - [DESIGN_DOCUMENTATION.adoc](DESIGN_DOCUMENTATION.adoc) - design and rationale
