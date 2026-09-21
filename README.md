@@ -5,6 +5,10 @@
 
 ## Overview
 
+See the companion repo [mcu-bypass-hardware](https://github.com/matt-garman/mcu-bypass-hardware)
+for hardware implementation details.  This repo covers the MCU
+firmware exclusively.
+
 The firmware is intended to be used for electric instrument effects
 (e.g. guitar effect pedals) bypass switching.  The firmware has the
 following responsibilities:
