@@ -354,30 +354,6 @@ Dependencies: none. Effort: about 3-4 hours for the comment convention and the
 query goal; the contract test and the scope field are a separate pass. Risk if
 deferred: Low for correctness; every gate failure keeps costing a round trip.
 
-### T25-soak-version-policy - Decide whether a version bump forces a fresh soak
-
-The soak input key names images, driver sources, harness identity and the
-liveness interval, and deliberately excludes the version string, so a release
-that changes only documentation stands on an existing soak record by
-construction. [`docs/release_proportionality.md`](docs/release_proportionality.md)
-argues for that and states the one judgment it leaves to the maintainer:
-whether a version bump should force a fresh soak regardless of image identity.
-
-The question was about which flag to pass while reuse was optional. It is now
-about whether a release may proceed, because the record is mandatory, and it is
-the last undecided thing in that design.
-
-Decide it, record the decision beside the argument that document already
-carries, and implement only if the answer is to force. Forcing means adding the
-version to the key payload, which is a small edit with a large consequence:
-every release would soak again, and the record would stop covering the
-documentation-only releases that motivated it.
-
-Dependencies: none. Effort: about 30 minutes to decide and record; about an
-hour more if the answer is to force. Risk if deferred: none to firmware
-correctness. The current behavior is stated and enforced by the key, so the
-tree is not in an undecided state -- only the policy is.
-
 ---
 
 ## Tier 3 - platinum-grade hardening and silicon validation
@@ -582,13 +558,19 @@ substitute a fragile URL shortener. Firmware edits must be made by the owner.
 Dependencies: per-image flash budgets and final-HEX string verification.
 Effort: about 1-2 hours. Risk: Low; provenance polish only.
 
-### T3-programming-guide - Publish a flash-first release landing page
+### T3-downloader-release - Make a downloaded release easy to flash and verify
 
-`MANIFEST.md` is the GitHub Release body (`notes="$dir/MANIFEST.md"` in
-`.github/workflows/release.yml`), so someone who opens a release to flash a
-chip lands on a provenance document and reads past source commits, digests and
-soak evidence to reach the commands. The commands themselves are generated,
-pasteable and gated; their placement is not.
+A builder who downloads a release rather than cloning the repository meets two
+problems: the first page they land on is written for auditors rather than for
+someone flashing a chip, and what they download cannot be verified on its own.
+Both serve the same reader and touch the same documents, so they are one item.
+Do the landing page first; the bundle then carries it.
+
+**Flash-first landing page.** `MANIFEST.md` is the GitHub Release body
+(`notes="$dir/MANIFEST.md"` in `.github/workflows/release.yml`), so someone who
+opens a release to flash a chip lands on a provenance document and reads past
+source commits, digests and soak evidence to reach the commands. The commands
+themselves are generated, pasteable and gated; their placement is not.
 
 Render a flash-first page into `release/vX.Y.Z/`, publish it as an asset and as
 the release body, and keep `MANIFEST.md` as the provenance asset with
@@ -611,12 +593,8 @@ erratum's anchor, and a gate requires `TOOLCHAIN.adoc` to link `#flash-a-chip`.
 The safety warning is not an erratum -- the opening paragraph forward-references
 it to qualify "ready-to-flash" -- so it must stay ahead of the trust material.
 
-Dependencies: none. Effort: about 4-5 hours including gates. Risk: Low; it
-moves existing gated content and adds no hardware instruction.
-
-### T3-release-bundle - Make a downloaded release verifiable on its own
-
-Three gaps face someone who downloads rather than clones. `SHA256SUMS` covers
+**Self-verifiable bundle.** Three gaps face someone who downloads rather than
+clones. `SHA256SUMS` covers
 every published file, so `sha256sum -c SHA256SUMS` reports the rest missing for
 anyone who took the one image they need. The pinned public key is not a
 published asset, so `gpg --verify` needs an out-of-band fetch, and neither
@@ -633,9 +611,11 @@ detached signature -- and keep saying that the pinned fingerprint needs a
 separately trusted source, because a key shipped beside the signature it
 verifies is not an independent trust path.
 
-Dependencies: none. Effort: about 4-6 hours including reproducibility and
-exact-content gates. Risk: Low-Medium; it enlarges the signed payload boundary,
-which is the part to gate first.
+Dependencies: none. Effort: about 4-5 hours for the landing page and 4-6 hours
+for the bundle, each including its gates. Risk: Low for the landing page, which
+moves existing gated content and adds no hardware instruction; Low-Medium for
+the bundle, which enlarges the signed payload boundary -- the part to gate
+first.
 
 ---
 
@@ -916,14 +896,12 @@ The stable ID in each row matches exactly one open section above.
 | T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
 | T25-program-argv | Published commands vs executed programmer argv | 2.5 | 2-3 h | Medium |
 | T25-gate-explain | Make a failing gate explain itself | 2.5 | 3-4 h | Medium - diagnosis |
-| T25-soak-version-policy | Decide whether a version bump forces a fresh soak | 2.5 | 30 min | Low - policy clarity |
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |
-| T3-programming-guide | Flash-first release landing page | 3 | 4-5 h | Medium - first-run experience |
-| T3-release-bundle | Self-verifiable downloaded release | 3 | 4-6 h | Medium |
+| T3-downloader-release | Flash-first landing page and self-verifiable bundle | 3 | 8-11 h | Medium - first-run experience |
 | T4-manufacturing-scope | Name manufacturing deliverables as out of scope | 4 | Small | Completeness |
 | T4-spice | Footswitch-network SPICE modeling | 4 | 2 h | High for board design |

@@ -281,9 +281,16 @@ sample for the day it costs.
 
 The policy that keeps this honest: reuse freely when the images are unchanged,
 which is automatic since the key changes otherwise, and require a fresh
-full-duration soak whenever any image changes. Whether a minor-version bump
-should force a fresh soak regardless of image identity is a judgment for the
-maintainer, not something this scheme should decide silently.
+full-duration soak whenever any image changes.
+
+**Decided (2026-09-24): a version bump does not force a fresh soak.** The
+maintainer's position is that soak evidence should be reused as far as the key
+allows, because a soak costs a day and re-running it over byte-identical
+firmware buys only the extra sample described above. The version string
+therefore stays out of the key payload. A release that changes only
+documentation, tooling or anything else outside the key stands on the existing
+record; anything the key names -- an image, a driver source, the simulator and
+harness identity, or the liveness interval -- still forces a fresh full-duration soak.
 
 ## Part 4 - scope the claim-boundary rules (done)
 
@@ -458,11 +465,11 @@ and what comes out is modes and searches rather than checks.
 ### The limit this keeps
 
 Nothing here changes what a soak proves, or how long a changed image must soak
-for. The stochastic-sampling argument under Part 3 stands unaltered, and so does
-the judgment it leaves open: whether a version bump should force a fresh soak
-regardless of image identity. Making evidence mandatory rather than optional
-makes that question live, because the answer now decides whether a release may
-proceed rather than which flag to pass.
+for. The stochastic-sampling argument under Part 3 stands unaltered. Making
+evidence mandatory rather than optional made the question it left open -- whether
+a version bump should force a fresh soak regardless of image identity -- decide
+whether a release may proceed rather than which flag to pass. Part 3 records the
+answer: it does not.
 
 One related choice is deliberately left to the operator. `make soak` warns
 rather than refuses when handed a duration below what a production release
