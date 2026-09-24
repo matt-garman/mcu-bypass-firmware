@@ -287,10 +287,103 @@ if ! output=$(FAKE_TOOL_LOG="$cbmc_log" run_make test-cbmc STRICT_TOOLS=1 \
 		"CBMC=$fake_cbmc" 2>&1); then
 	fail "test-cbmc rejected an available tool under STRICT_TOOLS=1: $output"
 fi
-[ "$(wc -l < "$cbmc_log")" -eq 11 ] \
-	|| fail "test-cbmc did not execute all 11 proof commands"
 [[ "$output" == *"all debounce-core proofs SUCCESSFUL"* ]] \
 	|| fail "test-cbmc omitted its completion sentinel"
+checks=$((checks + 1))
+
+# EVERY DEFINED PROOF IS DISPATCHED, AND NOTHING ELSE IS. This used to be a
+# literal count of fake-cbmc invocations, and it went red once on an entirely
+# correct change: two proofs were added to the source and to the Makefile's
+# lists, and the literal was not. The obvious repair -- derive the expectation
+# from CBMC_PROOFS, CBMC_PROOFS_LOOP and CBMC_PROOFS_DEEP -- is self-fulfilling:
+# a proof dropped from a list lowers the expectation exactly as much as the
+# count, and the gate stays green while the proof stops running. So the
+# expectation comes from the OTHER side, the proofs test/formal/test_cbmc.c
+# defines, and the two are compared by name. A proof defined but dispatched by
+# no list -- which the literal could never see -- fails naming the proof, and a
+# proof added properly to both sides needs no edit here.
+#
+# The definition scan fails closed rather than under-counting. Comments are
+# stripped by the host preprocessor, not by a pattern, so a commented-out proof
+# is not a proof. Conditional compilation is refused outright, because which
+# branch cbmc sees is not a lexical question. And every remaining `prove_`
+# identifier must sit on a recognized `void prove_<name>(void)` definition line,
+# so a proof written in a form the scan does not parse -- static, macro-built,
+# brace on its own line -- stops the gate instead of silently dropping out.
+cbmc_defined_proofs() {
+	local source=$1 stripped
+	stripped=$("${HOSTCC:-cc}" -fpreprocessed -dD -E -P "$source") \
+		|| { printf 'could not strip comments from %s\n' "$source"; return 1; }
+	if grep -Eq '^[[:space:]]*#[[:space:]]*(if|ifdef|ifndef|elif|else)\b' <<<"$stripped"; then
+		printf '%s uses conditional compilation; the proof set is not lexically decidable\n' "$source"
+		return 1
+	fi
+	local unrecognized
+	unrecognized=$(grep -E '\bprove_[A-Za-z0-9_]*' <<<"$stripped" \
+		| grep -Ev '^void prove_[A-Za-z0-9_]+\(void\) \{$' || true)
+	if [ -n "$unrecognized" ]; then
+		printf '%s has a prove_ reference that is not a recognized definition: %s\n' \
+			"$source" "$unrecognized"
+		return 1
+	fi
+	sed -nE 's/^void (prove_[A-Za-z0-9_]+)\(void\) \{$/\1/p' <<<"$stripped"
+}
+
+# <defined names> <fake-cbmc log>: prints why the two disagree and returns 1.
+cbmc_proofs_dispatched() {
+	local defined=$1 log=$2 dispatched missing extra repeated
+	[ -n "$defined" ] || { printf 'no proofs are defined\n'; return 1; }
+	dispatched=$(sed -nE 's/.*--function ([^ ]+).*/\1/p' "$log")
+	[ "$(printf '%s\n' "$dispatched" | grep -c .)" -eq "$(wc -l < "$log")" ] \
+		|| { printf 'a cbmc invocation names no --function\n'; return 1; }
+	repeated=$(printf '%s\n' "$dispatched" | sort | uniq -d)
+	missing=$(comm -23 <(printf '%s\n' "$defined" | sort -u) \
+		<(printf '%s\n' "$dispatched" | sort -u))
+	extra=$(comm -13 <(printf '%s\n' "$defined" | sort -u) \
+		<(printf '%s\n' "$dispatched" | sort -u))
+	[ -z "$missing" ] || { printf 'defined but never dispatched: %s\n' "$(tr '\n' ' ' <<<"$missing")"; return 1; }
+	[ -z "$extra" ] || { printf 'dispatched but not defined: %s\n' "$(tr '\n' ' ' <<<"$extra")"; return 1; }
+	[ -z "$repeated" ] || { printf 'dispatched more than once: %s\n' "$(tr '\n' ' ' <<<"$repeated")"; return 1; }
+}
+
+cbmc_report=$work/cbmc-proofs.log
+defined_proofs=$(cbmc_defined_proofs "$ROOT/test/formal/test_cbmc.c") \
+	|| fail "test-cbmc proof inventory: $defined_proofs"
+cbmc_proofs_dispatched "$defined_proofs" "$cbmc_log" >"$cbmc_report" \
+	|| fail "test-cbmc proof dispatch: $(<"$cbmc_report")"
+checks=$((checks + 1))
+
+# The reject cases, each spoiling one side the way a real edit would.
+assert_cbmc_rejected() {
+	local description=$1 expected=$2 rc=0; shift 2
+	"$@" >"$cbmc_report" 2>&1 || rc=$?
+	[ "$rc" -ne 0 ] || fail "the CBMC proof check accepted $description"
+	grep -Fq "$expected" "$cbmc_report" \
+		|| fail "$description was rejected for the wrong reason: $(<"$cbmc_report")"
+	checks=$((checks + 1))
+}
+assert_cbmc_rejected 'a proof defined in the source but in no dispatch list' \
+	'defined but never dispatched: prove_new_property' \
+	cbmc_proofs_dispatched "$defined_proofs"$'\nprove_new_property' "$cbmc_log"
+grep -v -- '--function prove_press_liveness ' "$cbmc_log" > "$work/cbmc-dropped.log"
+assert_cbmc_rejected 'a proof dropped from its dispatch list' \
+	'defined but never dispatched: prove_press_liveness' \
+	cbmc_proofs_dispatched "$defined_proofs" "$work/cbmc-dropped.log"
+{ cat "$cbmc_log"; grep -- '--function prove_integrate ' "$cbmc_log"; } > "$work/cbmc-twice.log"
+assert_cbmc_rejected 'a proof dispatched twice' \
+	'dispatched more than once: prove_integrate' \
+	cbmc_proofs_dispatched "$defined_proofs" "$work/cbmc-twice.log"
+printf '#if 0\nvoid prove_hidden(void) {\n}\n#endif\n' > "$work/cbmc-conditional.c"
+assert_cbmc_rejected 'a conditionally compiled proof' \
+	'uses conditional compilation' \
+	cbmc_defined_proofs "$work/cbmc-conditional.c"
+printf 'static void prove_hidden(void)\n{\n}\n' > "$work/cbmc-unparsed.c"
+assert_cbmc_rejected 'a proof in a form the scan does not parse' \
+	'not a recognized definition' \
+	cbmc_defined_proofs "$work/cbmc-unparsed.c"
+printf '// void prove_commented(void) {\nvoid prove_live(void) {\n}\n' > "$work/cbmc-commented.c"
+[ "$(cbmc_defined_proofs "$work/cbmc-commented.c")" = prove_live ] \
+	|| fail "the CBMC proof scan counted a commented-out proof"
 checks=$((checks + 1))
 
 : > "$cppcheck_log"
@@ -305,6 +398,6 @@ fi
 	|| fail "analyze-cppcheck omitted its per-profile execution diagnostics"
 checks=$((checks + 1))
 
-[ "$checks" -eq 72 ] \
-	|| fail "strict optional-tool inventory ran $checks checks, expected 72"
+[ "$checks" -eq 79 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 79"
 printf 'strict optional-tool validation (host + AVR-XT + all three PIC parts): %d checks, 0 failures\n' "$checks"

@@ -261,40 +261,6 @@ Dependencies: regulator and MCU electrical data. Effort: about 2-3 hours. Risk:
 Medium; real-board startup assumptions are not represented by digital
 simulation alone.
 
-### T25-cbmc-proof-count - Cross-check the dispatched CBMC proof count against the source
-
-`test/test_strict_tools.sh` asserts that `test-cbmc` under `STRICT_TOOLS=1`
-issues a fixed number of `cbmc` invocations, restating that number as a literal.
-It has drifted once already: two proofs were added, the Makefile's three proof
-lists grew with them, the assertion still held the old number, and the gate went
-red on an addition that was entirely correct.
-
-The tempting repair is the wrong one. Deriving the expected count from
-`CBMC_PROOFS`, `CBMC_PROOFS_LOOP` and `CBMC_PROOFS_DEEP` makes the assertion
-self-fulfilling: a proof accidentally dropped from a dispatch list would lower
-the expectation by exactly as much as it lowers the count, and the gate would
-stay green while the proof stopped running. The literal is doing real pinning
-work -- it is the only thing in the tree that would notice a silently
-undispatched proof -- and that property must survive any rewrite.
-
-What removes the drift without losing the pin is to derive the expectation from
-the other side: `grep -c '^void prove_' test/formal/test_cbmc.c` counts the
-proofs that are *defined*, the fake-`cbmc` log counts the proofs that are
-*dispatched*, and asserting the two are equal catches both failure directions.
-A proof defined but left out of a Makefile list fails as a coverage gap -- a
-case the current literal cannot detect at all -- and a new proof added properly
-to both sides needs no edit here. Today those numbers agree at eleven.
-
-Acceptance test: adding a proof to `test/formal/test_cbmc.c` and to a dispatch
-list keeps the gate green with no edit to the assertion; adding it to the source
-only turns the gate red naming the undispatched proof; the existing
-STRICT_TOOLS=1 negative cases are unaffected.
-
-Dependencies: none. Effort: 30-45 minutes, most of it confirming the definition
-scan cannot be fooled by a commented-out or conditionally compiled proof. Risk
-if deferred: Low -- the literal is correct as of this writing and a future
-mismatch fails loudly and names the count, exactly as it did this time.
-
 ### T25-program-argv - Cross-check published commands against executed argv
 
 A release now pins its published PIC10F322 command to `PIC10F322_PROG_CMD` and
@@ -863,16 +829,13 @@ recovers MAKE and PROJECT_MAKE but adds four permanent false positives
 **Start here.** The tiers group work by kind rather than by urgency -- Tier 3 is
 where silicon-facing work lives whatever it costs -- so a short item that
 unblocks other work can sit beside a multi-day rig and read as though it were
-equally distant. Two are out of order that way:
+equally distant. One is out of order that way:
 
   - **`T3-hw-procedure` is the one open item that gates the `1.x.y` line.**
     `HARDWARE_VALIDATION_LOG.md`'s **Procedure** field cannot be filled for any
     part until that document exists, so no controlled record can be complete for
     any part, and `T3-pic12f675-bench` waits on it. Writing it is desk work; the
     hardware and instruments in its dependency line are what executing it needs.
-  - **`T25-cbmc-proof-count` is the cheapest gate improvement open.** Its
-    write-up already carries the design, including the repair that looks obvious
-    and is wrong, so what remains is implementation and one confirmation.
 
 The stable ID in each row matches exactly one open section above.
 
@@ -893,7 +856,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-irq-window | Interrupt-enabled invariant measurement | 2.5 | 1 h | Medium |
 | T25-multipress | Residual multi-press boundaries | 2.5 | 3-4 h | Medium |
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
-| T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
 | T25-program-argv | Published commands vs executed programmer argv | 2.5 | 2-3 h | Medium |
 | T25-gate-explain | Make a failing gate explain itself | 2.5 | 3-4 h | Medium - diagnosis |
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
