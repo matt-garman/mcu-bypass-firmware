@@ -1,6 +1,6 @@
 # Remaining work toward textbook reference quality
 
-**Status (2026-08-29):** No nominal-path firmware correctness defect is
+**Status (2026-09-24):** No nominal-path firmware correctness defect is
 currently known. PIC10F320 remains the self-contained exception.
 
 The release contract this source tree stands on -- the version, the part and
@@ -90,25 +90,6 @@ Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
 simulator-fidelity caveat rather than closing a firmware gap.
 
-### T25-pic322-hex-stack - Extend the final-HEX stack oracle to PIC10F322
-
-The PIC10F320 oracle decodes every reachable word in the shipped HEX and is
-independent of XC8 assembly annotations. Its device geometry is already
-parameterized, but the PIC10F322 startup emits a `clear_ram0` loop using
-`CLRF INDF`; the oracle correctly rejects it because an unconstrained FSR could
-write `PCL` or `INTCON`.
-
-Add a sound interprocedural abstract domain for both FSR and W so the startup
-clear range can be proved not to reach control-flow or interrupt SFRs. An
-approximate analysis that can under-report depth is unacceptable; retain the
-fail-closed rejection until the proof is sound. The assembly stack gate remains
-the policy-budget witness, while this oracle remains an architectural-limit
-cross-check.
-
-Dependencies: PIC baseline instruction semantics and XC8 startup behavior.
-Effort: High. Risk if deferred: Low-Medium because the existing assembly gate
-already bounds PIC10F322 stack use; this would add a second independent witness.
-
 ### T25-output-formal - Formally verify output-driver sequencing
 
 Model the relay, mute, and CD4053 drivers as small state machines and prove that,
@@ -184,16 +165,6 @@ Dependencies: a second AVR compiler and simulator-compatible images. Effort:
 about 2 hours. Risk: Medium; catches compiler-sensitive UB, volatile ordering,
 or ISR code-generation changes.
 
-### T25-opt-sweep - Sweep compiler optimization levels
-
-Build and simulate every Classic AVR variant at selected optimization levels,
-asserting the same behavioral results and reviewing timing/size changes. Vary
-`CFLAGS_COMMON` or add a dedicated optimization variable; do not replace the
-complete `CFLAGS`, which would drop required MCU and frequency flags.
-
-Dependencies: enough flash headroom at each selected level. Effort: about 1
-hour. Risk: Medium; a quick check for optimization-sensitive behavior.
-
 ### T25-stack-cross - Add an AVR disassembly stack-depth cross-check
 
 Use `avr-objdump` to recover the actual CALL/RCALL graph, combine it with frame
@@ -242,20 +213,6 @@ expected-image check, and removal of the now-unneeded
 Dependencies: full PIC10F320 toolchain and target validation. Effort: about 20
 minutes plus reruns. Risk: Low; optional simplification, not a correctness fix.
 
-### T25-clock-sweep - Add a fine-grained oscillator-drift sweep
-
-Sweep the arithmetic drift factor used to interpret fixed tick counts between
-the documented tolerance endpoints (for example, in 1% increments) and assert
-the wall-clock press/release latency budgets. Do not describe this as changing
-the simulated oscillator unless the harness is extended to do so. Endpoint
-tests already cover the extreme factors, so this is an independent monotonicity
-and rounding cross-check rather than evidence of a known intermediate-frequency
-defect.
-
-Dependencies: parameterized drift-factor arithmetic, or explicit simulator
-clock control if true oscillator variation is later desired. Effort: about 1
-hour. Risk: Low.
-
 ### T25-wdt-rate - Measure watchdog pet frequency
 
 Count watchdog-pet executions over fixed steady-state and actuation windows.
@@ -292,18 +249,6 @@ instruction-accurate firmware confirmation.
 Dependencies: deterministic tick-phase control. Effort: about 3-4 hours. Risk:
 Medium; exact rate-limit and counter-drain behavior.
 
-### T25-poweron-sim - Repair power-on-pressed simulator fidelity
-
-The simavr harness drives the switch low before initial execution, but simavr
-clears PINB during watchdog reset instead of preserving the externally driven
-IRQ level. Either patch that reset behavior or re-establish the external drive
-immediately after each reset, then cover power-on-held and watchdog-reset-held
-trajectories. The golden model and model checker already cover the logic; this
-is an image-simulator fidelity gap.
-
-Dependencies: a reset hook or simulator fix that does not hide real reset
-behavior. Effort: about 1-2 hours. Risk: Low.
-
 ### T25-power-ramp - Analyze slow power-supply ramp-up
 
 Verify initialization remains fail-safe from plausible reset-register states,
@@ -315,42 +260,6 @@ a datasheet-backed timing analysis.
 Dependencies: regulator and MCU electrical data. Effort: about 2-3 hours. Risk:
 Medium; real-board startup assumptions are not represented by digital
 simulation alone.
-
-### T25-name-contract-shim - Check overrides handed to a routing Make shim
-
-Axis C of `test/test_makefile_name_contract.py` harvests a `NAME=value` only
-where it follows a make word, and a make word is bare `make` or a `$(MAKE)`
-style reference. Five gate invocations enter the real Make graph through a
-routing shim whose command word is a shell variable instead -- `"$fake_make"`
-in `test/test_target_matrix.sh` and `test/test_target_lane_markers.sh`,
-`"$matrix_lane_make"` in `test/test_pic_build.sh` -- so no make word occurs in
-those lines and the overrides they carry are checked by no axis at all. Those
-overrides are real: MAKE, PROJECT_MAKE, CC, HOSTCC, FW_BASE, STRICT_TOOLS and
-five PIC12F675 names travel that way, and MAKE and PROJECT_MAKE reach axis C
-from nowhere else in the tree. A rename would leave those five harnesses
-passing inert overrides -- the exact defect class the gate exists to catch, one
-level below where it currently looks.
-
-The obvious repair is the wrong one, and it was measured rather than guessed.
-Widening the make word to accept a lowercase `$..._make` command word recovers
-MAKE and PROJECT_MAKE but adds four false positives -- MUTATION_MAKE_LOG,
-PIC_BASELINE_STALE_HEX, PIC_GPSIM_SELFTEST_LOG and TOOL_LOG, every one an
-environment prefix for a child process -- buying two names at the price of four
-the gate could then never check again. What the harvest needs is command
-POSITION: the command word of a statement is its first word that is not an
-assignment, and an override is an assignment after it. That is the shell's own
-rule, it is already implemented for the prefix half in `env_channel_names()`,
-and it recognizes any invocation of a Make command without a name-shape
-heuristic.
-
-Acceptance test: the five shim sites contribute their overrides again, the four
-names above stay unharvested, and axis C's negative case (e) still rejects a
-make word sitting inside an assignment's value.
-
-Dependencies: none. Effort: 2-3 hours, most of it re-measuring the harvest diff
-across the whole tree. Risk if deferred: Low -- each of those five harnesses
-asserts on the argument list its shim was called with, so a severed override
-there would most likely surface as a loud harness failure rather than silently.
 
 ### T25-cbmc-proof-count - Cross-check the dispatched CBMC proof count against the source
 
@@ -569,83 +478,42 @@ silicon evidence gap.
 ### T3-pic12f675-bench - Graduate the PIC12F675 on silicon
 
 The part is built, tested, formally verified, statically analyzed and
-**release-supported from `v0.9.9`** here, and — like every other part in this
-repository — has **no controlled hardware-qualification record**. That is the
-`0.9.x` line: validated in software, with no bench run whose procedure,
-configuration bytes and measurements are on file. (Some parts do have
-self-reported field-use reports; this one does not. `HARDWARE_VALIDATION_LOG.md`
-keeps the two apart and states what a controlled record must retain.) This item
-is the PIC12F675's slice of the `1.x.y` hardware-validation pass, which closes
-four open risks that are invisible to every lane this repository has. The
-numbers are the original ones from the port assessment, kept because the
-Makefile, the CI notes and the release documentation cite them; the four
-statements below are now the definition rather than a summary of one:
+**release-supported from `v0.9.9`** here, and -- like every other part in this
+repository -- has **no controlled hardware-qualification record**.
+`HARDWARE_VALIDATION_LOG.md` keeps field-use reports and controlled records
+apart and states what a controlled record must retain. This item is the
+PIC12F675's slice of the `1.x.y` hardware-validation pass, which closes four
+open risks that no lane in this repository can see. Their numbers come from the
+original port assessment and are kept because the Makefile, the CI notes and
+the release documentation cite them:
 
 - **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
   factory-set per device and fix the BOR/POR trip voltages.
-  `make pic12f675-program` enforces the build-side half -- the toolchain must
-  leave the field erased -- and now requires a `pic12f675-preflight` baseline,
-  an immediate matching pre-write read, and a retained matching post-write
-  result. **Measured once on silicon, 2026-09-07**: a PICkit 3 / MPLAB X 6.20
-  erase-and-program left `BG<1:0>` at its factory `0x1000`, and CONFIG read back
-  `0x11CC`, exactly `(image 0x31CC & ~BG) | (factory BG)`. That is one device,
-  one program, through a locally modified helper; see the bench-run record in
-  `HARDWARE_VALIDATION_LOG.md`. What remains is the same measurement on a
-  released helper, and on a repeat program of an already-programmed part.
+  `make pic12f675-program` enforces the build-side half -- the image must leave
+  the field erased -- and requires a `pic12f675-preflight` baseline, a matching
+  pre-write read and a retained matching post-write result. Measured once on
+  silicon on 2026-09-07: `BG<1:0>` kept its factory value through a PICkit 3 /
+  MPLAB X 6.20 erase-and-program (one device, one program, through a locally
+  modified helper; see the bench-run record in `HARDWARE_VALIDATION_LOG.md`).
+  Remaining: the same measurement through a released helper, and on a repeat
+  program of an already-programmed part.
 - **2 - factory oscillator trim (flash word 0x3FF) preserved on program.**
-  Losing it yields an untrimmed clock: wrong tick cadence, wrong coil-pulse
-  widths, and a device that still appears to work. The guarded workflow now
-  compares the complete word before/after and fails on a change. **Measured
-  once on silicon, 2026-09-07**: OSCCAL at 0x3FF read `0x3424` (`RETLW 0x24`)
-  before and after a PICkit 3 / MPLAB X 6.20 erase-and-program, still a valid
-  `RETLW`, with the transcript recording `Device Erased...` first -- so the trim
-  survived a real bulk erase. The JSON is retained and the run is recorded in
-  `HARDWARE_VALIDATION_LOG.md`. It is not yet the controlled result that section
-  2 of that file requires: no written procedure exists to execute
-  (`T3-hw-procedure`), and the helper was modified to bypass its release
-  checksum binding, so the run attests to the path and not to a shipped
-  artifact.
-- **8 - `ipecmd` actually runs against the part.** The pinned device pack lists
-  the PIC12F675 with the same MPLAB hardware-tool set as the PIC10F322, but
-  neither programmer binary is installed on any machine this repository is
-  tested on, so the command shape is inherited and has never been executed.
-  The first real execution of `scripts/flash-pic12f675.py` against an installed
-  MPLAB X 6.20 (2026-09-07) reached the version probe and stopped there, on two
-  defects that no lane could see because both fakes were modelled on the helper
-  rather than on the tool: the version pin required the token `MPLAB` on the
-  banner line, which real `ipecmd -?` never prints, and the jar was handed over
-  as a sealed `memfd` copy, which destroys the manifest `Class-Path` every one
-  of its ~200 sibling jars loads through, so `ipecmd` could not start at all.
-  Both are fixed and both now have regression coverage. What this does NOT yet
-  establish is anything past the probe: no read or program transcript from real
-  `ipecmd` has ever been retained, so the device-id and revision parsing, the
-  full-device export shape `-GF` actually produces, and every argument spelling
-  in `read_argv`/`write_argv` remain modelled on the same invention that hid
-  these two. Capture a real `-GF` export and a real program transcript before
-  trusting the rest of the transaction; expect the next failure there.
-  The bench run that followed found the next two immediately, as predicted:
-  `-P` must spell the part `12F675`, because `ipecmd` supplies the `PIC` prefix
-  itself and rejects the prefixed form, and the helper offered no way to ask the
-  programmer for target Vdd, so a board without its own supply could not be read
-  at all (`could not detect target voltage VDD`). `PART_ARG`, `--power tool`
-  (`-W`) and a `--show-commands` echo now cover all three, and the argument
-  spellings are asserted against the real ones. Still unproven past the reads:
-  no successful `-GF` export or program transcript from real `ipecmd` has been
-  retained, so the export shape and the device-id/revision parsing remain
-  modelled rather than observed.
-  **Closed 2026-09-07**, at the cost of four more corrections, all of the same
-  kind: the identity parsing wanted a numeric Device ID that `ipecmd` prints for
-  this part under no option at all (`-I` merely repeats the identity block), so
-  the ID now comes from the export's DEVID word -- which this part does not
-  export either, making it legitimately unavailable; the revision arrives as
-  `Device Revision ID = b`, not the `Revision =` the stub invented; and the
-  image was handed over as a sealed `memfd`, which `ipecmd` answers with `Hex
-  file not found.` for exactly the reason the jar could not start. A full
-  transaction then completed `status=PASS` with every claim re-derived
-  independently from the retained exports. The command shape is now observed
-  rather than inherited. What is still unobserved: a repeat program of an
-  already-programmed part, a read/finalize of an interrupted PENDING
-  transaction, and any execution of the programmed firmware.
+  Losing it yields an untrimmed clock: wrong tick cadence and coil-pulse widths
+  on a device that still appears to work. The guarded workflow compares the
+  complete word before and after and fails on a change. Measured once on
+  silicon on 2026-09-07, in the same run: the word survived a real bulk erase.
+  That run attests to the path, not to a shipped artifact -- the helper had been
+  modified to bypass its release checksum binding, and no written procedure
+  existed to execute (`T3-hw-procedure`). Remaining: the same as item 1.
+- **8 - `ipecmd` actually runs against the part.** A full transaction through
+  `scripts/flash-pic12f675.py` and real MPLAB X 6.20 `ipecmd` completed
+  `status=PASS` on 2026-09-07, with every claim re-derived from the retained
+  exports. Getting there corrected a series of places where the helper and its
+  fakes had been modelled on an assumed `ipecmd` rather than the real one (Git
+  history has each), so the command shape is now observed rather than
+  inherited. Remaining unobserved: a repeat program of an already-programmed
+  part, a read/finalize of an interrupted PENDING transaction, and any execution
+  of the programmed firmware.
 - **9 - GP2's readback margin.** The port-follows-shadow guard re-reads `GPIO`
   against the SRAM shadow every tick, and GP2 is the one output whose input
   buffer is a Schmitt Trigger (VIH min 0.8*VDD) rather than TTL. On
@@ -654,17 +522,13 @@ statements below are now the definition rather than a summary of one:
   fail-safe pulldown a builder may substitute. gpsim models pins ideally, so no
   lane here can see this one at all.
 
-There are now two vehicles for the first three. The guarded
-`pic12f675-preflight` / `pic12f675-program` bench workflow records a factory
-baseline, requires it to match immediately before and after a write, and refuses
-an image that would overwrite the calibration word; it drives a pk2cmd reader.
-From `v0.9.10` the release-shipped `scripts/flash-pic12f675.py` runs the same
-transaction against PICkit 3 and MPLAB X 6.20 `ipecmd` with no checkout, which
-makes it the vehicle for item 8 as well as items 1 and 2 -- the properties its
-bench run must prove are enumerated under "Outstanding controlled runs" in
-`HARDWARE_VALIDATION_LOG.md`. What is missing in both cases is a retained result
-from real silicon. The fourth (GP2) needs a meter on a built `cd4053_with_mute`
-board.
+Two vehicles cover items 1, 2 and 8: the guarded source-checkout
+`pic12f675-preflight` / `pic12f675-program` workflow, which drives a pk2cmd
+reader, and, from `v0.9.10`, the release-shipped `scripts/flash-pic12f675.py`,
+which runs the same transaction against PICkit 3 and MPLAB X `ipecmd` with no
+checkout. The properties its controlled run must prove are listed under
+"Outstanding controlled runs" in `HARDWARE_VALIDATION_LOG.md`. Item 9 needs a
+meter on a built `cd4053_with_mute` board.
 
 Dependencies: a PIC12F675, a PICkit programmer, a meter, and a built board.
 Effort: about half a day at the bench plus 1-2 hours to retain and review the
@@ -947,6 +811,71 @@ audience already has a programmer CLI installed -- and can be added later
 without blocking the CLI path. Reconsider if the generated per-profile commands
 measurably fail the paste-one-command goal.
 
+### Extend the final-HEX stack oracle to PIC10F322
+
+The PIC10F320 oracle decodes every reachable word of the shipped HEX,
+independently of XC8's assembly annotations. PIC10F322 startup emits a
+`clear_ram0` loop using `CLRF INDF`, which the oracle correctly rejects because
+an unconstrained FSR could write `PCL` or `INTCON`. Accepting it needs a sound
+interprocedural abstract domain for FSR and W; an approximate one that could
+under-report depth is unacceptable. That is high effort for a second witness to
+a property the assembly stack gate already bounds.
+
+Reconsider if the assembly gate's evidence comes into doubt -- an XC8 change to
+its annotation or call-graph output -- or if PIC10F322 return-stack margin
+becomes tight.
+
+### Sweep compiler optimization levels
+
+The shipping images are built at one pinned optimization level, so a sweep
+would qualify builds nobody ships. The defect classes it would catch --
+optimization-sensitive undefined behavior, volatile ordering, ISR code
+generation -- are reached more directly by varying the compiler under the
+shipping flags, which `T25-cross-compiler` does.
+
+Reconsider if the shipped optimization level changes, or if the
+cross-compiler lane finds an optimization-sensitive defect.
+
+### Sweep oscillator drift between the tolerance endpoints
+
+The wall-clock press/release budgets come from fixed tick counts scaled by a
+drift factor, and the endpoint tests already assert both extremes. An
+intermediate sweep could find only a monotonicity or rounding fault in that
+arithmetic, and no such fault has been seen. It would not change the simulated
+oscillator either.
+
+Reconsider if the budget arithmetic stops being a plain scaling of tick counts,
+or if a simulator gains true oscillator control.
+
+### Repair power-on-pressed simulator fidelity
+
+simavr clears PINB during a watchdog reset instead of preserving the externally
+driven level, so the classic-AVR image simulation cannot hold the switch across
+a reset. The power-on-held and reset-held logic is already covered by the golden
+model and the model checker; patching the simulator would add fidelity to one
+harness, not coverage of a new state.
+
+Reconsider if simavr fixes the reset behavior upstream, or if a defect is found
+in `init()`'s power-on-pressed path that the model could not see.
+
+### Check overrides handed to a routing Make shim
+
+Axis C of `test/test_makefile_name_contract.py` harvests a `NAME=value` only
+after a make word, so five gate invocations that reach Make through a
+shell-variable shim (`"$fake_make"` in `test/test_target_matrix.sh` and
+`test/test_target_lane_markers.sh`, `"$matrix_lane_make"` in
+`test/test_pic_build.sh`) contribute no overrides. Each of those harnesses
+asserts on the argument list its shim receives, so a renamed override there
+would most likely fail loudly anyway. Closing it is two to three hours of
+re-measurement for a gate on a gate.
+
+Reconsider if a severed override is found in one of those harnesses, or when
+axis C is next reworked. Harvest by command POSITION then -- the first word of a
+statement that is not an assignment, as `env_channel_names()` already does for
+prefixes. Widening the make word to a lowercase `$..._make` was measured: it
+recovers MAKE and PROJECT_MAKE but adds four permanent false positives
+(MUTATION_MAKE_LOG, PIC_BASELINE_STALE_HEX, PIC_GPSIM_SELFTEST_LOG, TOOL_LOG).
+
 ---
 
 ## Priority summary
@@ -971,24 +900,19 @@ The stable ID in each row matches exactly one open section above.
 |---|---|---:|---:|---|
 | T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
-| T25-pic322-hex-stack | Extend final-HEX stack oracle to PIC10F322 | 2.5 | High | Low-Medium |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
 | T25-delay-formal | Blocking-delay safety argument | 2.5 | 1-2 h | Medium |
 | T25-golden-cross | Independent-model/direct-core cross-validation | 2.5 | 1-2 h | Medium |
 | T25-klee-path | Bounded full-path KLEE proof | 2.5 | 2-4 h | High assurance value |
 | T25-klee-ci | Execute KLEE in CI | 2.5 | 2 h | Medium |
 | T25-cross-compiler | Narrow alternate-AVR-compiler lane | 2.5 | 2 h | Medium |
-| T25-opt-sweep | Compiler optimization sweep | 2.5 | 1 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
 | T25-avr-xt-stack | Record the measured AVR-XT shell stack maxima | 2.5 | 30 min | Low - completeness |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |
-| T25-clock-sweep | Fine-grained oscillator-drift sweep | 2.5 | 1 h | Low |
 | T25-wdt-rate | Watchdog pet-frequency measurement | 2.5 | 1-2 h | Medium |
 | T25-irq-window | Interrupt-enabled invariant measurement | 2.5 | 1 h | Medium |
 | T25-multipress | Residual multi-press boundaries | 2.5 | 3-4 h | Medium |
-| T25-poweron-sim | Power-on-pressed simulator fidelity | 2.5 | 1-2 h | Low |
 | T25-power-ramp | Power-supply ramp analysis | 2.5 | 2-3 h | Medium |
-| T25-name-contract-shim | Check overrides handed to a routing Make shim | 2.5 | 2-3 h | Low |
 | T25-cbmc-proof-count | Cross-check dispatched CBMC proof count against source | 2.5 | 30-45 min | Low |
 | T25-program-argv | Published commands vs executed programmer argv | 2.5 | 2-3 h | Medium |
 | T25-gate-explain | Make a failing gate explain itself | 2.5 | 3-4 h | Medium - diagnosis |
