@@ -476,25 +476,30 @@ __attribute__((OS_main)) int main(void) {
         }
 
         // Pause until the next 1ms Timer0 compare-match ISR wakes the core.
-        // Lost-wakeup is impossible on AVR IDLE sleep: if the ISR fires in
-        // the window between clearing timer_isr_called_ and the SLEEP
-        // instruction, the hardware aborts SLEEP immediately and services the
-        // interrupt before the next instruction (ATtiny13A datasheet §7.3,
-        // Sleep Modes). No tick is ever missed even without disabling
-        // interrupts around the check-then-sleep sequence.
         //
-        // Nor can a threshold crossing be "coalesced away."  The integrator
-        // runs in the ISR, so every 1ms sample folds into debounce_counter
-        // whether or not main has run; and debounce_step() is level-triggered
+        // This test-then-sleep sequence runs with interrupts enabled, so it
+        // has a window: if a tick ISR runs after timer_isr_called_ was tested
+        // above but before the SLEEP instruction, the core returns from it,
+        // executes that SLEEP, and sleeps until the NEXT compare match.  The
+        // tick is not lost -- the ISR has already integrated its sample and
+        // set timer_isr_called_ -- but it is coalesced: main's next step
+        // comes one tick late and covers two integrator samples.  avr-libc's
+        // <avr/sleep.h> documentation describes this race and the
+        // cli()/sleep_enable()/sei()/sleep_cpu() idiom that closes it; the
+        // idiom is deliberately not used, because the coalescing is harmless.
+        // The pass that performs a blocking actuation always takes this path:
+        // its ticks arrive during the delay, before the SLEEP.
+        //
+        // Coalescing cannot lose a press.  The integrator runs in the ISR, so
+        // every 1ms sample folds into debounce_counter whether or not main has
+        // run; and in PRESS_DEBOUNCE_WAIT, debounce_step() is level-triggered
         // on that saturating counter (>= PRESSED_THRESH), not edge-triggered,
-        // so it needs no transient crossing to be observed live.  In
-        // PRESS_DEBOUNCE_WAIT main does no blocking work, so it steps once
-        // per tick and inspects the counter after every ISR.  The only place
-        // main can miss ticks is the blocking actuation in set_*_state() -
-        // which runs only on a toggle, as we enter RELEASE_DEBOUNCE_WAIT with
-        // the counter reloaded to and saturating at RELEASE_THRESH while
-        // awaiting release: no press is at risk there.  (See the
-        // integrator-in-ISR rationale in bypass_pure.c.)
+        // so a late step still sees the crossing, at most one tick late.  The
+        // ticks main steps over during a blocking actuation in set_*_state()
+        // occur only after a toggle, in RELEASE_DEBOUNCE_WAIT with the counter
+        // reloaded to and saturating at RELEASE_THRESH: no press is at risk
+        // there.  The delayed watchdog pet is the TICK_PERIOD_MS term of
+        // WDT_PET_TO_PET_MAX_MS() (bypass_output_common.h).
         hw_wait_for_tick();
     }
 

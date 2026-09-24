@@ -473,10 +473,19 @@ __attribute__((OS_main)) int main(void) {
             }
         }
 
-        // Pause until the next 1ms TCB0 tick.  Lost-wakeup is impossible on AVR
-        // IDLE sleep: if the ISR fires between clearing the flag and SLEEP, the
-        // core executes SLEEP as a no-op and services the interrupt (tinyAVR-0
-        // SLPCTRL/sleep semantics).  No tick is ever missed.
+        // Pause until the next 1ms TCB0 tick.  Interrupts stay enabled across
+        // this test-then-sleep sequence, so a tick ISR that runs after the flag
+        // test but before SLEEP is followed by the SLEEP itself, and the core
+        // sleeps until the NEXT tick.  The sample is not lost (the ISR has
+        // integrated it and set the flag); main's next step comes one tick
+        // late and covers two samples.  This is harmless for the same reasons
+        // as on the classic-AVR shell: the integrator runs in the ISR, the
+        // press test is level-triggered on the saturating counter, blocking
+        // actuations run only in RELEASE_DEBOUNCE_WAIT with the lockout
+        // loaded, and the delayed pet is the TICK_PERIOD_MS term of
+        // WDT_PET_TO_PET_MAX_MS() (bypass_output_common.h).  The
+        // cli()/sleep_enable()/sei()/sleep_cpu() idiom that closes the window
+        // (avr-libc <avr/sleep.h>) is deliberately not used.
         hw_wait_for_tick();
     }
 }

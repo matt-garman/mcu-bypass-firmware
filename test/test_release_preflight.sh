@@ -1089,7 +1089,7 @@ checks=$((checks + 1))
 # source commit already contains release/<version>/QUALIFICATION -- and naming it
 # during that window is permitted only alongside the exact transition line that
 # discloses it.
-transition_line='**Pre-tag transition:** `release/v1.2.3/` is created by the release cut and published with the signed `v1.2.3` tag, so the source tree that declares this contract does not contain it yet.'
+transition_line='**Pre-tag transition:** `release/v1.2.3/` is added by the artifact commit that follows the source commit declaring this contract, and is published with the signed `v1.2.3` tag.'
 
 declare_in_block() {
 	# The two `local` statements are separate on purpose. Bash expands every

@@ -177,6 +177,23 @@ if git -C "$ROOT" rev-parse -q --verify "$replay_before" >/dev/null 2>&1 \
 	git -C "$ROOT" show "$replay_after:CHANGELOG.md" > "$work/hand-CHANGELOG.md"
 	git -C "$ROOT" show "$replay_after:release/README.md" > "$work/hand-release-README.md"
 
+	# The transition line was reworded after v0.9.12: the original claimed the
+	# tree "does not contain it yet", which stopped being true on main once the
+	# artifact commit landed. Carry the hand commit forward to the current
+	# spelling -- exactly one line, exactly the old wording, or the replay fails
+	# rather than comparing against a document it did not edit -- so the replay
+	# still pins every other byte to what was shipped.
+	hand_transition='> **Pre-tag transition:** `release/v0.9.12/` is created by the release cut and published with the signed `v0.9.12` tag, so the source tree that declares this contract does not contain it yet.'
+	[ "$(grep -Fxc "$hand_transition" "$work/hand-release-README.md" || true)" -eq 1 ] \
+		|| fail "the v0.9.12 release commit no longer carries its original transition line"
+	current_transition="> $(. "$ROOT/scripts/release-documentation.sh" && _release_transition_line "$replay_version")" \
+		|| fail "could not render the current transition line"
+	awk -v old="$hand_transition" -v new="$current_transition" \
+		'$0 == old { print new; next } { print }' \
+		"$work/hand-release-README.md" > "$work/hand-release-README.md.new" \
+		&& mv "$work/hand-release-README.md.new" "$work/hand-release-README.md" \
+		|| fail "could not carry the v0.9.12 transition line forward"
+
 	cmp -s "$work/hand-CHANGELOG.md" "$replay/CHANGELOG.md" \
 		|| fail "prepared CHANGELOG.md differs from the v0.9.12 release commit: $(diff -u "$work/hand-CHANGELOG.md" "$replay/CHANGELOG.md" | head -40)"
 	pass

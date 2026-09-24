@@ -1143,11 +1143,18 @@ does not make them independently enforceable by this repository.
   repository.
 
 | Sleep wake-up ordering
-| one instruction executes after `SEI` before the pending interrupt is serviced
-| ATtiny13A datasheet **§7.3**
-| **Documented implementation rationale.** The sleep-entry comment in
-  `src/bypass_mcu_avr_classic.c` ties the sequence to §7.3. No dedicated test can
-  enforce the cited silicon interrupt-ordering guarantee.
+| test-then-sleep with interrupts enabled; a tick ISR that runs after the flag
+  test is followed by the `SLEEP`, which then waits for the next tick
+| ATtiny13A datasheet, "Reset and Interrupt Handling" (one main-program
+  instruction executes after an interrupt returns); avr-libc `<avr/sleep.h>`
+  documentation (the test-then-sleep race)
+| **Documented implementation rationale.** The sleep-entry comments in both AVR
+  shells record that such a tick is coalesced into the next wake, not lost: the
+  ISR has already integrated its sample, and the press test is level-triggered
+  on the saturating counter, so the cost is one tick of step and pet latency,
+  the `TICK_PERIOD_MS` term of the watchdog budget. The race-closing
+  `cli()`/`sei()`/`sleep_cpu()` idiom is deliberately not used. No dedicated
+  test can enforce the cited silicon interrupt-ordering behavior.
 
 | PIC12F675 WDT period
 | `PSA=1`, `PS<2:0>` = `0b100` (1:16), de-rated floor 160 ms

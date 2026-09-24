@@ -3138,7 +3138,11 @@ clean:
 		test/formal/test_symbolic_klee.bc \
 		test/stack_*.o test/stack_*.su \
 		test/.toolchain.sig $(FW_BASE).plist
-	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list*
+	@# cppcheck writes its dump and CTU files beside each analyzed source and
+	@# deletes them itself on completion, so only an interrupted analysis leaves
+	@# them -- and then in src/, not the repository root.
+	rm -f *.dump *.ctu-info cppcheck-addon-ctu-file-list* \
+		src/*.dump src/*.ctu-info src/cppcheck-addon-ctu-file-list*
 	@# KLEE output: the pinned directory, plus the default-named and pre-`src/`
 	@# -reorganization forms so an existing worktree carrying either is cleaned too.
 	rm -rf $(KLEE_OUT_DIR) test/formal/klee-out-* test/formal/klee-last \

@@ -34,7 +34,7 @@ _release_current_block() {
 # two spelled differently would be a rule that silently stopped matching.
 _release_transition_line() {
 	[ "$#" -eq 1 ] || return 2
-	printf '**Pre-tag transition:** `release/%s/` is created by the release cut and published with the signed `%s` tag, so the source tree that declares this contract does not contain it yet.\n' \
+	printf '**Pre-tag transition:** `release/%s/` is added by the artifact commit that follows the source commit declaring this contract, and is published with the signed `%s` tag.\n' \
 		"$1" "$1"
 }
 
