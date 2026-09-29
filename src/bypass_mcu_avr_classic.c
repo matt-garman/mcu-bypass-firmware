@@ -14,18 +14,20 @@
 //     -Wall
 //     -Wextra
 //
-// Fuse configuration:
+// Fuse configuration (ATtiny13A; the ATtiny25/45/85 bytes and bit positions
+// differ -- see the Makefile's TINYX5_* fuses and test/avr/test_fuses.c):
 // Fuse      | Value                                     | Rationale
 // ----------+-------------------------------------------+----------------------------------------------------------------
-// CKSEL     | 0b0010 (Internal 9.6MHz)                  | Required for 1.2MHz operation with CKDIV8
-// SUT       | 0b00 (14 CK + 4ms) or 0b10 (14 CK + 64ms) | 64ms recommended for stable power-on with LDO regulator ramp-up
+// CKSEL     | 0b10 (Internal 9.6MHz)                    | Required for 1.2MHz operation with CKDIV8
+// SUT       | 0b10 (14 CK + 64ms)                       | Slowly rising power: stable power-on with LDO regulator ramp-up
 // CKDIV8    | 0 (enabled, i.e., divide by 8)            | Yields 1.2MHz system clock
 // WDTON     | 0 (enabled, i.e., WDT always on)          | Silicon-level guarantee: WDT cannot be disabled by software;
 //           |                                           | resilient against stray WDTCR writes (EMI, cosmic rays)
-// BODEN     | 0 (enabled)                               | Required for brown-out protection
-// BODLEVEL  | 0b00 (4.3V)                               | Peripheral-safe: relay and MOSFET
+// BODLEVEL  | 0b00 (4.3V typ, 4.1-4.5V specified)       | Peripheral-safe: relay and MOSFET
 //           |                                           | control both require >4V; 4.3V ensures
-//           |                                           | BOD fires while hardware can still respond
+//           |                                           | BOD fires while hardware can still respond.
+//           |                                           | (There is no separate BODEN fuse on this
+//           |                                           | part: BODLEVEL=0b11 is what disables BOD.)
 // RSTDISBL  | 1 (disabled, i.e., PB5 remains RESET)     | Critical: clearing this disables ISP programming
 // SELFPRGEN | 1 (disabled)                              | No self-programming needed
 // DWEN      | 1 (disabled)                              | debugWIRE not needed in production; consumes PB5
@@ -201,13 +203,17 @@ static void hw_wait_for_tick(void) { sleep_mode(); }
 // Watchdog: ~250ms timeout in system-reset mode. wdt_enable() sets WDE
 // (reset mode) for us. WDTO_250MS is the nearest standard step.
 //
-// NOTE: the AVR watchdog timer uses a separate oscillator that is
-// independent of the system clock; it has *very* loose tolerance.  We
-// should expect our 250ms watchdog timeout to be 100-350ms in practice.
+// NOTE: the AVR watchdog timer runs from a separate 128kHz oscillator,
+// independent of the system clock.  The datasheets give only typical
+// curves for it, no minimum or maximum; at 5V those put this 250ms
+// setting at roughly 265-310ms.  WDT_MIN_PERIOD_MS de-rates it to 100ms
+// (see "Datasheet References" in DESIGN_DOCUMENTATION.adoc).
 //
-// Also note: after a watchdog-triggered reset, WDTCR resets to 0 with WDE
-// forced on by WDRF, so the effective timeout is ~16ms until wdt_enable()
-// runs.  With a 50% margin, this could be as low as 7-8ms.
+// Also note: after ANY reset, WDTCR comes up with WDP=0 (2K cycles, ~16ms
+// typical), and with the WDTON fuse programmed the watchdog is already in
+// system-reset mode (after a watchdog reset, WDRF forces WDE as well).  So
+// the effective timeout is ~16ms until wdt_enable() runs.  With a 50%
+// margin, this could be as low as 7-8ms.
 //
 // We need to ensure that we don't create a WDT reset loop by making
 // init() so long that the WDT bites.  Hence, one of the first things we

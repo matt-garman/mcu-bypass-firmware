@@ -31,14 +31,18 @@
 //
 //   Fuse     | Value                         | Rationale
 //   ---------+-------------------------------+---------------------------------------
-//   WDTCFG   | PERIOD=256CLK (0x06), WINDOW=OFF | ~256ms WDT, ENABLED + hardware-LOCKED
+//   WDTCFG   | PERIOD=256CLK (0x06), WINDOW=OFF | 250ms WDT, ENABLED + hardware-LOCKED
 //            |                               | at reset (WDT.STATUS.LOCK=1).  Stronger
 //            |                               | than classic WDTON: software cannot
 //            |                               | change or disable it, and there is no
 //            |                               | post-reset short-window reset hazard.
-//   BODCFG   | LVL=BODLEVEL7 (~4.2V),        | Peripheral-safe floor: relay/MOSFET need
-//            | ACTIVE=ENABLED, SLEEP=ENABLED | >4V. ~4.2V is the AVR-XT analogue of the
-//            |                               | classic 4.3V BOD.  Encoding verified
+//   BODCFG   | LVL=BODLEVEL7 (4.2V typ,      | Relay/MOSFET need >4V.  BODLEVEL7 is the
+//            | 3.9-4.5V specified),          | AVR-XT analogue of the classic 4.3V BOD
+//            | ACTIVE=ENABLED, SLEEP=ENABLED | and the highest level the part offers,
+//            |                               | but its 3.9V minimum (DS40002318A Table
+//            |                               | 33-10) does not guarantee a trip above
+//            |                               | 4V; see DESIGN_DOCUMENTATION.adoc,
+//            |                               | Failsafe Mechanisms.  Encoding verified
 //            |                               | against the pinned ATtiny_DFP
 //            |                               | (iotn202.h LVL_enum, FUSE_LVL_gp=5):
 //            |                               | BODLEVEL0/2/7 = 1.8/2.6/4.2V are the
@@ -75,7 +79,7 @@
 // Compile-time constants only (mirroring the AVR classic shell: do NOT snapshot into
 // file-statics - that grows BSS and can perturb the fault-injection tests).
 #define MCLKCTRLB_EXPECTED    ((uint8_t)((uint8_t)CLKCTRL_PDIV_8X_gc | (uint8_t)CLKCTRL_PEN_bm)) // 16MHz/8
-#define WDT_CTRLA_EXPECTED    ((uint8_t)WDT_PERIOD_256CLK_gc) // fuse-locked ~256ms
+#define WDT_CTRLA_EXPECTED    ((uint8_t)WDT_PERIOD_256CLK_gc) // fuse-locked 250ms
 #define TCB0_CTRLA_EXPECTED   ((uint8_t)((uint8_t)TCB_CLKSEL_CLKDIV1_gc | (uint8_t)TCB_ENABLE_bm))
 #define TCB0_CTRLB_EXPECTED   ((uint8_t)TCB_CNTMODE_INT_gc)
 #define TCB0_INTCTRL_EXPECTED ((uint8_t)TCB_CAPT_bm)

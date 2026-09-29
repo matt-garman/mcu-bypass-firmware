@@ -17,34 +17,6 @@ open and actionable as of the date above.
 
 ---
 
-## Tier 2 - closes verification and traceability gaps
-
-### T2-avr-citations - Complete the AVR datasheet citations
-
-Add exact vendor-document revisions and load-bearing section, table, register,
-or parameter references to `DESIGN_DOCUMENTATION.adoc` for:
-
-- ATtiny13A/45/85 BOD fuse levels;
-- ATtiny202 `BODCFG` `LVL=BODLEVEL7`;
-- the post-reset watchdog window;
-- `WDTON` always-on fuse semantics;
-- internal-RC tolerance; and
-- the Timer0 CTC divisor derivation.
-
-`test/avr/test_fuses.c` already identifies the relevant datasheets and fuse
-sections; the gap is precise design-document traceability, not a complete
-absence of AVR references. Cross-check fuse encodings against the values the
-Makefile injects and burns, and do not guess section numbers. This was deferred
-from `v0.9.8`; complete it as post-release reference-grade traceability work.
-
-Dependencies: exact AVR vendor datasheets. Effort: about 1 hour with the source
-documents open. Risk if deferred: incomplete reference-grade traceability, not
-a known firmware defect.
-
----
-
-
-
 ## Tier 2.5 - additional software verification
 
 ### T25-yasimavr-repin - Re-pin yasimavr and retire the vendored patches
@@ -89,6 +61,24 @@ notice, not a measurement gap.
 Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
 simulator-fidelity caveat rather than closing a firmware gap.
+
+### T25-classic-wdt-comment - Correct the classic WDT floor comment at the next soak
+
+`src/bypass_pins_avr_classic.h` justifies `WDT_MIN_PERIOD_MS` with "WDT RC osc
+characterized 100-350 ms". The ATtiny13A and ATtiny25/45/85 datasheets give no
+such range: they give only typical curves, which put the 250 ms setting at
+roughly 265-310 ms at 5 V, so the 100 ms floor is a de-rating choice rather than
+a characterized bound. `DESIGN_DOCUMENTATION.adoc` ("Watchdog period and floor")
+already says this correctly; only the header comment is wrong.
+
+The fix is one comment, but the header is a soak-key driver source, hashed byte
+for byte, so editing it alone would force a fresh 24-hour soak for no firmware
+change. Make the edit in the same change as the next edit that invalidates the
+soak key anyway. The firmware edit must be made by the owner.
+
+Dependencies: the next soak-invalidating change. Effort: 5 minutes. Risk if
+deferred: a misattributed figure in one comment; the design document and the
+compile-time floor are correct.
 
 ### T25-output-formal - Formally verify output-driver sequencing
 
@@ -841,8 +831,8 @@ The stable ID in each row matches exactly one open section above.
 
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
-| T2-avr-citations | AVR datasheet citations | 2 | 1 h | High - traceability |
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
+| T25-classic-wdt-comment | Correct the classic WDT floor comment at the next soak | 2.5 | 5 min | Low |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
 | T25-delay-formal | Blocking-delay safety argument | 2.5 | 1-2 h | Medium |
 | T25-golden-cross | Independent-model/direct-core cross-validation | 2.5 | 1-2 h | Medium |

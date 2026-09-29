@@ -59,8 +59,9 @@
 // "Watchdog pet-to-pet budget" in DESIGN_DOCUMENTATION.adoc for the derivation
 // and the measured corroboration of each term below.
 #define TICK_PERIOD_MS    (1U)    // 1 ms TCB0 periodic tick
-#define WDT_MIN_PERIOD_MS (128U)  // PERIOD=256CLK ~256 ms nom; de-rated 50% for
-                                  // ATtiny202 OSCULP32K accuracy (datasheet)
+#define WDT_MIN_PERIOD_MS (128U)  // PERIOD=256CLK = 250 ms nom; OSCULP32K is +/-30%
+                                  // over the full range (DS40002318A Table 33-13),
+                                  // so ~192 ms at worst; 128 ms keeps margin below it
 
 // Bounded non-blocking work in the pet-to-pet window (boot: init() plus the
 // first loop pass; steady state: one loop pass) -- see the classic-AVR map for

@@ -33,10 +33,15 @@
 // test/test_fuse_injection_contract.py checks the other direction: that every
 // byte the Makefile injects survives the whole trip into the output below.
 //
-// Datasheet references:
-//   ATtiny13A  rev. 8126F, "Fuse Bytes" (low/high byte bit maps)
-//   ATtiny25/45/85 rev. 2586Q, "Fuse Bytes"
-//   ATtiny202/204/402/404/406 family data sheet, "FUSE - Fuses"
+// Datasheet references (each checked against the bytes decoded below; the
+// design document's "Datasheet References" table carries the full trace):
+//   ATtiny13A      DS40002307A, Microchip's reissue of Atmel 8126F: Tables
+//                  17-3/17-4 (fuse bit maps), 6-4 (CKSEL), 6-5 (SUT) and
+//                  18-6 (BODLEVEL)
+//   ATtiny25/45/85 2586Q: Tables 20-4/20-5 (fuse bit maps), 6-6 (CKSEL),
+//                  6-7 (SUT) and 21-7 (BODLEVEL)
+//   ATtiny202      DS40002318A: section 6.10.4 (fuse descriptions) and
+//                  Table 33-10 (BOD trip levels)
 //
 // Classic AVR fuses are active-low. AVR-XT fuses use encoded byte fields.
 
@@ -102,7 +107,7 @@ static void verify_byte_range(const char *name, unsigned value) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// ATtiny13A fuse map (datasheet 8126F; cross-checked against avr-libc
+// ATtiny13A fuse map (DS40002307A / 8126F; cross-checked against avr-libc
 // iotn13a.h FUSE_* macros).
 //
 // LOW byte:
@@ -198,7 +203,7 @@ static void verify_t85(void) {
 // memories by attiny202-fuses).
 //
 // WDTCFG:  WINDOW[7:4]=0 (off), PERIOD[3:0]=6 (256 cycles, fuse-locked).
-// BODCFG:  LVL[7:5]=7 (~4.2V), SAMPFREQ[4]=0,
+// BODCFG:  LVL[7:5]=7 (4.2V typ, 3.9-4.5V specified), SAMPFREQ[4]=0,
 //          ACTIVE[3:2]=1 (enabled), SLEEP[1:0]=1 (enabled).
 // OSCCFG:  FREQSEL[1:0]=1 (16 MHz).
 // SYSCFG0: CRCSRC[7:6]=3 (no CRC), RSTPINCFG[3:2]=1 (UPDI).

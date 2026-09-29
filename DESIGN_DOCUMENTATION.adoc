@@ -224,12 +224,15 @@ BOD fuse. The BOD/BOR floor is MCU-family-specific and not every
 supported part can enforce the >4v peripheral-safe threshold:
 +
 [horizontal]
-AVR Classic (ATtiny13a/45/85):: 4.3v BOD fuse -- enforces the >4v
-  floor the 5v relay coil / MOSFET peripherals require.
-ATtiny202 (AVR-XT):: BODCFG fuse `LVL=BODLEVEL7` (~4.2v), with BOD
-  enabled in both active and sleep modes. This is the AVR-XT
-  analogue of the classic 4.3v BOD and likewise enforces the >4v
-  peripheral-safe floor.
+AVR Classic (ATtiny13a/45/85):: 4.3v BOD fuse, specified at
+  4.1-4.5v -- enforces the >4v floor the 5v relay coil / MOSFET
+  peripherals require.
+ATtiny202 (AVR-XT):: BODCFG fuse `LVL=BODLEVEL7`, with BOD enabled in
+  both active and sleep modes. This is the AVR-XT analogue of the
+  classic 4.3v BOD and the highest level the part offers, but it is
+  specified at 3.9-4.5v (4.2v typical): it holds the supply near 4v
+  rather than guaranteeing a trip above it. A board whose peripherals
+  need a strict >4v floor must guarantee it in hardware on this part.
 PIC10F322:: BOR is enabled at the highest available trip
   (`BORV=HI`), but the PIC10F322's trip points are only ~2.4v (LO) /
   ~2.7v (HI). The PIC therefore *cannot* enforce a >4v floor in
@@ -1142,12 +1145,141 @@ does not make them independently enforceable by this repository.
   D017-D019; there is no current-measurement gate or bench result in this
   repository.
 
+| AVR Classic fuse encodings
+| ATtiny13A `lfuse=0x4A`, `hfuse=0xF9`; ATtiny25/45/85 `lfuse=0x62`,
+  `hfuse=0xCC`; only `lfuse` and `hfuse` are written
+| ATtiny13A datasheet DS40002307A **Tables 17-3/17-4** (fuse bit maps),
+  **Table 6-4** (`CKSEL[1:0]` = `10` -> 9.6 MHz) and **Table 6-5**
+  (`SUT[1:0]` = `10` -> 14 CK + 64 ms); ATtiny25/45/85 datasheet 2586Q
+  **Tables 20-4/20-5**, **Table 6-6** (`CKSEL[3:0]` = `0010` -> 8 MHz) and
+  **Table 6-7** (`SUT[1:0]` = `10` -> 14 CK + 64 ms)
+| **Machine-gated.** `make test-fuses` decodes the exact bytes the Makefile
+  burns, field by field, against these bit maps; `CKDIV8` is programmed on
+  both, giving 1.2 MHz and 1.0 MHz. The two families place the same fuses in
+  different bytes and bit positions -- `WDTON` is low-byte bit 5 on the
+  ATtiny13A and high-byte bit 4 on the ATtiny25/45/85 -- which is why the
+  checker decodes each separately.
+
+| AVR Classic brown-out trip
+| `BODLEVEL` 4.3 V: ATtiny13A `BODLEVEL[1:0]` = `00`, ATtiny25/45/85
+  `BODLEVEL[2:0]` = `100`
+| DS40002307A **Table 18-6** and 2586Q **Table 21-7**: 4.1 V min / 4.3 V typ
+  / 4.5 V max on both
+| **Build-derived machine gate; documented physical threshold.**
+  `make test-fuses` asserts the encoding. The 4.1 V minimum is what keeps the
+  trip above the >4 V the 5 V peripherals need (see Failsafe Mechanisms); the
+  silicon trip voltage itself is a vendor specification.
+
+| ATtiny202 brown-out trip
+| `BODCFG` = `0xE5`: `LVL` = `BODLEVEL7`, `ACTIVE` and `SLEEP` enabled
+| DS40002318A **§6.10.4.2** (`BODCFG`; `BODLEVEL7` is the highest of the
+  three defined levels) and **Table 33-10** (`VBOD` 3.9 V min / 4.2 V typ /
+  4.5 V max, 80 mV hysteresis)
+| **Build-derived machine gate; documented physical threshold.**
+  `make test-fuses` asserts the byte and each field. Because the minimum is
+  3.9 V, this part does not guarantee a trip above 4 V; see Failsafe
+  Mechanisms.
+
+| Watchdog always on
+| AVR Classic: `WDTON` programmed. ATtiny202: `WDTCFG` = `0x06`
+  (`PERIOD` = 256 CLK, `WINDOW` off)
+| DS40002307A **§8.4** and **Table 8-1**: a programmed `WDTON` forces
+  System Reset mode and locks `WDE`/`WDTIE` to 1/0, while the prescaler can
+  still change through the timed `WDCE` sequence. 2586Q datasheet **§8.4.1.2**
+  and **Table 8-1**: safety level 2, always enabled, time-out changed only by the
+  timed sequence. DS40002318A **§19.3.1** and **§19.3.3.3**: `WDT.CTRLA` is
+  loaded from `WDTCFG` at reset with `LOCK` set, and a locked `CTRLA` cannot
+  be changed, so software can neither disable nor retune the watchdog
+| **Build-derived machine gate plus runtime check.** `make test-fuses`
+  asserts `WDTON` and `WDTCFG`. On the classic parts a timed sequence could
+  still retune the period, so each loop pass re-reads `WDTCR` against its
+  configured value and escalates a mismatch; the ATtiny202 shell re-reads
+  `WDT.CTRLA` and the `LOCK` bit the same way.
+
+| Post-reset watchdog window
+| AVR Classic: after any reset the watchdog runs in System Reset mode at
+  its shortest period until `init()` re-arms it. ATtiny202: no such window
+| DS40002307A **§8.5.2** (`WDTCR` resets with `WDP[3:0]` = `0000`; `WDE` is
+  forced while `WDRF` is set) and **Table 8-2** (`0000` = 2K cycles, 16 ms
+  typical at 5 V); 2586Q **Table 8-3** (the same); DS40002318A **§6.10.4.1**
+  and **§19.3.1** (the fuse period applies from reset)
+| **Documented implementation rationale.** With `WDTON` programmed the
+  short period follows every reset, not only a watchdog reset.
+  `hw_wdt_arm()` is the first call in `init()` after `cli()`, so only the C
+  runtime's startup code precedes it -- microseconds against a period of
+  milliseconds.
+  The 16 ms is typical; no minimum is specified for the oscillator.
+
+| Watchdog period and floor
+| AVR Classic: `WDTO_250MS` = 32K cycles of the 128 kHz WDT oscillator,
+  compiled against a 100 ms floor. ATtiny202: 256 cycles of the 1.024 kHz
+  `OSCULP32K`-derived clock = 250 ms, against a 128 ms floor
+| DS40002307A **Table 8-2** (0.25 s typical at 5 V) with **Figures
+  19-65/19-66** (typical oscillator about 106-112 kHz at 5 V, -40 to
+  +85 degC); 2586Q **Table 8-3** with **Figures 22-38/22-39** (about
+  108-124 kHz across the two figures); DS40002318A **§19.3.2** ("not very
+  accurate") and **Table 33-13** (`OSCULP32K` +/-3% at 25 degC and 3.0 V,
+  +/-30% over the full operating range, from characterization)
+| **Documented vendor input; compile-time floor.** Neither classic
+  datasheet gives a minimum or maximum for the WDT oscillator, only typical
+  curves, and those put the 250 ms setting at roughly 265-310 ms at 5 V. The
+  100 ms floor is therefore a de-rating choice, not a vendor bound. The
+  ATtiny202's +/-30% gives a shortest period near 192 ms, above its 128 ms
+  floor. Each floor is compile-time asserted in Watchdog Pet-to-Pet Budget.
+
+| AVR Classic 1 ms tick
+| Timer0 CTC, clk/8, `OCR0A` = 149 at 1.2 MHz (ATtiny13A) or 124 at 1.0 MHz
+  (ATtiny25/45/85): 150 or 125 counts per compare match, 1 ms nominal
+| DS40002307A **§11.7.2** (the counter clears when `TCNT0` matches `OCR0A`,
+  and `OCF0A` interrupts at each match), **Table 11-8** (`WGM0[2:0]` = 2 is
+  CTC with TOP = `OCRA`) and **Table 11-9** (`CS0[2:0]` = `010` -> clk/8);
+  2586Q **§11.7.2**, **Table 11-5** and **Table 11-6**, the same
+| **Runtime-checked configuration; compile-time derivation.** The counter
+  runs 0..`OCR0A` inclusive, so one period is `8 * (OCR0A + 1) / F_CPU`, the
+  same `(1 + OCR0A)` form as the datasheet's CTC output-frequency equation,
+  whose extra factor 2 is the toggled pin's half period.
+  `static_assert(1000U == (F_CPU / 8U / (TIMER0_OCR0A_1MS + 1U)))` pins it,
+  and the runtime sanity check re-reads `TCCR0A`, `TCCR0B`, `OCR0A`,
+  `TIMSK0` and `CLKPR`.
+
+| ATtiny202 1 ms tick
+| 16 MHz `OSC20M` / 8 = 2 MHz; TCB0 periodic interrupt, `CLK_PER`,
+  `CCMP` = 1999: 2000 counts, 1 ms nominal
+| DS40002318A **§6.10.4.3** (`FREQSEL` = 1 -> 16 MHz), **§10.5.2**
+  (`PDIV` = `0x2` -> divide by 8), DS40002318A **§21.3.3.1.1** (Periodic
+  Interrupt mode counts to TOP and restarts from BOTTOM, with CAPT at TOP)
+  and DS40002318A **§21.5.1** (`CLKSEL` = `0x0` -> `CLK_PER`)
+| **Runtime-checked configuration; compile-time derivation.**
+  `static_assert(1000U == (F_CPU / ((uint32_t)TCB0_CCMP_1MS + 1U)))` pins
+  the arithmetic, and the runtime sanity check re-reads `MCLKCTRLB`,
+  `TCB0.CTRLA` and `TCB0.CCMP` among others.
+
+| Internal oscillator tolerance
+| +/-10% design envelope on every AVR part (Caveats and Limitations, and the
+  debounce-threshold arithmetic)
+| DS40002307A **Table 18-2** (factory calibration +/-10%, at 3 V and 25 degC
+  only) with **Figures 19-59/19-60** (typical 9.6 MHz at 5 V, about -5% to
+  +3% over -40 to +85 degC); 2586Q **Table 21-2** (the same +/-10% at 3 V,
+  25 degC) with **Figures 22-40/22-41** (typical 8 MHz at 5 V, about -3.5% to
+  +1.5%); DS40002318A **Table 33-12** (`OSC20M` +/-3% at 25 degC and 3.0 V,
+  +/-5% over the full operating range, from characterization)
+| **Documented vendor input; design envelope.** On the classic parts +/-10%
+  is the only numeric bound the datasheets give, and it applies at the
+  calibration point, not across voltage and temperature. The typical curves
+  sit well inside it, but they are typical data, not limits, so +/-10% is an
+  engineering envelope that the characterization supports rather than a
+  guaranteed operating-range limit. On the ATtiny202 it is looser than the
+  characterized +/-5%. The debounce core counts samples, so the envelope
+  moves only the wall-clock figures derived from them.
+
 | Sleep wake-up ordering
 | test-then-sleep with interrupts enabled; a tick ISR that runs after the flag
   test is followed by the `SLEEP`, which then waits for the next tick
-| ATtiny13A datasheet, "Reset and Interrupt Handling" (one main-program
-  instruction executes after an interrupt returns); avr-libc `<avr/sleep.h>`
-  documentation (the test-then-sleep race)
+| DS40002307A **§4.7** and 2586Q datasheet **§4.8** ("Reset and Interrupt
+  Handling": one main-program instruction executes after an interrupt
+  returns, before any pending interrupt); DS40002318A **§13.2** (the same
+  rule on the ATtiny202); avr-libc `<avr/sleep.h>` documentation (the
+  test-then-sleep race)
 | **Documented implementation rationale.** The sleep-entry comments in both AVR
   shells record that such a tick is coalesced into the next wake, not lost: the
   ISR has already integrated its sample, and the press test is level-triggered
@@ -1221,16 +1353,16 @@ NOTE: Scope, stated so this table is not over-trusted. The PIC10(L)F320/322
 references above were confirmed against DS40001585 and the device pack's
 `pic10f322.h` header, which is authoritative for register and CONFIG names, the
 PIC12F675 references against DS41190G and the pack's `pic12f675.h` and
-`edc/PIC12F675.PIC`, and the ATtiny13A reference against that part's
-datasheet. Machine gates can
-enforce configured encodings and software arithmetic, but not vendor physical
-specifications. The AVR Classic and AVR-XT *electrical* parameters used
-elsewhere in this document — the 4.3 V / 4.2 V BOD levels, the ~16 ms
-post-reset watchdog window and internal-RC ±10% tolerance — are likewise
-physical inputs; their fuse selections and timing
-constants are gated, not the resulting voltage or silicon timing. Those inputs,
-`WDTON` semantics and the Timer0 CTC derivation are not yet traced here to exact
-datasheet sections. Completing them is tracked in `TODO.md`.
+`edc/PIC12F675.PIC`, and the AVR references against the ATtiny13A datasheet
+DS40002307A (Microchip's reissue of Atmel 8126F), the ATtiny25/45/85
+datasheet 2586Q and the ATtiny202/204/402/404/406 datasheet DS40002318A. Machine
+gates can enforce configured encodings and software arithmetic, but not vendor
+physical specifications: the BOD trip voltages, oscillator tolerances and
+watchdog periods above remain physical inputs whose fuse selections and timing
+constants are gated, not the resulting voltage or silicon timing. Where a
+datasheet gives only typical curves -- the classic parts' watchdog and RC
+oscillators across voltage and temperature -- the row says so, and the figure
+this document uses is a design envelope rather than a vendor limit.
 
 == Testing and Validation
 

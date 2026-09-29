@@ -1496,7 +1496,8 @@ static void test_watchdog_backstop_reset(void) {
 
 // (#3) Watchdog timeout BOUND: not only must the WDT eventually reset after the
 // ISR dies, it must do so within the part's WDT window. The AVR WDT oscillator
-// is loose (~100-350ms for a nominal 250ms setting), so we assert the reset
+// has no specified minimum or maximum -- the datasheets' typical curves put the
+// nominal 250ms setting at roughly 265-310ms at 5V -- so we assert the reset
 // lands inside a generous [50ms, 500ms] envelope -- catching both a WDT that
 // never fires AND one mis-configured to an absurdly long timeout.
 static void test_watchdog_timeout_within_bound(void) {
@@ -1529,7 +1530,7 @@ static void test_watchdog_timeout_within_bound(void) {
 
     double wdt_ms = (double)(reset_cycle - kill_cycle) / (double)CYCLES_PER_MS;
     printf("  WDT reset fired %.1f ms after ISR death "
-           "(nominal 250ms, RC tolerance ~100-350ms)\n", wdt_ms);
+           "(nominal 250ms; datasheet typical ~265-310ms at 5V)\n", wdt_ms);
     CHECK(wdt_ms >= 50.0 && wdt_ms <= 500.0,
           "WDT reset latency %.1f ms outside expected [50,500] ms envelope",
           wdt_ms);
