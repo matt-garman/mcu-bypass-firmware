@@ -52,6 +52,8 @@ lengths.
 
 ## [Unreleased]
 
+## [0.9.16] - 2026-09-29
+
 All 21 firmware images are byte-identical to `v0.9.15`. Every firmware source
 change in this release is a comment. It corrects what the documentation claims
 about the AVR parts and settles the soak policy that release reuse depends on.
@@ -1603,7 +1605,8 @@ to six parts and 18 images.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.15...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.16...HEAD
+[0.9.16]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.12...v0.9.13

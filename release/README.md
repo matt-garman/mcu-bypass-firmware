@@ -14,9 +14,9 @@ There are two routes into it -- one for a downloaded release, one for a source
 checkout -- and both are under "Flash a chip" below.
 
 <!-- current-release:start -->
-> **Current release contract:** `v0.9.15`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
+> **Current release contract:** `v0.9.16`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
 > The images cover three output stages; PIC10F320 is the self-contained target.
-> **Pre-tag transition:** `release/v0.9.15/` is added by the artifact commit that follows the source commit declaring this contract, and is published with the signed `v0.9.15` tag.
+> **Pre-tag transition:** `release/v0.9.16/` is added by the artifact commit that follows the source commit declaring this contract, and is published with the signed `v0.9.16` tag.
 <!-- current-release:end -->
 
 That block is the project's single live declaration of the release contract; no
