@@ -159,6 +159,11 @@ IMAGE_CONTINUITY = {
                        "part. Neither reaches an image -- nothing under src/ "
                        "changed at all -- so all 21 were republished byte for "
                        "byte"),
+    "v0.9.15": (21, 0, "a release-process and documentation release: the "
+                       "soak became a prerequisite of a release rather than a "
+                       "phase of one, and GOVERNANCE.md took ownership of the "
+                       "documentation rules. Nothing under src/ changed at "
+                       "all, so all 21 were republished byte for byte"),
 }
 
 

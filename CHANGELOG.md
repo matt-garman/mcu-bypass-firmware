@@ -52,6 +52,44 @@ lengths.
 
 ## [Unreleased]
 
+All 21 firmware images are byte-identical to `v0.9.15`. Every firmware source
+change in this release is a comment. It corrects what the documentation claims
+about the AVR parts and settles the soak policy that release reuse depends on.
+
+### Changed
+
+- **The AVR design inputs are traced to exact datasheet tables.**
+  `DESIGN_DOCUMENTATION.adoc` now cites the ATtiny13A (DS40002307A),
+  ATtiny25/45/85 (2586Q) and ATtiny202 (DS40002318A) tables behind the fuse
+  encodings, brown-out levels, watchdog behavior, tick derivations and
+  oscillator tolerances, as it already did for the PIC parts. Where a datasheet
+  gives only typical curves -- the classic parts' watchdog and RC oscillators
+  across voltage and temperature -- the document now says that the figure it
+  uses is a design envelope rather than a vendor limit.
+- **A version bump alone does not force a fresh soak.** The soak input key
+  deliberately excludes the version, so a release whose images, driver sources
+  and harness are unchanged stands on the existing record, and anything the key
+  names still forces a full-duration soak.
+  [`docs/release_proportionality.md`](docs/release_proportionality.md) records
+  the decision.
+
+### Fixed
+
+- **The ATtiny202 brown-out level was overstated.** The documentation said
+  `BODLEVEL7` enforces the >4 V floor the 5 V relay and MOSFET peripherals need.
+  Its specified trip range is 3.9-4.5 V, so it does not guarantee that. It is
+  the highest level the part offers, so a board that needs a strict >4 V floor
+  must guarantee it in hardware, as the PIC parts already require. The Classic
+  AVR 4.3 V level is specified at 4.1-4.5 V and does hold the floor.
+- **The AVR sleep-entry rationale described behavior AVR does not have.** A tick
+  that arrives just before `SLEEP` does not abort the sleep; it is coalesced
+  into the next wake, costing one tick of step and watchdog-pet latency. The
+  behavior was always safe and is unchanged; the comments and the design
+  document now give the right reason.
+- **`release/README.md`'s pre-tag transition line was false on `main`** from a
+  release's artifact commit until the next release was prepared. It now
+  describes the release sequence rather than the tree's momentary state.
+
 ## [0.9.15] - 2026-09-13
 
 ### Added
