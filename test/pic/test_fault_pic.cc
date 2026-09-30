@@ -15,15 +15,10 @@
 #define PIC_FAULT_DEFAULT_PROC_NAME "p10f322"
 #define PIC_FAULT_PROGRAM_WORDS 0x200u
 // The shared core adds one IN-RANGE ctx.debounce_counter case (only F2's
-// XOR-fold shadow catches it) iff the firmware image opts into BYPASS_CTX_CHECK.
-// PIC10F322 always enables F2 (see docs/context_seu_detection.md and the
-// Makefile), so the fault compile passes -DBYPASS_CTX_CHECK and this term is 1;
-// keep it macro-driven so the count and the case can never disagree.
-#if defined(BYPASS_CTX_CHECK)
-#  define PIC_FAULT_CTX_INRANGE 1u
-#else
-#  define PIC_FAULT_CTX_INRANGE 0u
-#endif
+// XOR-fold shadow catches it) iff this is 1. PIC10F322's shell carries F2
+// unconditionally (docs/context_seu_detection.md); the same macro drives the
+// case and its count, so the two can never disagree.
+#define PIC_FAULT_CTX_INRANGE 1u
 // Output-stage fault policy (see docs/relay_coil_fault_correction.md). Every
 // LATA upset resets on every variant; what the relay variant adds is the
 // SECOND half of the F1 contract. RA1/RA2 are the coils, and an energized coil

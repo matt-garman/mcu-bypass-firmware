@@ -27,7 +27,7 @@
 #define CD4053_CTL1 (2U) // PB2
 #define CD4053_CTL2 (3U) // PB3
 
-// dual-latching mechanical relay bypass (e.g. Panasonic TQ2-2L)
+// 2-coil latching mechanical relay bypass (e.g. Panasonic TQ2-L2-5V)
 #define RELAY_RESET_PIN (2U) // PB2
 #define RELAY_SET_PIN   (3U) // PB3
 
@@ -48,7 +48,7 @@
 // "Watchdog pet-to-pet budget" in DESIGN_DOCUMENTATION.adoc for the derivation
 // and the measured corroboration of each term below.
 #define TICK_PERIOD_MS    (1U)    // 1 ms Timer0 CTC tick
-#define WDT_MIN_PERIOD_MS (100U)  // WDTO_250MS nom; WDT RC osc characterized 100-350 ms -> 100 ms floor
+#define WDT_MIN_PERIOD_MS (100U)  // WDTO_250MS nom; typical curves only (~265-310 ms at 5 V) -> 100 ms de-rated floor
 
 // Bounded NON-BLOCKING work inside the pet-to-pet window, in wall time. Two
 // paths contribute and one allowance covers both:

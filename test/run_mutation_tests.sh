@@ -805,7 +805,7 @@ MUTATIONS=(
 # moved into test/formal/test_model_check.c, and it is retargeted from the dead
 # vendored copy to the single verified core.
 "src/bypass_pure.c	s@res.fault = true;@res.fault = false;@	test-model-check	MODEL corrupt-state fault suppressed (verify_corrupt_state_faults catches it)"
-# --- F2 context-SEU detection (BYPASS_CTX_CHECK) ------------------------------
+# --- F2 context-SEU detection (complemented XOR-fold check) --------------------
 # Transaction-seam mutants for the complemented XOR-fold context check. The
 # post-check probes must reject any shell that resumes from a validated local
 # snapshot but then consumes or re-folds live persisted SRAM. PIC10F320 is
@@ -1934,9 +1934,9 @@ inventory_total=$((${#MUTATIONS[@]} + ${#XT_MUTATIONS[@]} \
 mutation_require_count total "$MUTATION_EXPECTED_TOTAL" "$inventory_total" || exit 2
 
 # F2 exclusion invariant: PIC10F320 is capacity-excluded from the context-SEU
-# check (256-word flash; see Makefile BYPASS_CTX_CHECK_FLAG, NOT added to
-# PIC10F320_CFLAGS). Its shell must therefore reference NEITHER the pure fold
-# nor the opt-in macro -- which is why the four F2 mutants above have no
+# check (256-word flash; it does not link the pure core). Its shell must
+# therefore reference NEITHER the pure fold nor a ctx_check_ shadow -- which is
+# why the four F2 mutants above have no
 # PIC10F320 counterpart and could not be built there even in principle. Assert
 # that statically on every run (real and --sandbox self-test) so a future edit
 # that wires F2 into the 320 shell fails loudly here.
@@ -1945,9 +1945,9 @@ if [ ! -f "$pic10f320_f2_shell" ]; then
     echo "ERROR: PIC10F320 shell not found for the F2-exclusion assertion: $pic10f320_f2_shell" >&2
     exit 2
 fi
-if pic10f320_f2_hits=$(grep -nE 'debounce_ctx_check_word|BYPASS_CTX_CHECK' "$pic10f320_f2_shell"); then
+if pic10f320_f2_hits=$(grep -nE 'debounce_ctx_check_word|ctx_check_' "$pic10f320_f2_shell"); then
     echo "ERROR: PIC10F320 is F2-EXCLUDED but its shell references the context-check" >&2
-    echo "       machinery (BYPASS_CTX_CHECK / debounce_ctx_check_word):" >&2
+    echo "       machinery (ctx_check_ / debounce_ctx_check_word):" >&2
     printf '%s\n' "$pic10f320_f2_hits" >&2
     exit 2
 fi

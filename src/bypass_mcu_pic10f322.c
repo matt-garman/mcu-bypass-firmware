@@ -301,10 +301,8 @@ static void hw_wait_for_tick(void) {
 // real successor rather than let the compiler reuse live global values.
 static volatile debounce_context_t ctx_;
 
-#if defined(BYPASS_CTX_CHECK)
 // debounce_context_t checksum; see debounce_ctx_check_word()
 static volatile uint8_t ctx_check_;
-#endif
 
 
 
@@ -338,8 +336,9 @@ static void init(void) {
     // the AVR -- whose WDTCR collapses to the ~16ms minimum after a WDRF,
     // creating a short post-reset reset-loop hazard -- the PIC has no such
     // window: WDTE=ON runs the WDT from reset at its ~2s POR-default prescale
-    // (1:65536 on the 31kHz LFINTOSC; confirm WDTCON's reset value in
-    // DS40001585), which dwarfs init() + the <=12ms bypass pulse. hw_mcu_init()
+    // (1:65536 on the 31kHz LFINTOSC: WDTCON resets to --01 0110, WDTPS =
+    // 0b01011, on POR and MCLR alike per the device pack's edc/PIC10F322.PIC),
+    // which dwarfs init() + the <=12ms bypass pulse. hw_mcu_init()
     // narrows the period to ~256ms afterward (WDTPS=0x08). This early pet is
     // therefore belt-and-suspenders, not required -- it documents why no early
     // arming is needed and costs one instruction.
@@ -362,9 +361,7 @@ static void init(void) {
     debounce_context_t next_ctx =
         debounce_init_context(hw_read_footswitch());
 
-#if defined(BYPASS_CTX_CHECK)
     ctx_check_ = debounce_ctx_check_word(next_ctx);
-#endif
     ctx_ = next_ctx;
 
     // LAST: start + clear the tick, immediately before the loop, so no compare
@@ -398,9 +395,7 @@ void main(void) {
         // mechanically harmless, so recovery, not a silent clear, decides the
         // relay position.
         if (
-#if defined(BYPASS_CTX_CHECK)
                 (ctx_check_ != debounce_ctx_check_word(next_ctx)) ||
-#endif
                 (next_ctx.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (next_ctx.debounce_counter > RELEASE_THRESH) ||
                 (next_ctx.effect_state > ENGAGED) ||
@@ -430,11 +425,9 @@ void main(void) {
         if (res.reload_lockout) {
             next_ctx.debounce_counter = res.lockout_value;
         }
-#if defined(BYPASS_CTX_CHECK)
         // Derive from the validated intended successor, never live persisted
         // SRAM: a post-snapshot upset is overwritten or remains a mismatch.
         ctx_check_ = debounce_ctx_check_word(next_ctx);
-#endif
         ctx_ = next_ctx;
 
         // note: the fault condition is defense-in-depth/belt-and-suspenders with

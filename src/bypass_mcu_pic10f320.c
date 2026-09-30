@@ -431,8 +431,10 @@ static void hw_set_engaged_state(void) {
 // OUTPUT VARIANT: TQ2-L2-5V MECHANICAL RELAY
 #elif defined(OUTPUT_TQ2_RELAY)
 
-// Panasonic TQ-L2-5V specifies a 4ms minimum current pulse for the set/reset
-// coils; multiply by a factor of three for a safety margin
+// Panasonic TQ2-L2-5V: set/reset time max. 3 ms, and a recommended set/reset
+// pulse time of 10 ms or more at the rated coil voltage (TQ relays catalog
+// ASCTB14E, 2025.07). 12 ms meets it for any clock error up to 20% fast; see
+// bypass_output_tq2_l2_5v_relay.h for the modular shells' copy.
 #  define TQ2_L2_5V_PULSE_MS (12U)
 
 static uint8_t hw_is_sanity_check_failed(void) {
@@ -624,8 +626,9 @@ static void init(void) {
     // Unlike the AVR -- whose WDTCR collapses to the ~16ms minimum after a
     // WDRF, creating a short post-reset reset-loop hazard -- the PIC has no
     // such window: WDTE=ON runs the WDT from reset at its ~2s POR-default
-    // prescale (1:65536 on the 31kHz LFINTOSC; confirm WDTCON's reset value
-    // in DS40001585), which dwarfs init() + the <=12ms bypass pulse.  init()
+    // prescale (1:65536 on the 31kHz LFINTOSC: WDTCON resets to --01 0110,
+    // WDTPS = 0b01011, on POR and MCLR alike per the device pack's
+    // edc/PIC10F320.PIC), which dwarfs init() + the <=12ms bypass pulse.  init()
     // narrows the period to ~256ms afterward (WDTPS=0x08).  This early pet is
     // therefore belt-and-suspenders, not required -- it documents why no
     // early arming is needed and costs one instruction.

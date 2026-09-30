@@ -29,7 +29,7 @@
 #define CD4053_CTL1 (2U) // PA2
 #define CD4053_CTL2 (3U) // PA3
 
-// dual-latching mechanical relay bypass (e.g. Panasonic TQ2-2L)
+// 2-coil latching mechanical relay bypass (e.g. Panasonic TQ2-L2-5V)
 #define RELAY_RESET_PIN (2U) // PA2
 #define RELAY_SET_PIN   (3U) // PA3
 

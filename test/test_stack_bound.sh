@@ -202,7 +202,7 @@ expected_xt_matrix=$'src/bypass_mcu_avr_xt.c\tCD4053_SIMPLE\nsrc/bypass_mcu_avr_
 actual_xt_matrix=$(LC_ALL=C sort "$log")
 [[ "$actual_xt_matrix" == "$expected_xt_matrix" ]] \
 	|| { printf 'FAIL: wrong AVR-XT stack compile matrix:\n%s\n' "$actual_xt_matrix" >&2; exit 1; }
-expected_common="-DF_CPU=2000000UL -DBYPASS_MCU_AVR_XT -mmcu=attiny202 -B $dfp/gcc/dev/attiny202 -I $dfp/include -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11 -DBYPASS_CTX_CHECK"
+expected_common="-DF_CPU=2000000UL -DBYPASS_MCU_AVR_XT -mmcu=attiny202 -B $dfp/gcc/dev/attiny202 -I $dfp/include -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11"
 for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
 	case "$variant" in
 		cd4053_simple) macro=CD4053_SIMPLE ;;

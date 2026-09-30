@@ -40,9 +40,9 @@ Selected and recorded by the repository owner before v0.9.10.
 
 The old model cleared an energized coil silently and let the loop continue. The
 intended pulse was bounded to roughly one tick at the tested settled seams,
-which is below the Panasonic TQ2-L2-5V **4 ms minimum pulse for guaranteed
-actuation** — but "below the guaranteed-actuation minimum" is not "proven
-mechanically harmless". No datasheet parameter, and no simulation, says what a
+which is shorter than the Panasonic TQ2-L2-5V's **3 ms maximum set/reset time**
+— but "not guaranteed to actuate" is not "proven mechanically harmless". No
+datasheet parameter, and no simulation, says what a
 1 ms pulse does to a particular relay at a particular voltage, temperature and
 armature position.
 
@@ -276,10 +276,10 @@ contact position.
 
 | Substrate | Harness | De-energization | Recovery electrical evidence |
 | --- | --- | --- | --- |
-| PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 4 ms, SET dark, firmware settles BYPASS |
+| PIC10F322 (gpsim) | `test/pic/test_fault_pic.cc` → `inject_relay_resync_case` | cycle-timed, ≤ 3 ms | RESET-coil pulse measured on modeled `PORTA`, ≥ 10 ms, SET dark, firmware settles BYPASS |
 | PIC10F320 (gpsim) | `test/pic10f320/gpsim/test_fault_pic.cc` (same case) | same | same |
 | PIC12F675 (gpsim) | `test/pic/test_fault_pic12f675.cc` (same case) | direct modeled GP1/GP2 node voltage at the watchdog spin, including comparator-owned GP2, plus parked GP4's pad on every relay case | same |
-| AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 4 ms, SET never driven, LED dark |
+| AVR classic, tinyx5 (simavr) | `test/avr/test_sim.c` → `inject_coil_resync` | `PORTB` coil bits low after the gate | edge-timed RESET-coil pulse ≥ 10 ms, SET never driven, LED dark |
 | AVR classic, ATtiny13A (simavr) | same | same | **not observable**: simavr has no WDT system-reset model for this part, so the case asserts a permanent `cli()`+spin wedge with the coils held idle |
 | ATtiny202 (yasimavr) | `test/avr/test_fault_attiny202.py` → `RESYNC` | modeled PA2/PA3 pin levels low plus canonical OUT/DIR/PINnCTRL at the spin | **not observable**: yasimavr treats the interrupts-off spin as a terminal halt, so the WDT never completes the reset in the model |
 | PIC10F322 / PIC12F675 host source | `test/pic/fw_coverage/test_fw_coverage.c` → `expect_coil_fault_escalates` | all outputs settled low after the run | not claimed (the mock elides `__delay_ms` and aborts the spin on a timer) |
@@ -293,14 +293,15 @@ SET inactive, LED dark and both coils idle. No case observes mechanical
 convergence. Pin-configuration fixtures use the one settled state needed to
 isolate their register and physical-pad mechanism.
 
-Each PIC lane requires the measured recovery pulse to clear the relay's 4 ms
-datasheet minimum against a 12 ms design pulse, and each reports what it
+Each PIC lane requires the measured recovery pulse to clear the relay's
+recommended 10 ms set/reset pulse (Panasonic TQ relays catalog ASCTB14E)
+against a 12 ms design pulse, and each reports what it
 measured; the reported figure is short of 12 ms by the harness's own 1 ms
 reset-detection step, not by anything the firmware does. At `v0.9.10` those
 reports were 10.8 ms (PIC10F322), 11.2 ms (PIC10F320) and 11.3 ms (PIC12F675) --
 recorded here to fix the size of that harness artifact, not as a current
 measurement. The tinyx5 case times the same pulse from pin edges against the
-same 4 ms minimum. The separate width oracle measures the *design* pulse rather
+same 10 ms minimum. The separate width oracle measures the *design* pulse rather
 than a recovery, and reports a longer one on the classic AVR, where the 1 ms
 tick ISR preempts the busy-wait.
 

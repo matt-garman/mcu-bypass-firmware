@@ -118,7 +118,7 @@ misra-config:src/bypass_mcu_pic10f320.c
 misra-c2012-2.5:src/bypass_mcu_pic10f320.c
 
 # --- D-5: avr-libc ATOMIC_BLOCK vendor macro (Rules 12.3, 14.2; unreadVariable) ---
-# The F2 context-SEU feature (BYPASS_CTX_CHECK, docs/context_seu_detection.md)
+# The F2 context-SEU check (docs/context_seu_detection.md)
 # needs main()'s snapshot-through-publish transaction to be atomic w.r.t. the
 # timer ISR, so the two AVR ISR shells use avr-libc's
 # ATOMIC_BLOCK(ATOMIC_RESTORESTATE) from

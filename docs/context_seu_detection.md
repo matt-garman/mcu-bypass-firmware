@@ -6,8 +6,8 @@
 > second copy of anything. The normative design of the mechanism is in
 > "Failsafe Mechanisms" in
 > [`DESIGN_DOCUMENTATION.adoc`](../DESIGN_DOCUMENTATION.adoc); the shipped
-> transaction is in `src/`; per-part enablement is `BYPASS_CTX_CHECK_FLAG` in
-> the `Makefile`; the reviewed ceilings are that document's Resource
+> transaction is in `src/`, unconditional in every shell that carries it; the
+> reviewed ceilings are that document's Resource
 > Utilization section; and what each image occupies is release evidence, bound
 > to a source commit and a pinned toolchain.
 >
@@ -49,7 +49,7 @@ that shape.
 | Storage / transaction / recovery | Shell | The pure core is stateless. Each shell owns the persisted pair, snapshots it, validates the snapshot, computes locally, and publishes the successor. |
 | Recovery action | Reset on mismatch; safe overwrite after a valid snapshot | A mismatch has no known-good persisted member. A later upset that was not consumed may instead be overwritten by the already validated transaction. |
 | Member scope | All three members | The fold covers the whole context uniformly. |
-| Enablement | Compile-time opt-in macro `BYPASS_CTX_CHECK` | Makes the per-part decision explicit and lets the mutation harness build a feature-off baseline. |
+| Enablement | Unconditional source in each enabled shell | First shipped as a compile-time opt-in macro (`BYPASS_CTX_CHECK`) to keep the per-part decision explicit. Every modular shell enabled it and no build ever compiled the feature-off branches, so those branches were source that no compiler, analyzer or test saw; the macro was retired and the per-part decision is now which shells contain the transaction. |
 | Part scope | **PIC12F675, AVR classic, AVR-XT, PIC10F322** | Every part that links the pure core and has flash room. |
 | **PIC10F320 excluded** | Capacity limit | 320 does not link `bypass_pure.c` at all (self-contained inlined logic), and when this was priced even the cheapest fold overflowed its 256-word flash on the relay variant. Its range-only gate stays; the exclusion is documented and tested. See "The PIC10F320 exclusion". |
 
@@ -62,10 +62,9 @@ XC8 at `-O2` does not inline the function.
 
 **Compile the pure function unconditionally, gate only its callers.**
 `bypass_pure.c` defines `debounce_ctx_check_word()` on every build, so the host
-suite exercises it even for a part that does not enable the feature; the shells
-reference it only under `BYPASS_CTX_CHECK`. The alternative -- compiling the
-function itself behind the macro -- would have left the fold's own arithmetic
-untested wherever the feature is off.
+suite exercises it even for a part that does not enable the feature. The
+alternative -- compiling the function itself behind a feature macro -- would
+have left the fold's own arithmetic untested wherever the feature is off.
 
 **Flash margin note (PIC10F322).** The pre-transaction F2 image used 507/512
 words in the relay variant, so the transaction did not fit as first written. The
@@ -200,9 +199,8 @@ the automatic `next_ctx`/`res` objects in place.
 - **Mutation:** transaction-seam mutants make AVR integration consume live
   `ctx_` and make each PIC publication re-fold live `ctx_`; the one-shot probes
   must kill them. Existing fold and missing-check mutants remain.
-- **PIC10F320 exclusion:** the mutation runner asserts that its shell does not
-  reference `debounce_ctx_check_word` and that `BYPASS_CTX_CHECK` is undefined
-  there.
+- **PIC10F320 exclusion:** the mutation runner asserts that its shell
+  references neither `debounce_ctx_check_word` nor a `ctx_check_` shadow.
 
 Which lane runs on which substrate, and what each may claim there, is
 [`test/README.md`](../test/README.md)'s subject. Pass/fail counts for any one

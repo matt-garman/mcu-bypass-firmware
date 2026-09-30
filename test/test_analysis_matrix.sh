@@ -190,13 +190,13 @@ profile_policy = {
 required_config = {
     "classic_t13": {
         "-D__AVR__", "-D__AVR_ATtiny13A__", "-DF_CPU=1200000UL",
-        "-DBYPASS_MCU_AVR_CLASSIC", "-DBYPASS_CTX_CHECK",
+        "-DBYPASS_MCU_AVR_CLASSIC",
         "-I" + str(work / "avr-libc"),
         "-I" + str(work / "avr-gcc"),
     },
     "classic_x5": {
         "-D__AVR__", "-D__AVR_ATtiny85__", "-DF_CPU=1000000UL",
-        "-DBYPASS_MCU_AVR_CLASSIC", "-DBYPASS_CTX_CHECK",
+        "-DBYPASS_MCU_AVR_CLASSIC",
         "-I" + str(work / "avr-libc"),
         "-I" + str(work / "avr-gcc"),
     },
@@ -204,7 +204,7 @@ required_config = {
         "-D__AVR__", "-D__AVR_XMEGA__", "-D__AVR_MEGA__",
         "-D__AVR_ATtiny202__", "-D__AVR_ARCH__=103",
         "-D__AVR_DEV_LIB_NAME__=tn202", "-DBYPASS_MCU_AVR_XT",
-        "-DF_CPU=2000000UL", "-DBYPASS_CTX_CHECK",
+        "-DF_CPU=2000000UL",
         "-UBYPASS_MCU_PIC10F322", "-UBYPASS_MCU_AVR_CLASSIC", "-Isrc",
         "-I" + str(work / "avr-libc"), "-I" + str(work / "avr-gcc"),
         "-I" + str(work / "xt/include"),
@@ -212,7 +212,7 @@ required_config = {
     "pic10f322": {
         "-D__XC8", "-D_10F322", "-D_XTAL_FREQ=2000000UL",
         "-DBYPASS_MCU_PIC10F322", "-U__AVR__", "-UBYPASS_MCU_AVR_CLASSIC",
-        "-DBYPASS_CTX_CHECK", "-Isrc", "-I" + str(work / "dfp322"),
+        "-Isrc", "-I" + str(work / "dfp322"),
         "-I" + str(work / "dfp322/proc"), "-I" + str(work / "xc8"),
     },
     "pic10f320": {
@@ -223,7 +223,7 @@ required_config = {
     "pic12f675": {
         "-D__XC8", "-D_12F675", "-D_XTAL_FREQ=4000000UL",
         "-DBYPASS_MCU_PIC12F675", "-U__AVR__", "-UBYPASS_MCU_AVR_CLASSIC",
-        "-DBYPASS_CTX_CHECK", "-Isrc", "-I" + str(work / "dfp675"),
+        "-Isrc", "-I" + str(work / "dfp675"),
         "-I" + str(work / "dfp675/proc"), "-I" + str(work / "xc8"),
     },
 }
@@ -344,11 +344,11 @@ def validate(records):
         if set(args) & backend_markers != expected_backend[profile]:
             raise ValueError("{} mixed backend selectors".format(profile))
         if profile == "pic10f320":
-            if selector not in pic320_selectors or "-DBYPASS_CTX_CHECK" in args:
-                raise ValueError("PIC10F320 row used modular selector/context policy")
+            if selector not in pic320_selectors:
+                raise ValueError("PIC10F320 row used a modular selector")
         else:
-            if selector not in modular_selectors or "-DBYPASS_CTX_CHECK" not in args:
-                raise ValueError("modular row lost selector/context policy")
+            if selector not in modular_selectors:
+                raise ValueError("modular row lost its selector")
         templates = [arg for arg in args if arg.startswith("--template=")]
         suppression_lists = [arg for arg in args if arg.startswith("--suppressions-list=")]
         addons = [arg for arg in args if arg.startswith("--addon=")]

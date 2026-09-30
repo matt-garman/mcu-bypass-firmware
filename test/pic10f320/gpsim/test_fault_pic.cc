@@ -17,6 +17,9 @@
 
 #define PIC_FAULT_DEFAULT_PROC_NAME "p10f320"
 #define PIC_FAULT_PROGRAM_WORDS 0x100u
+// No F2 on this part (docs/context_seu_detection.md): the shared core's
+// in-range context case and its count contribution both vanish.
+#define PIC_FAULT_CTX_INRANGE 0u
 // F1 fail-safe contract (docs/relay_coil_fault_correction.md): an energized
 // coil resets here exactly as it does on the modular shells. Both halves are
 // required -- both coils de-energized before the spin, and a complete

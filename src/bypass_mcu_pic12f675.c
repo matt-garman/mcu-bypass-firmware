@@ -523,10 +523,8 @@ static void hw_wait_for_tick(void) {
 // real successor rather than let the compiler reuse live global values.
 static volatile debounce_context_t ctx_;
 
-#if defined(BYPASS_CTX_CHECK)
 // debounce_context_t checksum; see debounce_ctx_check_word()
 static volatile uint8_t ctx_check_;
-#endif
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -607,9 +605,7 @@ static void init(void) {
     debounce_context_t next_ctx =
         debounce_init_context(hw_read_footswitch());
 
-#if defined(BYPASS_CTX_CHECK)
     ctx_check_ = debounce_ctx_check_word(next_ctx);
-#endif
     ctx_ = next_ctx;
 
     // LAST: start + clear the tick, immediately before the loop, so no rollover
@@ -636,9 +632,7 @@ void main(void) {
         // violation. (No timer_isr_called_ guard as on AVR -- the PIC has no
         // ISR; main-loop liveness is proven by reaching hw_wdt_pet() below.)
         if (
-#if defined(BYPASS_CTX_CHECK)
                 (ctx_check_ != debounce_ctx_check_word(next_ctx)) ||
-#endif
                 (next_ctx.program_state > RELEASE_DEBOUNCE_WAIT) ||
                 (next_ctx.debounce_counter > RELEASE_THRESH) ||
                 (next_ctx.effect_state > ENGAGED) ||
@@ -668,11 +662,9 @@ void main(void) {
         if (res.reload_lockout) {
             next_ctx.debounce_counter = res.lockout_value;
         }
-#if defined(BYPASS_CTX_CHECK)
         // Derive from the validated intended successor, never live persisted
         // SRAM: a post-snapshot upset is overwritten or remains a mismatch.
         ctx_check_ = debounce_ctx_check_word(next_ctx);
-#endif
         ctx_ = next_ctx;
 
         // note: the fault condition is defense-in-depth/belt-and-suspenders with

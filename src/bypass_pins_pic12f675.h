@@ -75,7 +75,7 @@
 #define CD4053_CTL1     (1U) // GP1
 #define CD4053_CTL2     (2U) // GP2
 
-// dual-latching mechanical relay bypass (e.g. Panasonic TQ2-2L)
+// 2-coil latching mechanical relay bypass (e.g. Panasonic TQ2-L2-5V)
 #define RELAY_RESET_PIN (1U)  // GP1
 #define RELAY_SET_PIN   (2U)  // GP2
 

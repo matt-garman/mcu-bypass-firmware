@@ -164,9 +164,8 @@ access does not produce that finding family. D-2 and D-3 record cppcheck
 artifacts for declarations that are used elsewhere in the project; they are not
 source-level noncompliance. D-4 records PIC analyzer accommodations, not actual
 MISRA deviations. D-5 is a second actual deviation family, also AVR-only and also
-forced by an adopted avr-libc macro (`ATOMIC_BLOCK`), reached only when the F2
-context-SEU feature (`BYPASS_CTX_CHECK`) is enabled; the PIC shells use no such
-macro.
+forced by an adopted avr-libc macro (`ATOMIC_BLOCK`), which the F2
+context-SEU transaction uses; the PIC shells use no such macro.
 
 ### Suppression review
 
@@ -407,7 +406,7 @@ and `src/bypass_mcu_avr_xt.c` — the two AVR ISR shells — and covers every fi
 with that ID attributed to those files. The PIC shells and the output drivers are
 outside this record.
 
-**What happens.** The F2 in-range context-SEU feature (`BYPASS_CTX_CHECK`, see
+**What happens.** The F2 in-range context-SEU check (see
 `docs/context_seu_detection.md`) keeps the debounce integrator in the timer ISR,
 so `main()`'s persisted-context transaction (snapshot, validate, step and
 publish) must be atomic with respect to that ISR. Both AVR shells express this
@@ -426,7 +425,7 @@ avr-libc's `_SFR_*` register macros force Rules 11.4 / 10.1 / 10.8. Hand-rolling
 the `SREG`-save / `cli()` / restore sequence to dodge the macro would be more
 error-prone, would still rely on the D-1 register-access deviation for the `SREG`
 write, and would discard the portable, reviewed library idiom. Only the two AVR
-shells compile this path, and only under `BYPASS_CTX_CHECK`.
+shells compile this path.
 
 **Cross-lane note.** The artifacts surface in both cppcheck-based lanes. The MISRA
 lane consumes this suppression file, so its 12.3 / 14.2 / `unreadVariable` waivers

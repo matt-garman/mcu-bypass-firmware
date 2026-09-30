@@ -198,8 +198,8 @@ def check_pulse_width(ck, trace, pulse_state, design_ms):
     few loop iterations, and it remains what pins the ABSOLUTE width. What this
     check adds is the DELIVERED width -- what the pin actually held once the
     1 ms tick ISR has preempted the busy loop -- which a compile-time count
-    structurally cannot show. Its lower edge also subsumes the relay's 4 ms
-    datasheet coil minimum, which the oracle asserts directly.
+    structurally cannot show. Its lower edge also subsumes the relay's 10 ms
+    recommended coil minimum, which the oracle asserts directly.
     """
     start = None
     end = None

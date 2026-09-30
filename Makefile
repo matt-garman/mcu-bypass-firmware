@@ -814,7 +814,7 @@ endif
 # the firmware exactly as the AVR build sees it.
 CLANG_AVR_FLAGS    ?= -target avr -mmcu=$(ATTINY13A_MCU) -DF_CPU=$(ATTINY13A_F_CPU) -D__AVR__ -D__AVR_ATtiny13A__ \
                       -DBYPASS_MCU_AVR_CLASSIC -D__AVR_DEVICE_NAME__=$(ATTINY13A_MCU) $(if $(AVR_ARCH),-D__AVR_ARCH__=$(AVR_ARCH)) \
-                      -D__AVR_HAVE_PRR_PRTIM0 $(BYPASS_CTX_CHECK_FLAG) \
+                      -D__AVR_HAVE_PRR_PRTIM0 \
                       -Wno-macro-redefined \
 					  -fshort-enums \
                       $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE)) \
@@ -858,11 +858,9 @@ CLASSIC_CPPCHECK_BASE_FLAGS ?= --enable=warning,style,performance,portability \
                       $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*' -I$(AVR_LIBC_INCLUDE)) \
                       $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*' -I$(AVR_GCC_INCLUDE))
 CLASSIC_T13_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_ATtiny13A__ \
-                       -DBYPASS_MCU_AVR_CLASSIC -DF_CPU=$(ATTINY13A_F_CPU) \
-                       $(BYPASS_CTX_CHECK_FLAG)
+                       -DBYPASS_MCU_AVR_CLASSIC -DF_CPU=$(ATTINY13A_F_CPU)
 CLASSIC_X5_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_ATtiny85__ \
-                       -DBYPASS_MCU_AVR_CLASSIC -DF_CPU=$(TINYX5_F_CPU) \
-                       $(BYPASS_CTX_CHECK_FLAG)
+                       -DBYPASS_MCU_AVR_CLASSIC -DF_CPU=$(TINYX5_F_CPU)
 CPPCHECK_FLAGS     ?= $(CLASSIC_CPPCHECK_BASE_FLAGS) $(CLASSIC_T13_CPPCHECK_CPPFLAGS)
 CLASSIC_X5_CPPCHECK_FLAGS ?= $(CLASSIC_CPPCHECK_BASE_FLAGS) $(CLASSIC_X5_CPPCHECK_CPPFLAGS)
 
@@ -988,28 +986,22 @@ CLANG              ?= clang
 # -Werror -Wall -Wextra -Wconversion : strict; -Wconversion catches narrowing
 # Flags common to every firmware build; the -mmcu and F_CPU differ per target and are
 # prepended in CFLAGS (t13a) / CFLAGS85 (t85).
-# F2 in-range context-SEU detection (docs/context_seu_detection.md) is a
-# compile-time opt-in.  It is enabled on every shell that links the pure core
-# and has flash headroom: PIC10F322, PIC12F675, and both AVR families (classic
-# and XT, which share CFLAGS_COMMON below).  PIC10F320 is deliberately excluded
-# -- it does not link the pure core and even a one-byte fold overflows its
-# 256-word flash -- so this flag is NOT added to PIC10F320_CFLAGS.
-BYPASS_CTX_CHECK_FLAG := -DBYPASS_CTX_CHECK
-# When F2 is enabled, the two AVR ISR shells use avr-libc's ATOMIC_BLOCK
+# F2 in-range context-SEU detection (docs/context_seu_detection.md) is
+# unconditional source in every shell that links the pure core; it has no
+# build flag.  PIC10F320 does not link the pure core and carries no F2.
+# The two AVR ISR shells' F2 transaction uses avr-libc's ATOMIC_BLOCK
 # (<util/atomic.h>).  That vendor macro trips MISRA 12.3/14.2 (waived in
 # test/misra_suppressions.txt, MISRA_COMPLIANCE.md D-5) and cppcheck's native
 # unreadVariable on the macro's internal SREG-save local.  The MISRA lanes waive
 # via the suppressions file; the parallel non-MISRA cppcheck lanes do not read
-# that file, so they carry the unreadVariable waiver inline here.  Kept beside
-# the feature flag so the whole F2 analysis coupling lives in one place.
+# that file, so they carry the unreadVariable waiver inline here.
 BYPASS_CTX_CHECK_UNREAD_SUPP_CLASSIC := --suppress=unreadVariable:src/bypass_mcu_avr_classic.c
 BYPASS_CTX_CHECK_UNREAD_SUPP_XT      := --suppress=unreadVariable:src/bypass_mcu_avr_xt.c
 
 CFLAGS_COMMON = -Os \
           -fshort-enums -funsigned-char \
           -ffunction-sections -fdata-sections \
-          -Werror -Wall -Wextra -Wconversion -std=c11 \
-          $(BYPASS_CTX_CHECK_FLAG)
+          -Werror -Wall -Wextra -Wconversion -std=c11
 
 # Primary (ATtiny13a). The tinyx5 family's per-chip flags are computed inline in
 # the build/sim templates from mmcu_<n> + TINYX5_F_CPU + CFLAGS_COMMON.
@@ -1410,8 +1402,7 @@ PIC10F322_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_pic10f322.h
 # XC8 compile flags: select the PIC10F322 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
 PIC10F322_CFLAGS = -mcpu=$(PIC10F322_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
-             -DBYPASS_MCU_PIC10F322 -D_XTAL_FREQ=$(PIC10F322_XTAL) \
-             $(BYPASS_CTX_CHECK_FLAG)
+             -DBYPASS_MCU_PIC10F322 -D_XTAL_FREQ=$(PIC10F322_XTAL)
 
 # --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
 # The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8
@@ -1428,7 +1419,6 @@ PIC10F322_CHIP_MACRO   ?= _$(PIC10F322_CHIP)
 # bypass_output_common.h, and add the XC8 + DFP header search paths.
 PIC10F322_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC10F322_CHIP_MACRO) -D_XTAL_FREQ=$(PIC10F322_XTAL) \
                         -DBYPASS_MCU_PIC10F322 -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
-                        $(BYPASS_CTX_CHECK_FLAG) \
                         -Isrc -I$(PIC10F322_DFP_INCLUDE) -I$(PIC10F322_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
 
 # Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).
@@ -2033,7 +2023,6 @@ PIC10F322_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 		-isystem $(PIC_SOAK_GPSIM_INC) -Itest -Isrc \
 		-DFW_PATH='"$(CURDIR)/$(PIC10F322_FAULT_HEX)"' -DPROC_NAME='"$(PIC10F322_GPSIM_PROC)"' \
 		-DF_CPU_HZ=$(PIC10F322_XTAL) -D$(macro_$(PIC10F322_FAULT_VARIANT)) -DCTX_ADDR=0x$$ctx_addr \
-		$(BYPASS_CTX_CHECK_FLAG) \
 		$(PIC10F322_FAULT_SRC) -o $(PIC10F322_FAULT_BIN) -lgpsim
 
 $(PIC10F322_FAULT_BIN): $(PIC10F322_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) $(PIC_PIN_LOOKUP_HDR) \
@@ -2929,7 +2918,7 @@ XT_ARCH ?= 103
 XT_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_XMEGA__ -D__AVR_MEGA__ \
                        -D__AVR_ATtiny202__ -D__AVR_ARCH__=$(XT_ARCH) \
                        -D__AVR_DEV_LIB_NAME__=$(XT_DEVLIB) \
-                       -DBYPASS_MCU_AVR_XT -DF_CPU=$(XT_F_CPU) $(BYPASS_CTX_CHECK_FLAG) \
+                       -DBYPASS_MCU_AVR_XT -DF_CPU=$(XT_F_CPU) \
                        -UBYPASS_MCU_PIC10F322 -UBYPASS_MCU_AVR_CLASSIC \
                        -Isrc $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE)) \
                        -I$(XT_INC) $(if $(AVR_GCC_INCLUDE),-I$(AVR_GCC_INCLUDE))
@@ -6182,8 +6171,7 @@ PIC12F675_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_pic12f675.h
 # XC8 compile flags: select the PIC12F675 + its DFP, C99 (no C11 in XC8), the
 # PIC pin map, and _XTAL_FREQ for __delay_ms.
 override PIC12F675_CFLAGS := -mcpu=$(PIC12F675_CHIP) -mdfp=$(PIC_DFP) -std=c99 -O2 \
-             -DBYPASS_MCU_PIC12F675 -D_XTAL_FREQ=$(PIC12F675_XTAL) \
-             $(BYPASS_CTX_CHECK_FLAG)
+             -DBYPASS_MCU_PIC12F675 -D_XTAL_FREQ=$(PIC12F675_XTAL)
 
 # --- PIC static analysis (cppcheck + MISRA addon) ----------------------------
 # The cppcheck/MISRA register-correct parse of the PIC shell needs the real XC8
@@ -6201,7 +6189,6 @@ PIC12F675_CHIP_MACRO   ?= _$(PIC12F675_CHIP)
 # bypass_output_common.h, and add the XC8 + DFP header search paths.
 PIC12F675_CPPCHECK_CPPFLAGS = -D__XC8 -D$(PIC12F675_CHIP_MACRO) -D_XTAL_FREQ=$(PIC12F675_XTAL) \
                         -DBYPASS_MCU_PIC12F675 -U__AVR__ -UBYPASS_MCU_AVR_CLASSIC \
-                        $(BYPASS_CTX_CHECK_FLAG) \
                         -Isrc -I$(PIC12F675_DFP_INCLUDE) -I$(PIC12F675_DFP_INCLUDE)/proc -I$(PIC_XC8_INCLUDE)
 
 # Plain bug-finding pass (parallel to analyze-cppcheck for the AVR build).
@@ -6680,7 +6667,6 @@ PIC12F675_FAULT_COMPILE = $(PIC_SOAK_CXX) -std=c++17 -O2 $$(pkg-config --cflags 
 		-DPIC_TARGET_RESULT_VARIANT='"$(PIC12F675_FAULT_VARIANT)"' \
 		-DF_CPU_HZ=$(PIC12F675_XTAL) -D$(macro_$(PIC12F675_FAULT_VARIANT)) \
 		-DCTX_ADDR=0x$$ctx_addr $(PIC12F675_FAULT_SHADOW_DEF) \
-		$(BYPASS_CTX_CHECK_FLAG) \
 		$(PIC12F675_FAULT_SRC) -o $(PIC12F675_FAULT_BIN) -lgpsim
 
 $(PIC12F675_FAULT_BIN): $(PIC12F675_FAULT_SRC) $(PIC_TARGET_FAULT_CORE_HDR) $(PIC_TARGET_RESULT_HDR) \

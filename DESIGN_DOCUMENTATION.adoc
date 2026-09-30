@@ -288,7 +288,7 @@ PIC12F675:: BOD is enabled (`BOREN=ON`) at a fixed 2.025-2.175v trip
       choose.  A flip that lands *inside* the legal
       range is caught by a checksum: the firmware keeps a
       complemented XOR fold of the three context members
-      (`debounce_ctx_check_word()`).  Each enabled shell validates a
+      (`debounce_ctx_check_word()`).  Each shell that carries it validates a
       local snapshot, computes only from that validated value, and
       then publishes the successor context and fold.  A single-bit
       flip confined to persisted `ctx_` or `ctx_check_` either fails
@@ -309,10 +309,10 @@ silicon family:
 +
 [horizontal]
 AVR Classic (ATtiny13a/45/85), ATtiny202, PIC10F322, PIC12F675::
-  enabled (`BYPASS_CTX_CHECK`).  PIC10F322 is the binding capacity
-  case: 512 words is the smallest budget that still holds the shared
-  core, the defensive layer and the fold, which is why the part below
-  it does without.
+  enabled, unconditionally in each shell's source.  PIC10F322 is the
+  binding capacity case: 512 words is the smallest budget that still
+  holds the shared core, the defensive layer and the fold, which is
+  why the part below it does without.
 PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
   shared pure core, so this shell inlines the debounce logic by hand
   and has no `debounce_ctx_check_word()` to call; even the cheapest
@@ -327,9 +327,9 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
     * Fail-safe relay resynchronization: an unexpectedly energized
       relay coil is treated as a fault, never cleared quietly.  The
       intended stray pulse is bounded to about one tick, which is
-      below the Panasonic TQ2-L2-5V 4ms minimum for guaranteed
-      actuation -- but below the guaranteed-actuation minimum is not
-      proven mechanically harmless, so the firmware cannot know
+      shorter than the Panasonic TQ2-L2-5V's 3 ms maximum set/reset
+      time -- so it is not guaranteed to move the relay, but it is
+      not proven not to either, and the firmware cannot know
       whether the latching relay moved.  Silently clearing it would
       therefore risk leaving the audio route permanently disagreeing
       with the effect state and the LED.
@@ -1319,8 +1319,8 @@ does not make them independently enforceable by this repository.
 | DS41190G **Table 12-2 param F10** `FOSC` (+/-1% at 3.5 V/25 degC, +/-2% over
   2.5-5.5 V and 0-85 degC, +/-5% over 2.0-5.5 V and -40 to +85/+125 degC)
 | **Documented vendor input.** +/-5% is the figure a pedal is designed against.
-  It moves the 12 ms relay coil pulse to 11.4-12.6 ms, so the 3x safety factor
-  over the TQ2-L2-5V's 4 ms minimum set/reset pulse degrades to 2.85x and holds;
+  It moves the 12 ms relay coil pulse to 11.4-12.6 ms, which still meets the
+  TQ2-L2-5V's recommended 10 ms set/reset pulse (see that row below);
   the watchdog runs on its own RC and does not track the error, so the two do
   not cancel. Debounce is unaffected in the way that matters, because the pure
   core counts samples rather than milliseconds. It also bounds what a simulator
@@ -1347,15 +1347,36 @@ does not make them independently enforceable by this repository.
 | **Documented vendor input.** The consequence and the board precondition are
   in the PIC12F675 pinout section; the loaded-board margin is a bench item.
   gpsim models pins ideally, so no lane in this repository can measure it.
+
+| TQ2-L2-5V set/reset pulse
+| 12 ms pulse on one coil at a time (`TQ2_L2_5V_PULSE_MS`); a RESET pulse on
+  every initialization; both coils held low outside a pulse
+| Panasonic TQ relays catalog ASCTB14E (2025.07): **Specifications**,
+  "Operate [Set] time" and "Release [Reset] time" (each max. 3 ms at the
+  rated coil voltage); **Cautions for usage of TQ relay**, "Latching"
+  (recommends a set and reset pulse time of 10 ms or more at the rated coil
+  voltage, and initializing the relay just after power-on); **Coil
+  connection** (avoid applying voltage to the set and reset coils at the same
+  time)
+| **Build-derived and runtime-checked; documented vendor input.** The driver
+  asserts the pulse is shorter than `RELEASE_THRESH` and fits the watchdog
+  budget; the image and simulator lanes require every compiled, delivered and
+  post-fault recovery pulse to reach 10 ms; the per-tick sanity gate rejects an
+  energized coil outside a pulse. Only a fast clock shortens the pulse: 12 ms
+  meets the recommendation for any error up to 20% fast, so the +/-10% design
+  envelope leaves at worst about 10.9 ms and the PIC12F675's +/-5% about
+  11.4 ms. The recommendation is stated at the rated coil voltage; a coil
+  driven below it is a board-design matter the firmware cannot see.
 |===
 
 NOTE: Scope, stated so this table is not over-trusted. The PIC10(L)F320/322
 references above were confirmed against DS40001585 and the device pack's
 `pic10f322.h` header, which is authoritative for register and CONFIG names, the
 PIC12F675 references against DS41190G and the pack's `pic12f675.h` and
-`edc/PIC12F675.PIC`, and the AVR references against the ATtiny13A datasheet
+`edc/PIC12F675.PIC`, the AVR references against the ATtiny13A datasheet
 DS40002307A (Microchip's reissue of Atmel 8126F), the ATtiny25/45/85
-datasheet 2586Q and the ATtiny202/204/402/404/406 datasheet DS40002318A. Machine
+datasheet 2586Q and the ATtiny202/204/402/404/406 datasheet DS40002318A, and the
+relay row against Panasonic's TQ relays catalog ASCTB14E (2025.07). Machine
 gates can enforce configured encodings and software arithmetic, but not vendor
 physical specifications: the BOD trip voltages, oscillator tolerances and
 watchdog periods above remain physical inputs whose fuse selections and timing
@@ -1499,10 +1520,11 @@ handshake.
 immutable production selector with the shipping flags plus `-fstack-usage` and
 rejects any frame above `XT_STACK_MAX_FRAME`. `test-stack-bound` continues to
 cover the shared core and drivers. These gates bound individual compiler frames,
-not the complete call-chain plus interrupt high-water mark. No AVR-XT lane
-measures that maximum — the stack-canary test is a simavr/AVR Classic lane — so
-the actual per-variant maxima remain unretained and must be measured before this
-part is qualified on hardware.
+not the complete call-chain plus interrupt high-water mark. Each release retains
+the per-variant frame report in its `attiny202-test` evidence. No AVR-XT lane
+measures the whole-chain maximum — the stack-canary test is a simavr/AVR Classic
+lane — so that figure must be measured before this part is qualified on
+hardware.
 
 === PIC10F322 (XC8 build)
 

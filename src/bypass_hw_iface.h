@@ -46,7 +46,8 @@ uint8_t hw_output_state_intact(
         uint8_t const expected_high_mask);
 
 
-// - sets global effect state (ENGAGE/BYPASS)
+// - drives the outputs for the BYPASS/ENGAGED state (the caller owns the
+//   logical effect state)
 // - lights or dims status LED
 // - does implementation-specific audio routing device control (e.g. cd4053
 //   switching, relay coil set/reset)

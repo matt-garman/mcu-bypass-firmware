@@ -50,7 +50,7 @@
 #   For each built variant image it disassembles the flash (avr-objdump -d),
 #   finds every avr-libc _delay_ms busy loop, recovers its 16-bit iteration
 #   count, converts that to milliseconds at F_CPU, and asserts the per-variant
-#   expected set of pulse widths (and the relay's 4 ms datasheet minimum). It
+#   expected set of pulse widths (and the relay's 10 ms recommended minimum). It
 #   also identifies the sole `reti` function, follows its direct call tree, and
 #   requires the complete tick ISR to remain within the reviewed 84-instruction
 #   ceiling that underpins WDT_ISR_STRETCH_PCT. Cyclic control flow fails closed;
@@ -78,7 +78,7 @@ import sys
 # --- device / timing constants (match the shell + the yasimavr harness) ------
 F_CPU_HZ = 2_000_000          # 16 MHz OSC / PDIV 8 (see sim_attiny202.F_CPU_HZ)
 DELAY_LOOP_CYCLES = 4         # avr-libc _delay_ms body: SBIW(2) + taken BRNE(2)
-RELAY_MIN_MS = 4              # TQ2-L2-5V coil-set datasheet minimum
+RELAY_MIN_MS = 10             # TQ2-L2-5V recommended set/reset pulse (ASCTB14E)
 ISR_INSTRUCTION_LIMIT = 84    # reviewed TCB0 ISR + complete direct call tree
 ISR_MAX_CYCLES_PER_INSTRUCTION = 4
 ISR_FIXED_CYCLE_ALLOWANCE = 16  # conservative interrupt entry + vector dispatch
@@ -380,7 +380,7 @@ def check_variant(ck, variant, counts):
     if variant in RELAY_MINIMUM_VARIANTS:
         ck.check(
             bool(measured) and all(m >= RELAY_MIN_MS for m in measured),
-            "%s: every coil pulse >= %d ms datasheet minimum (%s)"
+            "%s: every coil pulse >= %d ms recommended minimum (%s)"
             % (variant, RELAY_MIN_MS, pretty))
 
 
@@ -608,9 +608,10 @@ def selftest():
              "mute with an extra unexpected pulse fails")
     ck.check(_variant_fails("cd4053_simple", counts_for([5])) > 0,
              "simple cd4053 with any coil pulse fails")
-    # A relay pulse below the 4 ms datasheet minimum trips both width and minimum.
-    ck.check(_variant_fails("tq2_l2_5v_relay", counts_for([3, 3])) >= 2,
-             "sub-minimum relay pulse fails design width AND datasheet minimum")
+    # A relay pulse below the 10 ms recommended minimum trips both width and
+    # minimum. 9 ms is chosen because the retired 4 ms floor would have passed it.
+    ck.check(_variant_fails("tq2_l2_5v_relay", counts_for([9, 9])) >= 2,
+             "sub-minimum relay pulse fails design width AND recommended minimum")
 
     # A complete loop signature with an undecodable seed is an oracle error,
     # never absence of evidence.

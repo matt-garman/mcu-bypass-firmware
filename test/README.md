@@ -316,8 +316,8 @@ number, and locating an anchor is itself fail-closed — text that matches zero
 records, or several, fails the gate instead of silently checking nothing. The
 live sanity-gate call to `hw_force_wdt_reset()` is a *positive* coverage
 requirement, so an allowance cannot hide a harness that never enters the real
-reset path. Compilation uses the shipping configuration (including
-`BYPASS_CTX_CHECK`), because that is what ships.
+reset path. Compilation uses the shipping configuration, because that is what
+ships.
 
 The mocks preserve the distinctions the firmware depends on rather than
 flattening them. The PIC12F675 mock keeps GPIO intent and physical pin levels

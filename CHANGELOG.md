@@ -52,6 +52,37 @@ lengths.
 
 ## [Unreleased]
 
+### Changed
+
+- **The in-range context check (F2) is unconditional source.** Every modular
+  shell enabled it, and nothing ever compiled the shells with it off, so each
+  AVR shell carried a complete alternate ISR and main-loop context update that
+  no compiler, analyzer or test had seen. The `BYPASS_CTX_CHECK` macro and the
+  Makefile flag that set it are gone; the PIC fault lanes now state per part
+  whether the in-range case applies. Static analysis can no longer silently
+  analyze a configuration that does not ship.
+- **Relay pulse oracles check the vendor figure.** The simulator, image and
+  recovery lanes held relay coil pulses to 4 ms; they now require the 10 ms
+  Panasonic recommends.
+
+### Fixed
+
+- **The relay pulse rationale cited a figure the datasheet does not give.** The
+  source and documents justified the 12 ms coil pulse as three times a "4 ms
+  minimum". Panasonic's TQ relays catalog (ASCTB14E, 2025.07) gives a set/reset
+  time of at most 3 ms and recommends a set/reset pulse of 10 ms or more at the
+  rated coil voltage. The 12 ms pulse is unchanged and meets that for any clock
+  error up to 20% fast, about 10.9 ms at worst across the +/-10% design
+  envelope, so the margin is 1.2x, not 3x. The design document now traces the
+  relay to the catalog.
+- **The Classic AVR watchdog floor comment cited a characterized range the
+  datasheets do not give.** It now says what they do give: typical curves only.
+- **Comment corrections.** The relay part is named `TQ2-L2-5V` throughout, the
+  PIC10F32x post-reset watchdog prescale is confirmed from the device pack
+  rather than left as a note to check, and `hw_set_bypass_state()` /
+  `hw_set_engaged_state()` are described as driving outputs rather than setting
+  the effect state, which the shell owns.
+
 ## [0.9.16] - 2026-09-29
 
 All 21 firmware images are byte-identical to `v0.9.15`. Every firmware source

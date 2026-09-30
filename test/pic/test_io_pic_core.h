@@ -271,8 +271,10 @@ static void check_pulse(const IoTrace &trace, unsigned pulse_state,
                 trace.name, width, expected, (unsigned long)PULSE_TOLERANCE_CYCLES);
     }
     if (relay_minimum) {
-        check(width >= 4u * CYCLES_PER_MS,
-              "relay pulse is shorter than the 4 ms datasheet minimum");
+        // Panasonic TQ2-L2-5V: set/reset pulse of 10 ms or more at the rated
+        // coil voltage (TQ relays catalog ASCTB14E).
+        check(width >= 10u * CYCLES_PER_MS,
+              "relay pulse is shorter than the 10 ms recommended minimum");
     }
 }
 

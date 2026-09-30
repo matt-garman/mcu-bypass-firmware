@@ -239,8 +239,9 @@ static void expect_no_reset(fw_inject_t inj, const char *what) {
 
 #if defined(TQ2_L2_5V_RELAY)
 // A relay coil found energized is a FAULT, not something to clear quietly: a
-// pulse below the TQ2-L2-5V 4 ms minimum is not proven mechanically harmless,
-// so the firmware cannot know whether the latching relay moved (F1;
+// pulse shorter than the TQ2-L2-5V's 3 ms maximum set/reset time is not
+// guaranteed to move the relay, and not proven not to, so the firmware cannot
+// know whether the latching relay moved (F1;
 // docs/relay_coil_fault_correction.md). The gate escalates it like any other
 // output-state mismatch, and hw_force_wdt_reset() de-energizes both coils
 // before it spins.

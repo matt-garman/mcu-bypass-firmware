@@ -62,24 +62,6 @@ Dependencies: an upstream release containing the three fixes. Effort: about
 1 hour. Risk: Low; this retires vendored third-party modifications and a
 simulator-fidelity caveat rather than closing a firmware gap.
 
-### T25-classic-wdt-comment - Correct the classic WDT floor comment at the next soak
-
-`src/bypass_pins_avr_classic.h` justifies `WDT_MIN_PERIOD_MS` with "WDT RC osc
-characterized 100-350 ms". The ATtiny13A and ATtiny25/45/85 datasheets give no
-such range: they give only typical curves, which put the 250 ms setting at
-roughly 265-310 ms at 5 V, so the 100 ms floor is a de-rating choice rather than
-a characterized bound. `DESIGN_DOCUMENTATION.adoc` ("Watchdog period and floor")
-already says this correctly; only the header comment is wrong.
-
-The fix is one comment, but the header is a soak-key driver source, hashed byte
-for byte, so editing it alone would force a fresh 24-hour soak for no firmware
-change. Make the edit in the same change as the next edit that invalidates the
-soak key anyway. The firmware edit must be made by the owner.
-
-Dependencies: the next soak-invalidating change. Effort: 5 minutes. Risk if
-deferred: a misattributed figure in one comment; the design document and the
-compile-time floor are correct.
-
 ### T25-output-formal - Formally verify output-driver sequencing
 
 Model the relay, mute, and CD4053 drivers as small state machines and prove that,
@@ -162,31 +144,15 @@ sizes, and compare the computed maximum with both `-fstack-usage` analysis and
 the runtime canary high-water measurement. Reject unresolved or indirect edges
 rather than silently lowering the bound.
 
+Cover the ATtiny202 as well. Every release retains its per-variant
+`-fstack-usage` frame report, but no AVR-XT lane measures the whole call chain
+plus interrupt context, and there is no simavr canary for that part, so there
+this would be the first whole-chain witness rather than a third one.
+
 Dependencies: a sound treatment of interrupts, recursion, indirect control
 flow, and compiler-generated helpers. Effort: about 2-3 hours. Risk: Medium;
-adds a third independent witness for the Classic AVR stack bound.
-
-### T25-avr-xt-stack - Record the measured AVR-XT shell stack maxima
-
-The lane exists. `attiny202-test-stack-bound` compiles `src/bypass_mcu_avr_xt.c`
-under all three immutable production selectors with the shipping `XT_FW_CFLAGS`
-contract and the SHA-verified DFP inputs, shares the Classic AVR `.su` parser,
-enforces 32 bytes per frame, rejects missing, empty, malformed, dynamic or
-unexpected reports, sits in the `attiny202-test` aggregate rather than the
-default `make test` path, and carries a toolchain-free regression. What is
-missing is a run: no pinned avr-gcc/ATtiny_DFP environment has yet produced the
-actual maxima.
-
-Acceptance: a pinned run records the per-variant frame maxima, and the
-unmeasured-maximum notes in `DESIGN_DOCUMENTATION.adoc` and `test/README.md`
-are replaced by the retained result. Publish the number as what it is:
-`-fstack-usage` bounds individual frames, not complete call depth.
-
-Dependencies: a provisioned pinned avr-gcc plus the fetched, SHA-verified
-ATtiny_DFP device specs and headers. Effort: about 30 minutes once that
-toolchain exists. Risk: Low and completeness-focused: ATtiny202 has 128 bytes of
-SRAM versus the ATtiny13A's 64 bytes, but that capacity comparison does not
-supply the missing retained whole-call-chain-plus-interrupt maximum.
+adds a third independent witness for the Classic AVR stack bound and the first
+for the ATtiny202.
 
 ### T25-pic320-thresholds - Optionally centralize PIC10F320 thresholds
 
@@ -195,10 +161,16 @@ As optional cleanup, consider including `bypass_config.h` and
 then remove its duplicate thresholds, counter maximum, and five invariant
 assertions. This leaves the inlined algorithm and single-TU architecture intact.
 
-A pinned-toolchain scratch build measured all three images byte-identical and
-the equivalence lane unchanged, but acceptance still requires the full matrix,
-expected-image check, and removal of the now-unneeded
-`SHELLS_WITH_OWN_COPY` exception. The firmware edit must be made by the owner.
+Blocked as written since `ba99202` (2026-09-02): `bypass_compile_checks.h`
+now also requires exactly one modular output selector (`CD4053_SIMPLE`,
+`CD4053_WITH_MUTE` or `TQ2_L2_5V_RELAY`), and this shell is built with its own
+`OUTPUT_*` selectors, so including the header fails the build. The earlier
+byte-identical measurement predates that check. Doing it now means either
+renaming the PIC10F320 selectors across its build and test lanes, or moving the
+selector check into `bypass_output_common.h`, which only the modular shells
+include. Including `bypass_config.h` alone would remove the duplicated
+threshold values but keep the invariant copy and the `SHELLS_WITH_OWN_COPY`
+exception. The firmware edit must be made by the owner.
 
 Dependencies: full PIC10F320 toolchain and target validation. Effort: about 20
 minutes plus reruns. Risk: Low; optional simplification, not a correctness fix.
@@ -832,7 +804,6 @@ The stable ID in each row matches exactly one open section above.
 | ID | Item | Tier | Effort | Impact |
 |---|---|---:|---:|---|
 | T25-yasimavr-repin | Re-pin yasimavr and retire vendored patches | 2.5 | 1 h | Low |
-| T25-classic-wdt-comment | Correct the classic WDT floor comment at the next soak | 2.5 | 5 min | Low |
 | T25-output-formal | Formal output-driver sequencing | 2.5 | 3-4 h | Medium |
 | T25-delay-formal | Blocking-delay safety argument | 2.5 | 1-2 h | Medium |
 | T25-golden-cross | Independent-model/direct-core cross-validation | 2.5 | 1-2 h | Medium |
@@ -840,7 +811,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-klee-ci | Execute KLEE in CI | 2.5 | 2 h | Medium |
 | T25-cross-compiler | Narrow alternate-AVR-compiler lane | 2.5 | 2 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
-| T25-avr-xt-stack | Record the measured AVR-XT shell stack maxima | 2.5 | 30 min | Low - completeness |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |
 | T25-wdt-rate | Watchdog pet-frequency measurement | 2.5 | 1-2 h | Medium |
 | T25-irq-window | Interrupt-enabled invariant measurement | 2.5 | 1 h | Medium |

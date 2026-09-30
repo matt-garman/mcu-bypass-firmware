@@ -96,12 +96,13 @@
 // main loop for this long is not mistaken for a hung core.
 #if defined(TQ2_L2_5V_RELAY)
 #  define CTL_DELAY_MS  TQ2_L2_5V_PULSE_MS
-// Panasonic TQ2-L2-5V specified minimum coil pulse for GUARANTEED actuation.
-// The firmware drives TQ2_L2_5V_PULSE_MS (12 ms, 3x margin); the recovery pulse
-// must clear this electrical floor before mechanical convergence can be expected
-// under the documented hardware assumptions. Simulation proves the PULSE, never
-// the relay mechanics.
-#  define TQ2_L2_5V_MIN_PULSE_MS 4U
+// Panasonic TQ2-L2-5V recommended set/reset pulse time (10 ms or more at the
+// rated coil voltage; TQ relays catalog ASCTB14E). The firmware drives
+// TQ2_L2_5V_PULSE_MS (12 ms); every coil pulse, recovery included, must clear
+// this floor before mechanical convergence can be expected under the
+// documented hardware assumptions. Simulation proves the PULSE, never the
+// relay mechanics.
+#  define TQ2_L2_5V_MIN_PULSE_MS 10U
 #elif defined(CD4053_WITH_MUTE)
 #  define CTL_DELAY_MS  CD4053_MUTE_DELAY_MS
 #else
@@ -1680,7 +1681,7 @@ static void test_fault_inject_effect_state(void) {
     expect_fault_response("effect_state_");
 }
 
-// F2 context-SEU (BYPASS_CTX_CHECK): corrupt debounce_counter_ to an IN-RANGE
+// F2 context-SEU check: corrupt debounce_counter_ to an IN-RANGE
 // value that the main-loop range gate cannot see. 0x10 = 16, with
 // PRESSED_THRESH(8) <= 16 <= RELEASE_THRESH(25), so `debounce_counter >
 // RELEASE_THRESH` stays false -- the pre-F2 firmware would silently phantom-
@@ -1937,8 +1938,9 @@ static void inject_output_latch_bit(uint8_t const pin, const char *what) {
 #if defined(TQ2_L2_5V_RELAY)
 // Relay coil fail-safe resynchronization (docs/relay_coil_fault_correction.md).
 //
-// An unexpectedly energized coil is a FAULT: a pulse below the TQ2-L2-5V 4 ms
-// minimum is not proven mechanically harmless, so the firmware cannot know
+// An unexpectedly energized coil is a FAULT: a pulse shorter than the TQ2-L2-5V's
+// 3 ms maximum set/reset time is not guaranteed to move the relay, and not
+// proven not to, so the firmware cannot know
 // whether the latching relay moved, and a latching relay that moved without the
 // firmware's knowledge leaves the audio route disagreeing with the effect state
 // and the LED. The sanity gate escalates it like any other PORTB latch
@@ -2032,7 +2034,7 @@ static void inject_coil_resync(uint8_t const pin, int const engaged,
             / (double)CYCLES_PER_MS;
         CHECK(pulse_ms >= (double)TQ2_L2_5V_MIN_PULSE_MS,
               "coil-resync [%s]: recovery RESET-coil pulse %.2f ms >= %u ms"
-              " datasheet minimum", what, pulse_ms,
+              " recommended minimum", what, pulse_ms,
               (unsigned)TQ2_L2_5V_MIN_PULSE_MS);
     }
     CHECK((g_ctl_changes[CTL_PB3] - set_changes_before) == 0,
@@ -2546,7 +2548,7 @@ static void test_stack_high_water_mark(void) {
 // XT part (which needs only 0.10 -- at 2 MHz its tick ISR costs about 5.5%).
 //
 // 25% is roughly 1.5x the worst measured overhead, which leaves the tick ISR
-// (footswitch sample, debounce integrate and, under BYPASS_CTX_CHECK, the
+// (footswitch sample, debounce integrate and the F2
 // persisted-context validate + refresh) room to grow before this gate trips,
 // while still rejecting a halved, doubled or clock-mis-scaled delay by a wide
 // margin. Nothing else checks the delivered width on these parts -- the classic
@@ -2568,18 +2570,19 @@ static void test_stack_high_water_mark(void) {
 // configured duration, leave the other coil idle, and PARK BOTH COILS LOW
 // afterward (a coil left energized would overheat). Engage pulses the SET coil
 // (PB3); bypass pulses the RESET coil (PB2). The pulse must meet the relay's
-// 4ms datasheet minimum and sit near the design value.
+// recommended 10 ms minimum and sit near the design value.
 static void check_coil_pulse(int pulse_idx, int idle_idx, const char *what) {
     double pulse_ms =
         (double)(g_ctl_fall_cycle[pulse_idx] - g_ctl_rise_cycle[pulse_idx])
         / (double)CYCLES_PER_MS;
-    printf("  relay %s pulse: %.2f ms (datasheet min 4ms, design %d ms; "
+    printf("  relay %s pulse: %.2f ms (recommended min %u ms, design %d ms; "
            "tick-ISR preemption %+.1f%%, budget %+.0f%%)\n",
-           what, pulse_ms, TQ2_L2_5V_PULSE_MS,
+           what, pulse_ms, (unsigned)TQ2_L2_5V_MIN_PULSE_MS, TQ2_L2_5V_PULSE_MS,
            PREEMPTION_PCT(pulse_ms, TQ2_L2_5V_PULSE_MS),
            PULSE_PREEMPTION_MARGIN * 100.0);
-    CHECK(pulse_ms >= 4.0,
-          "relay %s pulse %.2f ms below 4ms datasheet minimum", what, pulse_ms);
+    CHECK(pulse_ms >= (double)TQ2_L2_5V_MIN_PULSE_MS,
+          "relay %s pulse %.2f ms below %u ms recommended minimum", what, pulse_ms,
+          (unsigned)TQ2_L2_5V_MIN_PULSE_MS);
     CHECK(pulse_ms >= BUSY_WAIT_MIN_MS(TQ2_L2_5V_PULSE_MS) &&
           pulse_ms <= BUSY_WAIT_MAX_MS(TQ2_L2_5V_PULSE_MS),
           "relay %s pulse %.2f ms (%+.1f%% vs the %d ms design) outside "

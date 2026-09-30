@@ -169,9 +169,10 @@ static void test_fault_injection(void) {
 
 #if defined(OUTPUT_TQ2_RELAY)
 // F1 fail-safe policy (docs/relay_coil_fault_correction.md): an unexpectedly
-// energized relay coil is a fault, because a pulse shorter than the TQ2-L2-5V
-// 4 ms minimum is not proven mechanically harmless and the firmware therefore
-// cannot know whether the latching relay moved. The gate escalates it, and
+// energized relay coil is a fault, because a pulse shorter than the TQ2-L2-5V's
+// 3 ms maximum set/reset time is not guaranteed to move the relay, and not
+// proven not to, so the firmware cannot know whether the latching relay moved.
+// The gate escalates it, and
 // hw_force_wdt_reset() de-energizes both coils before it spins.
 //
 // This lane proves escalation and de-energization on the shipping source. It

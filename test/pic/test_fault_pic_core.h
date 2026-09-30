@@ -154,6 +154,9 @@
 #ifndef PIC_FAULT_PROGRAM_STATE_NOTE
 #  error "PIC_FAULT_PROGRAM_STATE_NOTE must be defined by the part adapter"
 #endif
+#ifndef PIC_FAULT_CTX_INRANGE
+#  error "PIC_FAULT_CTX_INRANGE (1 iff the shell carries the F2 context check) is required"
+#endif
 #ifndef PIC_FAULT_WDT_NOTE
 #  error "PIC_FAULT_WDT_NOTE must be defined by the part adapter"
 #endif
@@ -225,12 +228,12 @@
 // datasheet minimum pulse, so it cannot mistake a real actuation for a glitch
 // or vice versa, while keeping the case ~940 resumes instead of ~15000.
 #define RESYNC_SAMPLE_CYCLES 16u
-// Panasonic TQ2-L2-5V specified minimum coil pulse for GUARANTEED actuation.
-// The firmware drives 12 ms (TQ2_L2_5V_PULSE_MS, 3x margin); this is the floor
-// the recovery pulse must clear before physical convergence can be expected
-// under the documented hardware assumptions. Simulation proves the PULSE,
-// never the mechanics.
-#define RELAY_MIN_PULSE_MS 4u
+// Panasonic TQ2-L2-5V recommended set/reset pulse time (10 ms or more at the
+// rated coil voltage; TQ relays catalog ASCTB14E). The firmware drives 12 ms
+// (TQ2_L2_5V_PULSE_MS); this is the floor the recovery pulse must clear before
+// physical convergence can be expected under the documented hardware
+// assumptions. Simulation proves the PULSE, never the mechanics.
+#define RELAY_MIN_PULSE_MS 10u
 #if defined(PIC_FAULT_REQUIRE_PHYSICAL_COIL_IDLE)
 // gpsim drives digital outputs at the rails. Keep the assertions in the
 // datasheet-defined low/high regions rather than treating any nonzero float as
@@ -537,8 +540,9 @@ static void prove_post_reset_liveness(void) {
 // ---- Relay fail-safe RESYNCHRONIZATION case ---------------------------------
 // F1 policy (docs/relay_coil_fault_correction.md): an unexpectedly energized
 // relay coil is a FAULT, not something to clear quietly. A pulse shorter than
-// the Panasonic TQ2-L2-5V 4 ms minimum is not proven mechanically harmless, so
-// the firmware cannot know whether the latching relay moved -- and a latching
+// the TQ2-L2-5V's 3 ms maximum set/reset time is not guaranteed to move the
+// relay, and not proven not to, so the firmware cannot know whether the
+// latching relay moved -- and a latching
 // relay that moved without the firmware's knowledge leaves the audio route
 // disagreeing with both the logical effect state and the LED.
 //
@@ -714,7 +718,7 @@ static void finish_relay_resync_case(Register *target, Register *latch,
                " at watchdog spin,", reset_pin_v, set_pin_v, spare_pin_v);
 #endif
         printf(" 1 reset, recovery drove a %.3f ms RESET-coil pulse"
-               " (>= %u ms datasheet minimum) with SET dark, settled in BYPASS\n",
+               " (>= %u ms recommended minimum) with SET dark, settled in BYPASS\n",
                (double)reset_coil_cycles / (double)CYCLES_PER_MS,
                RELAY_MIN_PULSE_MS);
         // Folded into this same check slot (deliberately no g_checks++).
@@ -1297,7 +1301,7 @@ int main() {
     inject_case("ctx.debounce_counter", CTX_DEBOUNCE_COUNTER, nullptr, true, 0xFF, 1,
                 "->255: > RELEASE_THRESH (gate-only)");
 
-#if defined(BYPASS_CTX_CHECK)
+#if PIC_FAULT_CTX_INRANGE
     // F2 context-SEU: an IN-RANGE single-bit flip the range clauses above cannot
     // see. 0x10 = 16, with PRESSED_THRESH(8) <= 16 <= RELEASE_THRESH(25), so the
     // gate's `ctx_.debounce_counter > RELEASE_THRESH` clause stays FALSE -- the
@@ -1307,10 +1311,10 @@ int main() {
     // (see bypass_mcu_pic10f322.c / bypass_mcu_pic12f675.c). inject_case parks the
     // write at the loop CLRWDT, AFTER the tick's shadow refresh and BEFORE the
     // next gate, so that gate reads the corrupted counter against the stale
-    // shadow -> exactly one WDT reset. Compiled only where the firmware opts into
-    // BYPASS_CTX_CHECK (PIC10F322 / PIC12F675); PIC10F320 is EXCLUDED and never
-    // defines the macro (docs/context_seu_detection.md), so this case and its
-    // EXPECTED_CHECKS contribution both vanish there.
+    // shadow -> exactly one WDT reset. Compiled only where the adapter sets
+    // PIC_FAULT_CTX_INRANGE (PIC10F322 / PIC12F675); PIC10F320 is EXCLUDED
+    // (docs/context_seu_detection.md), so this case and its EXPECTED_CHECKS
+    // contribution both vanish there.
     inject_case("ctx.debounce.inrange", CTX_DEBOUNCE_COUNTER, nullptr, true, 0x10, 1,
                 "->16: in range, only the F2 XOR-fold shadow catches");
 #endif

@@ -273,9 +273,8 @@ static uint8_t fwp_ctx_check_word(debounce_context_t ctx) {
 // state the firmware could legitimately be in. That means writing F2's check
 // word alongside the context, exactly as the shell does -- a stale ctx_check_
 // would trip the context-check clause and reset, and the case would assert the
-// opposite of what it is named for. run_fw_coverage.sh always defines
-// BYPASS_CTX_CHECK (both parts ship with it), so ctx_check_ always exists;
-// dropping that flag is a compile error here, by design.
+// opposite of what it is named for. Both shells declare ctx_check_
+// unconditionally, so it always exists here.
 static void apply_injection(int inj) {
 #if defined(BYPASS_MCU_PIC12F675)
     switch (inj) {

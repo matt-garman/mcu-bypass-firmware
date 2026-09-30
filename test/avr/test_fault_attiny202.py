@@ -62,10 +62,11 @@ TRANSACTION_MAX_STEPS = 4_000  # exact-PC search; deliberately not a time budget
 EXPECTED_FAULT_CASES_CD4053 = 24
 EXPECTED_FAULT_CASES_RELAY = 32
 RESET_SENTINEL = 0xA5
-# Panasonic TQ2-L2-5V minimum coil pulse for guaranteed actuation; the shell
-# drives 12 ms. Used only in diagnostics here -- see the RESYNC note below for
-# why this substrate cannot measure the recovery pulse.
-TQ2_L2_5V_MIN_PULSE_MS = 4
+# Panasonic TQ2-L2-5V recommended set/reset pulse (10 ms or more at the rated
+# coil voltage, TQ relays catalog ASCTB14E); the shell drives 12 ms. Used only
+# in diagnostics here -- see the RESYNC note below for why this substrate cannot
+# measure the recovery pulse.
+TQ2_L2_5V_MIN_PULSE_MS = 10
 
 REG = "reg"              # I/O register        (write_ioreg, one byte)
 REG16 = "reg16"          # 16-bit I/O register  (write_ioreg low then high)
@@ -113,8 +114,9 @@ def _fault_cases(sim, is_relay):
         ("PORTA.DIR(spare PA6)",   REG,  S.REG_PORTA_DIR,         0x0E,   GATE),
         ("PORTA.OUT(PA1 LED)",     REG,  S.REG_PORTA_OUT,         0x02,   GATE),
         # Relay settled-state case: PA2/PA3 are the coils. An energized coil is
-        # a FAULT -- a pulse below the TQ2-L2-5V 4 ms minimum is not proven
-        # mechanically harmless, so the firmware cannot know whether the
+        # a FAULT -- a pulse shorter than the TQ2-L2-5V's 3 ms maximum set/reset
+        # time is not guaranteed to move the relay, and not proven not to, so
+        # the firmware cannot know whether the
         # latching relay moved -- and the gate escalates it exactly like any
         # other PORTA.OUT mismatch, after hw_force_wdt_reset() has driven both
         # coils low (see docs/relay_coil_fault_correction.md). This does not
