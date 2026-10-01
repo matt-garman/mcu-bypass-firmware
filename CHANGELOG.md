@@ -118,6 +118,16 @@ lengths.
   Both hold the variant vocabulary to the Makefile's parse-time guard, one for
   selectors and one for per-variant maps, and now share one harvest of the
   Makefile.
+- **The Make programming path for the PIC12F675.** `pic12f675-preflight`,
+  `pic12f675-program`, `pic12f675-release-program` and `pic12f675-finalize` are
+  gone, together with the trim-evidence tool, the signed-image binding script
+  and the calibration injector's inverse mode, which only they used. They
+  implemented the same calibration-preserving transaction as the release
+  helper, through a `pk2cmd` reader, and had never been run against a device;
+  the helper has. A PIC12F675 is now programmed only through
+  `flash-pic12f675.py` and a signed release image, so there is no route for an
+  unsigned local build. Generated release documentation publishes the helper
+  alone.
 
 ## [0.9.16] - 2026-09-29
 

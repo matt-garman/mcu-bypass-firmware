@@ -441,8 +441,6 @@ for renderer in release_validate_current_documentation \
 		release_validate_staged_documentation \
 		release_reject_branch_only_documents \
 		release_validate_hardware_claims \
-		release_validate_pic12f675_finalization \
-		release_validate_pic12f675_finalization_document \
 		release_validate_pic12f675_flashing_helper \
 		release_render_scope release_render_validation \
 		release_render_toolchain_table release_render_pic12f675_flashing \
@@ -503,9 +501,7 @@ case "$inherited_gpsim_timeout" in
 	''|60) ;;
 	*) die "GPSIM_TIMEOUT_SECONDS is not a supported production release override" ;;
 esac
-unset MAKE GPSIM_TIMEOUT_SECONDS PIC12F675_PART PIC12F675_PROG \
-	PIC12F675_PROG_KIND PIC12F675_PROG_TOOL PIC12F675_READ_PROG \
-	PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT PIC12F675_RELEASE_TAG \
+unset MAKE GPSIM_TIMEOUT_SECONDS \
 	AVRDUDE AVR_PROGRAMMER XT_PROGRAMMER XT_UPDI_PORT \
 	PIC10F322_PART PIC10F322_PROG PIC10F322_PROG_TOOL PIC10F322_PROG_CMD \
 	PIC10F320_PART PIC10F320_PROG PIC10F320_PROG_TOOL PIC10F320_PROG_CMD
@@ -966,12 +962,6 @@ if [ "$VERSION_WAS_SUPPLIED" -eq 1 ]; then
 		"${#DOCUMENT_RELEASE_IMAGES[@]}" "${#DOCUMENT_RELEASE_SOAKS[@]}" \
 		"$ALLOW_UNRELEASED" \
 		|| die "current release documentation is not finalized for $VERSION"
-	# Published recovery instructions must actually recover the transaction the
-	# published programming command reserves. Checked here, on the live tree, so
-	# a drifted static example fails on a polish branch rather than after a
-	# builder has already lost a PENDING signed-release transaction.
-	release_validate_pic12f675_finalization "$REPO_ROOT" "$VERSION" \
-		|| die "published PIC12F675 finalization commands do not match the transaction they recover"
 	# Field use and controlled qualification are different claims, and this
 	# repository holds only the first. Checked here, on the live tree, so a
 	# document that promotes a forum build report into bench evidence -- or that

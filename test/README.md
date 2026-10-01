@@ -710,9 +710,9 @@ closed for both.
 ### PIC12F675 hardware gaps
 
 PIC12F675 has distinct silicon-only risks rather than the PIC10F32x TMR2/family
-details above. Its guarded programming workflow detects and records OSCCAL and
-`BG<1:0>` changes but cannot prove that a real programmer preserves either; the
-pk2cmd and ipecmd hardware routes remain unvalidated on silicon. Simulator lanes
+details above. Its release flashing helper detects and records OSCCAL and
+`BG<1:0>` changes but cannot prove that a real programmer preserves either, and
+its `ipecmd` route is not hardware-qualified. Simulator lanes
 qualify its 1.024 ms TMR0 cadence, qualitative WDT reset and liveness, and
 nominal output pulse widths; real WDT timing, analog BOD behaviour, and the
 loaded-board GP2 Schmitt-trigger readback margin require measurement. These are

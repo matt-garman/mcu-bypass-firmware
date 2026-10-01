@@ -1309,220 +1309,6 @@ release_validate_claim_boundaries() {
 	return "$rc"
 }
 
-# release/README.md is the one maintained semantic owner of the source-checkout
-# transaction, and every PUBLISHED PIC12F675 finalization command must carry the
-# complete identity of the transaction it recovers.
-#
-# `make pic12f675-finalize` is read-only recovery of a PENDING transaction, and it
-# passes the CALLER-selected identity to the recovery oracle, which compares it
-# against the identity the reservation recorded. A transaction reserved by
-# pic12f675-release-program records the release tag and its source commit; one
-# reserved by pic12f675-program records neither. So the rule is not "always pass
-# the release tag" but "pass the identity of the goal that reserved it", and the
-# two directions fail in opposite ways:
-#
-#   * a signed-release example that OMITS PIC12F675_RELEASE_TAG rejects the very
-#     transaction it claims to recover (this is exactly what README.md and
-#     release/README.md published before v0.9.10, while the generated per-release
-#     documentation carried the argument -- the drift this contract exists to
-#     prevent); and
-#   * a development example that ADDS it rejects a reservation that holds no
-#     release identity.
-#
-# Each finalization command is therefore anchored to the nearest programming
-# command published before it in the same document, and must repeat that
-# command's arguments with the SAME VALUES -- naming the right variables is not
-# enough when the published recovery points at a different variant or a different
-# result path than the transaction it follows.
-#
-# A "published command" is a line inside a fenced block that begins a `make`
-# invocation, continuations included. Prose that merely names the goal mid
-# sentence is not a command and is not checked; test/README.md names all three
-# goals that way.
-_release_pic12f675_finalization_scan() {
-	[ "$#" -eq 1 ] || return 2
-	local label=$1
-	local line command word name value goal mode='' fenced=0 building=0 found=0 rc=0
-	local -a words
-	local -a required=(VARIANT PIC12F675_PROG PIC12F675_PROG_KIND \
-		PIC12F675_READ_PROG PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT)
-	local -A given reserved
-
-	command=''
-	while IFS= read -r line || [ -n "$line" ]; do
-		if [ "$building" -eq 0 ] && [[ "$line" == '```'* ]]; then
-			fenced=$((1 - fenced))
-			continue
-		fi
-		[ "$fenced" -eq 1 ] || continue
-		if [ "$building" -eq 0 ]; then
-			[[ "$line" =~ ^[[:space:]]*make([[:space:]]|$) ]] || continue
-			building=1
-			command=''
-		fi
-		if [[ "$line" =~ ^(.*)\\[[:space:]]*$ ]]; then
-			command+=" ${BASH_REMATCH[1]}"
-			continue
-		fi
-		command+=" $line"
-		building=0
-
-		read -r -a words <<<"$command"
-		given=()
-		goal=''
-		for word in ${words[@]+"${words[@]}"}; do
-			case "$word" in
-				pic12f675-release-program|pic12f675-program|pic12f675-finalize)
-					goal=$word
-					;;
-				[A-Za-z_]*=*)
-					name=${word%%=*}
-					value=${word#*=}
-					value=${value%\"}
-					given[$name]=${value#\"}
-					;;
-			esac
-		done
-		case "$goal" in
-			pic12f675-release-program|pic12f675-program)
-				mode=$goal
-				reserved=()
-				if [ "${#given[@]}" -gt 0 ]; then
-					for name in "${!given[@]}"; do
-						reserved[$name]=${given[$name]}
-					done
-				fi
-				continue
-				;;
-			pic12f675-finalize) : ;;
-			*) continue ;;
-		esac
-		found=$((found + 1))
-
-		# Same argument, same VALUE: recovery must select the transaction the
-		# preceding command reserved, not merely name the right variables.
-		for name in "${required[@]}"; do
-			if [ -z "${given[$name]+set}" ]; then
-				_release_documentation_error \
-					"$label publishes a pic12f675-finalize command without $name" || rc=1
-			elif [ "${given[$name]}" != "${reserved[$name]-}" ]; then
-				_release_documentation_error \
-					"$label recovers with $name=${given[$name]} but the transaction it follows reserved ${reserved[$name]-<nothing>}" || rc=1
-			fi
-		done
-		# The release tag is checked for presence, not text: the generated
-		# per-release documentation deliberately embeds the resolved tag in its
-		# recovery block so recovery does not depend on a shell variable
-		# surviving from the programming block, while the static examples carry
-		# the same "$release_tag" both times.
-		case "$mode" in
-			pic12f675-release-program)
-				[ -n "${given[PIC12F675_RELEASE_TAG]:-}" ] \
-					|| _release_documentation_error \
-						"$label finalizes a pic12f675-release-program transaction without PIC12F675_RELEASE_TAG; that reservation records the release identity, so the published recovery would be rejected" \
-					|| rc=1
-				;;
-			pic12f675-program)
-				[ -z "${given[PIC12F675_RELEASE_TAG]+set}" ] \
-					|| _release_documentation_error \
-						"$label finalizes a pic12f675-program transaction with PIC12F675_RELEASE_TAG; that reservation records no release identity" \
-					|| rc=1
-				;;
-			*)
-				_release_documentation_error \
-					"$label publishes a pic12f675-finalize command with no preceding pic12f675-program or pic12f675-release-program command to recover" || rc=1
-				;;
-		esac
-	done
-
-	[ "$building" -eq 0 ] \
-		|| _release_documentation_error "$label ends inside an unterminated make command" || rc=1
-	[ "$found" -gt 0 ] \
-		|| _release_documentation_error "$label publishes no pic12f675-finalize command" || rc=1
-	return "$rc"
-}
-
-release_validate_pic12f675_finalization_document() {
-	[ "$#" -eq 2 ] || return 2
-	local document=$1 label=$2
-	[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
-		|| _release_documentation_error "finalization document is not a regular nonempty file: $label" || return
-	_release_pic12f675_finalization_scan "$label" < "$document"
-}
-
-# Validate every published finalization command in the CURRENT tree, plus the
-# generated per-release documentation, against the same oracle.
-#
-# release/README.md is named because it is the sole live home of the guarded
-# source-checkout transaction, so deleting the recovery example from it must
-# fail. Every other document is DISCOVERED, and discovery keys on either half of
-# the pair: a document that publishes a PROGRAMMING command is scanned exactly
-# like one that publishes a recovery, so dropping the recovery while keeping the
-# command it recovers cannot escape by no longer matching the search. A document
-# that publishes NEITHER is not a publisher at all -- which is how README.md now
-# points at the two routes without restating either. Shipped release directories
-# (release/vX.Y.Z/) are excluded: they are immutable artifacts of past releases,
-# and release/v0.9.9/MANIFEST.md legitimately publishes the older unsigned
-# pic12f675-program transaction.
-release_validate_pic12f675_finalization() {
-	[ "$#" -eq 2 ] || return 2
-	local repo_root=$1 version=$2
-	local document label rendered toolchain find_pid rc=0
-	# Always scanned, so deleting the recovery example from it is a failure with
-	# a precise diagnostic rather than a silently empty scan.
-	local -a publishers=("release/README.md")
-
-	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
-		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
-
-	# TOOLCHAIN.adoc owns installation, pinning and tool behavior. It links to
-	# the operator transaction rather than maintaining the transaction's goals,
-	# evidence paths, reservation files or temporary-storage policy a second time.
-	toolchain="$repo_root/TOOLCHAIN.adoc"
-	[ -f "$toolchain" ] && [ -s "$toolchain" ] && [ ! -L "$toolchain" ] \
-		|| _release_documentation_error "PIC12F675 toolchain document is not a regular nonempty file: TOOLCHAIN.adoc" || return
-	grep -Fq 'link:release/README.md#flash-a-chip[' "$toolchain" \
-		|| _release_documentation_error "TOOLCHAIN.adoc does not link to release/README.md as the PIC12F675 source-checkout transaction owner" || rc=1
-	if grep -Eq 'pic12f675-preflight|PIC12F675_(TRIM_EVIDENCE|BENCH_RESULT)|reservation\.json|result\.json|XDG_RUNTIME_DIR' \
-			"$toolchain"; then
-		_release_documentation_error "TOOLCHAIN.adoc restates PIC12F675 source-checkout transaction details owned by release/README.md" || rc=1
-	fi
-
-	while IFS= read -r -d '' document; do
-		label=${document#$repo_root/}
-		case "$label" in
-			release/README.md) continue ;;
-		esac
-		# Root-level working documents quote the defective form of a command
-		# while describing the defect; they are deleted before release.
-		if _release_is_branch_only_document "$document" "$label"; then
-			continue
-		fi
-		# A published command, not a prose mention. This finds a NEW document the
-		# day it is written; the document named above is scanned either way, so a
-		# command this pattern cannot see still fails inside the scan.
-		grep -Eq '^[[:space:]]*make([[:space:]].*)?[[:space:]](pic12f675-finalize|pic12f675-program|pic12f675-release-program)([[:space:]]|\\|$)' \
-			"$document" || continue
-		publishers+=("$label")
-	done < <(find "$repo_root" \
-		\( -name .git -o -path "$repo_root/release/v[0-9]*" \) -prune -o \
-		-type f -name '*.md' -print0)
-	find_pid=$!
-	# A failed scan is a policy failure, not an empty result set: the two named
-	# documents would still be checked and a drifted third would pass unseen.
-	wait "$find_pid" \
-		|| _release_documentation_error "could not scan for published finalization commands" || return
-
-	for label in "${publishers[@]}"; do
-		release_validate_pic12f675_finalization_document "$repo_root/$label" "$label" || rc=1
-	done
-
-	rendered=$(release_render_pic12f675_flashing "$version") \
-		|| _release_documentation_error "generated PIC12F675 flashing guidance could not be rendered" || return
-	_release_pic12f675_finalization_scan "generated release documentation" <<<"$rendered" || rc=1
-	return "$rc"
-}
-
 # The PIC12F675 flashing contract, checked on the LIVE tree.
 #
 # This part is the one target where a correct HEX plus a writer is not a
@@ -1719,8 +1505,7 @@ release_validate_pic12f675_flashing_helper() {
 	# family rather than as three exact sentences, because the same false claim
 	# survives an editor'"'"'s rewrap and an adjective swap; what it deliberately
 	# does NOT ban is a claim SCOPED to a route ("this route offers no operator
-	# ipecmd procedure"), which is true of the Make-based development and
-	# release-provenance goals and must stay sayable.
+	# ipecmd procedure"), which must stay sayable.
 	local unscoped_ipecmd_denial='no ipecmd( (hardware|user|write|operator|programming))? procedure is published'
 	local retired
 
@@ -1815,7 +1600,7 @@ release_validate_pic12f675_flashing_helper() {
 		# test/README.md says a document may not "deny that any ipecmd
 		# procedure has been published", which is not the form itself.
 		if grep -Eqi -- "$unscoped_ipecmd_denial" <<<"${flowed//\`/}"; then
-			_release_documentation_error "$label denies that any ipecmd procedure is published; the release helper publishes one, so scope the claim to the Make route or say that route is not QUALIFIED" || rc=1
+			_release_documentation_error "$label denies that any ipecmd procedure is published; the release helper publishes one, so scope the claim to a route or say that route is not QUALIFIED" || rc=1
 		fi
 		case "$label" in
 			README.md|FLASHING.md|release/README.md) continue ;;
@@ -1902,15 +1687,16 @@ release_render_toolchain_table() {
 }
 
 release_render_pic12f675_flashing() {
+	# Takes the release tag for the interface its callers share; the guidance
+	# itself names no tag, because the helper reads the release beside it.
 	[ "$#" -eq 1 ] || return 2
-	local release_tag=$1
 	printf '%s\n' \
 		'### PIC12F675 programming' \
 		'' \
 		'This part is NOT a raw write target. Its per-device factory OSCCAL word and' \
 		'CONFIG `BG<1:0>` trim live in memory a programmer erases, and a device that' \
-		'loses either still appears to work. Every write therefore goes through a' \
-		'guarded transaction, and there are two of them.' \
+		'loses either still appears to work. Every write therefore goes through the' \
+		'guarded transaction of the release helper; no Make goal programs this part.' \
 		'' \
 		'**Programming these downloaded images** needs no source checkout and no' \
 		'firmware development toolchain -- only Linux, Python 3 and MPLAB X 6.20' \
@@ -1949,86 +1735,6 @@ release_render_pic12f675_flashing() {
 		'`1.x.y` bench pass, and the helper detects damage only after the write. The' \
 		"helper's \`ipecmd\` route is published and software-tested, but it is not" \
 		'hardware-qualified.' \
-		'' \
-		'#### From a source checkout of this tag (development and release provenance)' \
-		'' \
-		'Externally power the board; this workflow does not request programmer-supplied Vdd.' \
-		'Do not invoke a raw programmer write for this part. For each device, choose' \
-		'new baseline and result paths whose parent directory already exists, then run' \
-		'the read-only preflight and program steps as one fail-stop transaction. Replace' \
-		'`cd4053_simple` with one supported output stage when needed:' \
-		'`cd4053_simple`, `cd4053_with_mute`, or `tq2_l2_5v_relay`.' \
-		'' \
-		'```sh' \
-		"release_tag=$(printf '%q' "$release_tag") &&" \
-		'repo=$(git rev-parse --show-toplevel) &&' \
-		'head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&' \
-		'tag_commit=$(git -C "$repo" rev-parse --verify "refs/tags/$release_tag^{commit}") &&' \
-		'worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&' \
-		'test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&' \
-		'evidence_root=$(dirname "$repo") &&' \
-		'baseline="$evidence_root/pic12f675-factory-baseline.json" &&' \
-		'result="$evidence_root/pic12f675-program-result" &&' \
-		'test ! -e "$baseline" && test ! -e "$result" &&' \
-		'make -C "$repo" pic12f675-preflight \' \
-		'  PIC12F675_READ_PROG=pk2cmd \' \
-		'  PIC12F675_TRIM_EVIDENCE="$baseline" &&' \
-		'make -C "$repo" pic12f675-release-program \' \
-		'  VARIANT=cd4053_simple \' \
-		'  PIC12F675_RELEASE_TAG="$release_tag" \' \
-		'  PIC12F675_PROG=pk2cmd \' \
-		'  PIC12F675_PROG_KIND=pk2cmd \' \
-		'  PIC12F675_READ_PROG=pk2cmd \' \
-		'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
-		'  PIC12F675_BENCH_RESULT="$result"' \
-		'```' \
-		'' \
-		'If an interruption leaves `reservation.json` but no `result.json`, the' \
-		'transaction is **PENDING**. Keep physical custody of the same attached device.' \
-		'Do not write, reflash, capture a new baseline, or reuse the result path. From' \
-		'this same release checkout, resolve it with the same release identity, variant,' \
-		'and tool identities:' \
-		'' \
-		'```sh' \
-		'make -C "$repo" pic12f675-finalize \' \
-		'  VARIANT=cd4053_simple \' \
-		"  PIC12F675_RELEASE_TAG=$(printf '%q' "$release_tag") \\" \
-		'  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \' \
-		'  PIC12F675_READ_PROG=pk2cmd \' \
-		'  PIC12F675_TRIM_EVIDENCE="$baseline" \' \
-		'  PIC12F675_BENCH_RESULT="$result"' \
-		'```' \
-		'' \
-		'Finalization revalidates the same signed release tag and image, every reserved' \
-		'identity, and the separately retained image' \
-		'before hardware access and never invokes writer arguments. It verifies the reader' \
-		'version before a full-device read, uses retry-safe private attempts, and exclusively' \
-		'publishes the recovered PASS/FAIL `result.json`; FAIL is a' \
-		'resolved forensic record, not permission to retry the write, and an existing result' \
-		'is immutable.' \
-		'' \
-		'The guarded workflow rejects an image that explicitly programs OSCCAL word' \
-		'`0x3FF`, requires the image BG field to remain erased, compares the live device' \
-		'with the baseline immediately before writing.' \
-		'Post-write identity, OSCCAL, BG, CONFIG, and programmed bytes are checked and recorded' \
-		'as mandatory evidence.' \
-		'This does not prove that a real pk2cmd or ipecmd erase/program operation preserves' \
-		'factory trim: preservation remains hardware-unvalidated until the `1.x.y` bench' \
-		'pass. A failure is detected only after the write and may already have damaged the device.' \
-		'The device may still appear to work with wrong timing or BOR/POR thresholds.' \
-		'The release target rechecks a clean checkout of this exact annotated release tag,' \
-		'verifies the pinned tag and checksum signatures, and requires the private fresh' \
-		'build to match the selected digest in the complete signed release image set.' \
-		'It does not consume a downloaded release HEX. Baseline and result evidence stay' \
-		'outside the worktree so those checks remain exact. Transient reads and the private build use `TMPDIR` when set,' \
-		'otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must exist, be' \
-		'current-user-private, and have only root/current-user-owned non-writable ancestors.' \
-		'Shared `/tmp` and `/var/tmp` roots are rejected; the path is limited to letters,' \
-		'digits, spaces, `/`, `.`, `_`, and `-`.' \
-		'Handled exits remove the transient directories. No ipecmd hardware' \
-		'procedure is qualified: its software-tested write route would also require a' \
-		'pk2cmd reader before and after the write, and no safe attachment/handoff has been' \
-		'validated.' \
 		''
 }
 

@@ -164,21 +164,13 @@ license or hand-written assembly, neither of which this project will take.
                 The PIC12F675 needs python3 for a second reason: `make
                 pic12f675-simcal` runs the repository's calibration-word
                 injector to derive its simulator images, so every 12F675
-                simulator lane fails closed without an interpreter. The same
-                tool guards `make pic12f675-program` in its inverse mode -- the
-                 private snapshot selected from the fresh `VARIANT` matrix must
-                 NOT carry a calibration word -- and that target refuses to
-                 flash silicon at all rather than program a device with the
-                 check unrun or a changed snapshot.
+                simulator lane fails closed without an interpreter.
 
   PIC12F675
-  programmers:   Neither `pk2cmd` nor `ipecmd` is installed on this build host.
-                 `pk2cmd` is the only pinned readback dialect. `ipecmd` remains
-                 a software-tested write dialect, but the repository defines no
-                 `ipecmd` read command and uses `pk2cmd` for reads on that route.
-                 These are tool-support facts, not an operator procedure. Follow
-                 link:release/README.md#flash-a-chip[the release policy's
-                 source-checkout procedure]; for a downloaded release, follow
+  programmer:    MPLAB X 6.20 `ipecmd`, driven only by the release helper
+                 `flash-pic12f675.py`; no Make goal programs this part, and
+                 `ipecmd` is not installed on this build host. This is a
+                 tool-support fact, not an operator procedure: follow
                  link:FLASHING.md#pic12f675-not-a-raw-write-target[the general
                  flashing procedure].
                 `make test-pic10f320-return-stack-oracle` runs deterministic parser and

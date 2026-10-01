@@ -540,8 +540,8 @@ for bad_source_command in \
 done
 if release_producer_source_command_valid \
 		bypass-pic12f675-cd4053_simple.hex \
-		'make pic12f675-release-program VARIANT=cd4053_simple'; then
-	fail "release producer accepted a generic PIC12F675 source command"
+		'make pic12f675 VARIANT=cd4053_simple'; then
+	fail "release producer accepted a PIC12F675 source command; the part has no programming goal"
 fi
 checks=$((checks + 1))
 
@@ -2408,38 +2408,6 @@ mkdir -p "$render_bin" "$render_fixture/scripts"
 cat > "$render_bin/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [ -n "${GIT_SAFETY_LOG:-}" ]; then
-	printf 'git' >> "$GIT_SAFETY_LOG"
-	printf '\t%s' "$@" >> "$GIT_SAFETY_LOG"
-	printf '\n' >> "$GIT_SAFETY_LOG"
-	if [ "$#" -eq 2 ] && [ "$1" = rev-parse ] && [ "$2" = --show-toplevel ]; then
-		[ "${GIT_COMMAND_FAIL:-}" != root ] || exit 92
-		printf '%s\n' "$PWD"
-		exit 0
-	fi
-	if [ "$#" -eq 5 ] && [ "$1" = -C ] && [ "$3" = rev-parse ] \
-			&& [ "$4" = --verify ]; then
-		if [ "${GIT_COMMAND_FAIL:-}" = head ] && [ "$5" = 'HEAD^{commit}' ]; then
-			exit 92
-		fi
-		if [ "${GIT_COMMAND_FAIL:-}" = tag ] && [ "$5" != 'HEAD^{commit}' ]; then
-			exit 92
-		fi
-		if [ "${GIT_TAG_MISMATCH:-0}" -eq 1 ] && [ "$5" != 'HEAD^{commit}' ]; then
-			printf '%s\n' ffffffffffffffffffffffffffffffffffffffff
-			exit 0
-		fi
-		printf '%s\n' 0123456789abcdef0123456789abcdef01234567
-		exit 0
-	fi
-	if [ "$#" -eq 5 ] && [ "$1" = -C ] && [ "$3" = status ]; then
-		[ "${GIT_COMMAND_FAIL:-}" != status ] || exit 92
-		[ "${GIT_WORKTREE_DIRTY:-0}" -eq 0 ] \
-			|| printf '%s\n' ' M src/changed.c'
-		exit 0
-	fi
-	exit 91
-fi
 printf 'git' >> "${RENDER_LOG:?}"
 printf '\t%s' "$@" >> "$RENDER_LOG"
 printf '\n' >> "$RENDER_LOG"
@@ -2450,11 +2418,6 @@ set -euo pipefail
 printf 'make' >> "${RENDER_LOG:?}"
 printf '\t%s' "$@" >> "$RENDER_LOG"
 printf '\n' >> "$RENDER_LOG"
-if [ "${TEST_PREFLIGHT_FAIL:-0}" -eq 1 ]; then
-	for argument in "$@"; do
-		[ "$argument" != pic12f675-preflight ] || exit 97
-	done
-fi
 EOF
 cat > "$render_fixture/scripts/verify-release-images.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -2529,16 +2492,10 @@ if release_render_reproduction_commands v0.9.9 \
 fi
 checks=$((checks + 1))
 
-# The generated PIC12F675 flashing block is an executable guarded transaction,
-# not an abbreviated writer command. Run it from a path with spaces and require
-# fail-stop ordering between the read-only baseline and the write.
+# The generated PIC12F675 flashing guidance publishes the release helper and its
+# read-only recovery, never an abbreviated writer command.
 flashing="$work/rendered-pic12f675-flashing.md"
-flashing_commands="$work/rendered-pic12f675-flashing.sh"
-recovery_commands="$work/rendered-pic12f675-recovery.sh"
 flashing_fixture="$work/rendered-flashcmds.txt"
-git_safety_log="$work/rendered-pic12f675-git.log"
-flash_fixture="$work/flash fixture with spaces"
-mkdir -p "$flash_fixture"
 printf '%s\t%s\t%s\n' \
 	'bypass-attiny13a-cd4053_simple.hex' avrdude-isp \
 	'avrdude -c test-programmer -p t13 -U flash:w:bypass-attiny13a-cd4053_simple.hex:i' \
@@ -2551,10 +2508,9 @@ helper_commands="$work/rendered-pic12f675-helper.sh"
 helper_recovery="$work/rendered-pic12f675-helper-recovery.sh"
 release_render_flashing "$flashing_fixture" v0.9.9 \
 	test-programmer serialupdi /dev/ttyUSB0 > "$flashing"
-# Select each block by what it CONTAINS, not by its ordinal. The section now
-# publishes four: the downloaded-image helper and its recovery, then the
-# source-checkout transaction and its recovery. Positional extraction silently
-# followed the wrong one when the helper blocks were added ahead of them.
+# Select each block by what it CONTAINS, not by its ordinal: the section
+# publishes the downloaded-image helper and its recovery, and positional
+# extraction once silently followed the wrong block when blocks were added.
 extract_rendered_block() {
 	awk -v want="$2" '
 		/^```sh$/ { capture=1; buf=""; next }
@@ -2566,22 +2522,12 @@ extract_rendered_block() {
 		capture { buf = buf $0 "\n" }
 	' "$1"
 }
-extract_rendered_block "$flashing" 'pic12f675-release-program' > "$flashing_commands"
-extract_rendered_block "$flashing" 'pic12f675-finalize' > "$recovery_commands"
 extract_rendered_block "$flashing" 'flash-pic12f675.py program' > "$helper_commands"
 extract_rendered_block "$flashing" 'flash-pic12f675.py finalize' > "$helper_recovery"
-[ -s "$flashing_commands" ] \
-	|| fail "rendered PIC12F675 flashing guidance has no shell command block"
-[ -s "$recovery_commands" ] \
-	|| fail "rendered PIC12F675 flashing guidance has no recovery command block"
 [ -s "$helper_commands" ] \
 	|| fail "rendered PIC12F675 flashing guidance has no downloaded-image helper block"
 [ -s "$helper_recovery" ] \
 	|| fail "rendered PIC12F675 flashing guidance has no helper recovery block"
-bash -n "$flashing_commands" \
-	|| fail "rendered PIC12F675 flashing commands are not valid shell"
-bash -n "$recovery_commands" \
-	|| fail "rendered PIC12F675 recovery commands are not valid shell"
 bash -n "$helper_commands" \
 	|| fail "rendered PIC12F675 helper commands are not valid shell"
 bash -n "$helper_recovery" \
@@ -2605,17 +2551,8 @@ done
 checks=$((checks + 1))
 	for required in 'flash-pic12f675.py' 'NOT a raw write target' \
 		'no source checkout' 'immutable PASS/FAIL' \
-		'no trim damage was OBSERVED' \
-		PIC12F675_TRIM_EVIDENCE PIC12F675_BENCH_RESULT \
-		PIC12F675_RELEASE_TAG pic12f675-release-program pic12f675-finalize \
-		'transaction is **PENDING**' 'physical custody' \
-		'never invokes writer arguments' 'existing result' \
-		'checked and recorded' 'hardware-unvalidated' \
-		'may already have damaged the device' 'clean checkout of this exact annotated release tag' \
-		'pinned tag and checksum signatures' 'complete signed release image set' \
-		'does not consume a downloaded' 'outside the worktree' \
-		'Shared `/tmp` and `/var/tmp` roots' \
-		'No ipecmd hardware'; do
+		'no trim damage was OBSERVED' 'hardware-unvalidated' \
+		'never constructs a writer' 'no Make goal programs this part'; do
 	grep -Fq "$required" "$flashing" \
 		|| fail "rendered PIC12F675 flashing guidance omits: $required"
 done
@@ -2630,112 +2567,6 @@ if grep -Fiq 'preserves factory OSCCAL/BG' "$RELEASE" \
 		|| grep -Fq 'pk2cmd -PPIC12F675' "$RELEASE"; then
 	fail "release producer still contains unsafe PIC12F675 flashing guidance outside the renderer"
 fi
-: > "$render_log"
-: > "$git_safety_log"
-(
-	cd "$flash_fixture"
-	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
-		GIT_SAFETY_LOG="$git_safety_log" bash "$flashing_commands"
-) || fail "rendered PIC12F675 guarded flashing transaction did not execute"
-mapfile -t flashing_log < "$render_log"
-[ "${#flashing_log[@]}" -eq 2 ] \
-	|| fail "rendered PIC12F675 transaction ran ${#flashing_log[@]} Make commands, expected 2"
-baseline="$(dirname "$flash_fixture")/pic12f675-factory-baseline.json"
-result="$(dirname "$flash_fixture")/pic12f675-program-result"
-expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s' make -C "$flash_fixture" \
-	pic12f675-preflight \
-	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline")
-[ "${flashing_log[0]}" = "$expected" ] \
-	|| fail "rendered PIC12F675 preflight command is incomplete: ${flashing_log[0]}"
-expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
-	make -C "$flash_fixture" pic12f675-release-program VARIANT cd4053_simple \
-	PIC12F675_RELEASE_TAG v0.9.9 \
-	PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
-	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline" \
-	PIC12F675_BENCH_RESULT "$result")
-[ "${flashing_log[1]}" = "$expected" ] \
-	|| fail "rendered PIC12F675 program command is incomplete: ${flashing_log[1]}"
-if grep -Fq $'\tpic12f675-program\t' "$render_log"; then
-	fail "rendered release guidance invoked the unsigned development programming goal"
-fi
-: > "$render_log"
-repo="$flash_fixture" baseline="$baseline" result="$result" \
-	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
-	bash "$recovery_commands" \
-	|| fail "rendered PIC12F675 recovery command did not execute"
-mapfile -t recovery_log < "$render_log"
-[ "${#recovery_log[@]}" -eq 1 ] \
-	|| fail "rendered PIC12F675 recovery ran ${#recovery_log[@]} commands, expected 1"
-expected=$(printf '%s\t%s\t%s\t%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s\t%s=%s' \
-	make -C "$flash_fixture" pic12f675-finalize \
-	VARIANT cd4053_simple PIC12F675_RELEASE_TAG v0.9.9 \
-	PIC12F675_PROG pk2cmd PIC12F675_PROG_KIND pk2cmd \
-	PIC12F675_READ_PROG pk2cmd PIC12F675_TRIM_EVIDENCE "$baseline" \
-	PIC12F675_BENCH_RESULT "$result")
-[ "${recovery_log[0]}" = "$expected" ] \
-	|| fail "rendered PIC12F675 recovery command is incomplete: ${recovery_log[0]}"
-# The generated recovery command is held to the same published-finalization
-# contract as the static documentation, by the same oracle -- the two drifted
-# apart before v0.9.10 precisely because only the generated document carried
-# PIC12F675_RELEASE_TAG.
-release_validate_pic12f675_finalization_document "$flashing" \
-	'rendered release flashing guidance' \
-	|| fail "rendered PIC12F675 guidance fails the published-finalization contract"
-checks=$((checks + 1))
-
-mapfile -t git_safety_calls < "$git_safety_log"
-[ "${#git_safety_calls[@]}" -eq 4 ] \
-	&& [ "${git_safety_calls[0]}" = $'git\trev-parse\t--show-toplevel' ] \
-	&& [ "${git_safety_calls[1]}" = "git"$'\t-C\t'"$flash_fixture"$'\trev-parse\t--verify\tHEAD^{commit}' ] \
-	&& [ "${git_safety_calls[2]}" = "git"$'\t-C\t'"$flash_fixture"$'\trev-parse\t--verify\trefs/tags/v0.9.9^{commit}' ] \
-	&& [ "${git_safety_calls[3]}" = "git"$'\t-C\t'"$flash_fixture"$'\tstatus\t--porcelain=v1\t--untracked-files=normal' ] \
-	|| fail "rendered PIC12F675 transaction did not enforce exact-tag clean-source checks"
-checks=$((checks + 1))
-
-for failure in root head tag status; do
-	: > "$render_log"
-	: > "$git_safety_log"
-	if (
-		cd "$flash_fixture"
-		PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
-			GIT_SAFETY_LOG="$git_safety_log" GIT_COMMAND_FAIL="$failure" \
-			bash "$flashing_commands"
-	); then
-		fail "rendered PIC12F675 transaction accepted failed Git $failure inspection"
-	fi
-	[ ! -s "$render_log" ] \
-		|| fail "failed Git $failure inspection reached a PIC12F675 Make target"
-done
-checks=$((checks + 1))
-
-: > "$render_log"
-: > "$git_safety_log"
-if (
-	cd "$flash_fixture"
-	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
-		GIT_SAFETY_LOG="$git_safety_log" GIT_WORKTREE_DIRTY=1 \
-		bash "$flashing_commands"
-); then
-	fail "rendered PIC12F675 transaction accepted a dirty release-tag checkout"
-fi
-[ ! -s "$render_log" ] \
-	|| fail "dirty release-tag checkout reached a PIC12F675 Make target"
-checks=$((checks + 1))
-
-: > "$render_log"
-: > "$git_safety_log"
-if (
-	cd "$flash_fixture"
-	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
-		GIT_SAFETY_LOG="$git_safety_log" GIT_TAG_MISMATCH=1 \
-		bash "$flashing_commands"
-); then
-	fail "rendered PIC12F675 transaction accepted a checkout that was not the release tag"
-fi
-[ ! -s "$render_log" ] \
-	|| fail "release-tag mismatch reached a PIC12F675 Make target"
-checks=$((checks + 1))
-
 printf '%s\t%s\t%s\n' 'bypass-pic12f675-cd4053_simple.hex' pk2cmd \
 	'pk2cmd -PPIC12F675 -Fbypass-pic12f675-cd4053_simple.hex -M -Y -R' > "$flashing_fixture"
 if release_render_flashing "$flashing_fixture" v0.9.9 \
@@ -2860,21 +2691,6 @@ render_flash_reject "an unknown programming profile" \
 render_flash_reject "a page with no runnable command at all" \
 	bypass-pic10f322-cd4053_simple.hex make-source \
 	'make pic10f322-program VARIANT=cd4053_simple'
-
-: > "$render_log"
-if (
-	cd "$flash_fixture"
-	PATH="$render_bin:$PATH" RENDER_LOG="$render_log" \
-		GIT_SAFETY_LOG="$git_safety_log" TEST_PREFLIGHT_FAIL=1 \
-		bash "$flashing_commands"
-); then
-	fail "rendered PIC12F675 transaction continued after a failed preflight"
-fi
-mapfile -t flashing_log < "$render_log"
-[ "${#flashing_log[@]}" -eq 1 ] \
-	&& [[ "${flashing_log[0]}" == $'make\t-C\t'*$'\tpic12f675-preflight\t'* ]] \
-	|| fail "failed rendered preflight did not stop before programming"
-checks=$((checks + 1))
 
 # Every directory handed to the verifier must have a corresponding build in the
 # rendered recipe. Pin the five independent build roots so adding a sixth

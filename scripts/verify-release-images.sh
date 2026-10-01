@@ -166,13 +166,13 @@ done
 LC_ALL=C sort -o "$provenance_expected" "$provenance_expected"
 
 # --- which contract THIS release was published under -------------------------
-# This verifier does not only see releases being staged. Every PIC12F675 field
-# programming runs it against a PUBLISHED directory via
-# verify-release-program-image.sh, and those signatures cannot be reissued to
-# cover more than they already do. Three eras exist in release/ right now:
-# v0.9.0-v0.9.5 ship no QUALIFICATION at all, v0.9.6-v0.9.9 declare format=1,
-# and v0.9.10-v0.9.11 declare format=3. All three signed images and helpers
-# only. format=4 is the first to sign its own provenance.
+# This verifier does not only see releases being staged. Each release's own
+# reproduction instructions run it against a PUBLISHED directory, and those
+# signatures cannot be reissued to cover more than they already do. Three eras
+# exist in release/ right now: v0.9.0-v0.9.5 ship no QUALIFICATION at all,
+# v0.9.6-v0.9.9 declare format=1, and v0.9.10-v0.9.11 declare format=3. All
+# three signed images and helpers only. format=4 is the first to sign its own
+# provenance.
 #
 # The release's own format field is the only thing that can tell them apart,
 # which is what a format version is for. This is a live compatibility policy

@@ -59,8 +59,8 @@ cores, so their hardware-specific implementations ("shell") differ. See
 
 // pic12f675-disposition:start
 The PIC12F675 is *release-supported from `v0.9.9`*: release images, a place in
-the default `all` goal, the full release pipeline, and a guarded bench
-programming target (`make pic12f675-program`).  Like every part here, it has
+the default `all` goal, the full release pipeline, and a guarded programming
+helper shipped with every release (`flash-pic12f675.py`).  Like every part here, it has
 *not* completed controlled hardware qualification -- its release rests on
 simulation, formal proof and static analysis, with that qualification deferred
 to the `1.x.y` pass (TODO `T3-pic12f675-bench`).  No field-use report exists for

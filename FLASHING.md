@@ -340,12 +340,3 @@ run that has to be retained before this path can be called qualified.
 
 In MPLAB IPE leave **"allow ... to program calibration memory" OFF** — that
 setting is what lets a write clobber `0x3FF`.
-
-### Building from source instead
-
-The repository also has a guarded, evidence-recording transaction for
-developers (`make pic12f675-preflight`, then `make pic12f675-release-program`).
-It rebuilds the image privately and binds it to a signed tag, so it needs the
-full toolchain, a source checkout, and a **pk2cmd** reader. That is the
-development and release-provenance path, not a requirement for flashing
-downloaded release bytes. See [release/README.md](release/README.md).

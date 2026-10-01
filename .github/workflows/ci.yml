@@ -147,9 +147,9 @@ jobs:
   # static analysis, with real-silicon validation deferred to the 1.x.y pass
   # (TODO T3-pic12f675-bench). Its release images are built and its lanes re-run
   # by the tag workflow (.github/workflows/release.yml), the same as the other
-  # PICs. The guarded `pic12f675-preflight` / `pic12f675-program` bench workflow
-  # produces the OSCCAL and bandgap preservation evidence at a bench; that
-  # evidence is what the 1.x.y pass retains, not a 0.9.x blocker.
+  # PICs. The release helper, flash-pic12f675.py, produces the OSCCAL and
+  # bandgap preservation evidence at a bench; that evidence is what the 1.x.y
+  # pass retains, not a 0.9.x blocker.
   #
   # ONE job for all three, deliberately. `verify`,
   # `attiny202`, `build-matrix` and `stress` ALL declare `needs: pic`, so this job

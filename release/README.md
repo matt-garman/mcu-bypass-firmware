@@ -553,98 +553,14 @@ development path for a non-default programmer transaction and are never
 published as release instructions.
 
 <!-- pic12f675-helper-status:start -->
-**PIC12F675 is not a raw write target, on either route**, and the board must be
-externally powered for both. Programming a downloaded image needs no source
-checkout and no build toolchain: pass the release HEX to this release's
-`flash-pic12f675.py`, never to a programmer directly, and follow the
+**PIC12F675 is not a raw write target**, and the board must be externally
+powered. No Make goal programs this part. Programming a downloaded image needs
+no source checkout and no build toolchain: pass the release HEX to this
+release's `flash-pic12f675.py`, never to a programmer directly, and follow the
 transaction in [`FLASHING.md`](../FLASHING.md).
 The helper's `ipecmd` route is published and software-tested, but it is not
 hardware-qualified.
 <!-- pic12f675-helper-status:end -->
-
-*Programming from a source checkout of this release's tag* (the development and
-release-provenance path). For each device, choose new baseline and result paths
-whose parent directory already exists. `pic12f675-preflight` is read-only and
-does not take `VARIANT`; only program after it succeeds, using the same baseline:
-
-```sh
-# Replace with the intended release tag containing pic12f675-release-program.
-release_tag=vX.Y.Z &&
-repo=$(git rev-parse --show-toplevel) &&
-head_commit=$(git -C "$repo" rev-parse --verify "HEAD^{commit}") &&
-tag_commit=$(git -C "$repo" rev-parse --verify \
-  "refs/tags/$release_tag^{commit}") &&
-worktree_status=$(git -C "$repo" status --porcelain=v1 --untracked-files=normal) &&
-test "$head_commit" = "$tag_commit" && test -z "$worktree_status" &&
-evidence_root=$(dirname "$repo") &&
-baseline="$evidence_root/pic12f675-factory-baseline.json" &&
-result="$evidence_root/pic12f675-program-result" &&
-test ! -e "$baseline" && test ! -e "$result" &&
-make -C "$repo" pic12f675-preflight \
-  PIC12F675_READ_PROG=pk2cmd \
-  PIC12F675_TRIM_EVIDENCE="$baseline" &&
-make -C "$repo" pic12f675-release-program \
-  VARIANT=cd4053_simple \
-  PIC12F675_RELEASE_TAG="$release_tag" \
-  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
-  PIC12F675_READ_PROG=pk2cmd \
-  PIC12F675_TRIM_EVIDENCE="$baseline" \
-  PIC12F675_BENCH_RESULT="$result"
-```
-
-If an interruption leaves `reservation.json` but no `result.json`, the
-transaction is **PENDING**. Keep physical custody of the same attached device;
-do not write, reflash, capture a new baseline, or reuse the result path. From the
-same release checkout, resolve it with the same release identity, variant, and
-tool identities:
-
-```sh
-make -C "$repo" pic12f675-finalize \
-  VARIANT=cd4053_simple \
-  PIC12F675_RELEASE_TAG="$release_tag" \
-  PIC12F675_PROG=pk2cmd PIC12F675_PROG_KIND=pk2cmd \
-  PIC12F675_READ_PROG=pk2cmd \
-  PIC12F675_TRIM_EVIDENCE="$baseline" \
-  PIC12F675_BENCH_RESULT="$result"
-```
-
-Finalization never invokes writer arguments. It revalidates the selected release
-identity, the reservation, and the separately retained image first, verifies the
-reader version before a full-device read, and exclusively publishes the recovered
-PASS/FAIL `result.json`. Private read attempts are retry-safe after interruption.
-A FAIL is a resolved forensic record, not permission to retry the write. An
-existing result is immutable.
-
-Replace `cd4053_simple` with `cd4053_with_mute` or `tq2_l2_5v_relay` when
-needed. A baseline belongs to one device before its first write; do not reuse it
-for another device or a later reflash.
-
-The immutable `v0.9.9` tag predates `pic12f675-release-program`; this target
-protects release tags that contain it and is generated into their manifests.
-
-Transient full-device reads and the private programming build use `TMPDIR` when
-set, otherwise `XDG_RUNTIME_DIR`, otherwise `HOME`. The selected root must
-already exist, be owned by the current user, grant no group/other access, and
-have only current-user- or root-owned, non-group/other-writable ancestors;
-shared `/tmp` and `/var/tmp` roots are rejected. Its path may contain letters,
-digits, spaces, `/`, `.`, `_`, and `-`. Only the explicitly requested baseline
-and result paths survive normal, failed, or handled-interruption cleanup.
-
-Run the transaction from a clean checkout of this release's annotated tag with
-the pinned XC8/DFP toolchain. The release target verifies the pinned tag and
-`SHA256SUMS` signatures, validates the complete signed release image set, and
-requires the private fresh-build snapshot to match the selected signed digest.
-It does not consume the downloaded HEX in this directory. Baseline and result
-paths are outside the worktree so the target can recheck exact source cleanliness
-immediately before and after the build. The retained PASS/FAIL result checks and
-records the before/after values; it does not convert untested programmer behavior
-into a preservation guarantee.
-
-No ipecmd hardware procedure is qualified. The software-tested route requires
-pk2cmd reads immediately before and after the IPE write, but no safe
-dual-programmer attachment or handoff has been validated. Do not infer one from
-the internal `PIC12F675_PROG_KIND=ipecmd` routing until the `1.x.y` bench pass
-publishes the required hardware setup and retained result.
 
 ## Reproduce the images bit-for-bit
 

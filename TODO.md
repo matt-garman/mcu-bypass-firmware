@@ -393,9 +393,9 @@ the release documentation cite them:
 
 - **1 - bandgap calibration bits (`BG<1:0>`) preserved on program.** They are
   factory-set per device and fix the BOR/POR trip voltages.
-  `make pic12f675-program` enforces the build-side half -- the image must leave
-  the field erased -- and requires a `pic12f675-preflight` baseline, a matching
-  pre-write read and a retained matching post-write result. Measured once on
+  The release helper enforces the build-side half -- it refuses an image that
+  moves the field -- and compares the device before the write with a retained
+  post-write readback. Measured once on
   silicon on 2026-09-07: `BG<1:0>` kept its factory value through a PICkit 3 /
   MPLAB X 6.20 erase-and-program (one device, one program, through a locally
   modified helper; see the bench-run record in `HARDWARE_VALIDATION_LOG.md`).
@@ -426,11 +426,10 @@ the release documentation cite them:
   fail-safe pulldown a builder may substitute. gpsim models pins ideally, so no
   lane here can see this one at all.
 
-Two vehicles cover items 1, 2 and 8: the guarded source-checkout
-`pic12f675-preflight` / `pic12f675-program` workflow, which drives a pk2cmd
-reader, and, from `v0.9.10`, the release-shipped `scripts/flash-pic12f675.py`,
-which runs the same transaction against PICkit 3 and MPLAB X `ipecmd` with no
-checkout. The properties its controlled run must prove are listed under
+One vehicle covers items 1, 2 and 8: the release-shipped
+`scripts/flash-pic12f675.py`, which runs the guarded transaction against
+PICkit 3 and MPLAB X `ipecmd` with no checkout. It programs signed release
+images only. The properties its controlled run must prove are listed under
 "Outstanding controlled runs" in `HARDWARE_VALIDATION_LOG.md`. Item 9 needs a
 meter on a built `cd4053_with_mute` board.
 
