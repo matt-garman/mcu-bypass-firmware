@@ -26,4 +26,4 @@ SOAK [24.00/24.00 h] checks=1440 fails=0 wdt_resets=0
 
 SOAK PASS: 86400000 ms (24.00 h) simulated. 43431411945 cycles (86862823.890 ms) advanced; wdt_resets=0 liveness_fails=0 checks=1440
 SOAK_RESULT format=1 status=pass combination=pic10f320_tq2_l2_5v_relay duration_ms=86400000 liveness_interval_ms=60000 checks=1440 failures=0 watchdog_failures=0 liveness_failures=0
-EVIDENCE_RESULT format=2 status=pass role=soak evidence=soak-pic10f320_tq2_l2_5v_relay.log lines=28 payload_sha256=c5d29bf4d09505b26ebf73181b14c6e41efd4a7b386275e3d42ec1cb88b460c3 source_commit=6bf958ce73892a55c57116e7a142177ca99971d9
+EVIDENCE_RESULT format=2 status=pass role=soak evidence=soak-pic10f320_tq2_l2_5v_relay.log lines=28 payload_sha256=c5d29bf4d09505b26ebf73181b14c6e41efd4a7b386275e3d42ec1cb88b460c3 source_commit=c7e70bee841dfb253846fbc3daa771e4d4ed8006
