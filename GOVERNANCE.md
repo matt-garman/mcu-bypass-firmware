@@ -103,10 +103,10 @@ Three techniques are in use, and none costs the author a word:
 | 2 | **Form-family ban** — one ERE over flowed text | that a *false* claim is not made in any spelling of its family | anything that is not that claim |
 | 3 | **Structural / derived** — presence, ordering, agreement, or rendering | shape and single-ownership, never phrasing | all prose around it |
 
-One ban's operands are **derived rather than written**: the release-topology
-rule asks the build for the numbers it forbids, so the pattern changes when the
-product does and no author maintains it. Any future rule over a value this tree
-already computes should be built the same way.
+One rule's operands are **derived rather than written**: the declared-topology
+check asks the build for the numbers the declaration must state, so the pattern
+changes when the product does and no author maintains it. Any future rule over
+a value this tree already computes should be built the same way.
 
 A term group is an alternation matched case-insensitively on whole words, over
 the block's text with markup flowed away. A single word is just a keyword, so
@@ -153,13 +153,10 @@ rewrap or an adjective swap does not evade it.
 | Ban | Scope | Defect that motivated it |
 |---|---|---|
 | attributive `hardware-qualified <noun>` | every durable document, **while the sentinel stands** | the predicate cannot be banned: every true sentence here *is* its negation. Adjective-plus-noun has no negated spelling, which is what makes it decidable. A floor, not a proof — and it lifts by itself when the sentinel goes |
-| a blanket denial that any `ipecmd` procedure has been published — described here rather than quoted, because quoting it *is* making it | durable documents | the same contradiction the `pic12f675-helper-status` row records, in its other direction: a blanket denial stood in one document while the helper published a route in another. Deliberately still permits a claim **scoped to a route**, which is true of the Make-based goals and must stay sayable |
-| three retired programming claims | durable documents | *"Needs only a programmer and its CLI"*, *"needs no toolchain at all"* — each false once the helper became required |
+| a blanket denial that any `ipecmd` procedure has been published — described here rather than quoted, because quoting it *is* making it | durable documents | the same contradiction the `pic12f675-helper-status` row records, in its other direction: a blanket denial stood in one document while the helper published a route in another. Deliberately still permits a claim **scoped to a route**, which must stay sayable |
 | raw-writer `ipecmd` commands | **command contexts only** — fenced, listing, literal, indented, inline spans | a published raw write destroys factory calibration. Prose *mentioning* a tool is not a published command, so the scan reads contexts, not sentences |
-| current release topology | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | part/image/soak counts with two owners drift; the bounded declaration in `release/README.md` is the single owner |
 | unbound measurements | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | results that change when the source changes have no stable owner in a hand-edited document |
 | dates and source revisions | `DESIGN_DOCUMENTATION.adoc` | pinning provenance is the mitigation a misplaced measurement asks for, so removing the measurement has to close that door behind it |
-| release topology stated outside its declaration — the part, image, soak-combination, modular-target and shell-source counts | every durable document except the owner and the changelog, less one fenced region the rule names | `README.md` published how many firmware images a release contains and nothing objected. The rule this replaces was a denylist naming two documents, and a denylist only refuses the spellings someone thought of. These numbers are **derived from the canonical build sets rather than typed**, so adding a part moves the patterns with them. The one exemption — the growth table in `docs/release_proportionality.md`, whose rows are measurements at two named tags rather than a current restatement — is a fence in that document rather than a name in a list alone: it is visible where it applies, it fails like any other fence when absent or malformed, and it exempts nothing else in the file |
 
 ### 3. Structural and derived
 

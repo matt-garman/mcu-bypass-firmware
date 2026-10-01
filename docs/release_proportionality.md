@@ -16,7 +16,6 @@ and when.
 Release machinery only -- `scripts/`, the release gates under `test/`, and
 `release.yml` -- measured at the `v0.9.9` tag and at `v0.9.13`:
 
-<!-- release-topology-comparison:start -->
 | | v0.9.9 | v0.9.13 | |
 |---|---:|---:|---|
 | Release machinery, lines | ~7,800 | ~21,800 | 2.8x |
@@ -28,7 +27,6 @@ Release machinery only -- `scripts/`, the release gates under `test/`, and
 | Soak combinations | 18 | 18 | 1.0x |
 | Staged files per release | 60 | 64 | 1.07x |
 | `QUALIFICATION` schema | `format=1` | `format=7` | -- |
-<!-- release-topology-comparison:end -->
 
 The product did not grow. The apparatus around it tripled. Of the 279 commits
 in that window, 94 touched release machinery and 26 of those were `fix:`
@@ -306,10 +304,12 @@ term-group form introduced at `v0.9.13` already removed the brittleness of
 pinning prose byte for byte. A release must not publish a claim stronger than
 the evidence it ships, so these keep their release-time enforcement.
 
-The six **current-fact rules** are regexes over `DESIGN_DOCUMENTATION.adoc` and
-`TOOLCHAIN.adoc` rejecting restatements of release topology, unbound
+The six **current-fact rules** were regexes over `DESIGN_DOCUMENTATION.adoc`
+and `TOOLCHAIN.adoc` rejecting restatements of release topology, unbound
 measurements, and dates or commit SHAs in durable design prose. Each is a real
-drift this project has had. None of them is a defect in a release.
+drift this project has had. None of them is a defect in a release. The three
+topology rules were later retired under `GOVERNANCE.md`'s review of existing
+gates; the measurement and date rules remain.
 
 They now live in `release_validate_current_fact_rules`, which runs on every
 commit and which `make-release.sh` does not call. No rule was weakened: the

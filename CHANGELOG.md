@@ -128,6 +128,15 @@ lengths.
   `flash-pic12f675.py` and a signed release image, so there is no route for an
   unsigned local build. Generated release documentation publishes the helper
   alone.
+- **The release-topology and retired-claims documentation bans.** One topology
+  ban refused part, image and soak counts in `DESIGN_DOCUMENTATION.adoc` and
+  `TOOLCHAIN.adoc`; the other refused any count beside its noun in every other
+  durable document. The retired-claims ban refused three programming claims
+  the PIC12F675 helper made false, and a sibling list refused three superseded
+  PIC12F675 sentences. Each guarded wording against a drift that a reader
+  repairs in a commit. The declared-topology check stays: the bounded
+  declaration in `release/README.md` must still state the five counts derived
+  from the build, because three of them are literals in the renderer.
 
 ## [0.9.16] - 2026-09-29
 

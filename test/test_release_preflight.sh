@@ -100,8 +100,8 @@ declare -F release_current_contract_version >/dev/null \
 	|| { printf 'FAIL: current-contract version reader is missing\n' >&2; exit 1; }
 declare -F release_validate_current_fact_rules >/dev/null \
 	|| { printf 'FAIL: current-fact rule scanner is missing\n' >&2; exit 1; }
-declare -F release_validate_topology_ownership >/dev/null \
-	|| { printf 'FAIL: release topology ownership scanner is missing\n' >&2; exit 1; }
+declare -F release_validate_declared_topology >/dev/null \
+	|| { printf 'FAIL: declared release topology validator is missing\n' >&2; exit 1; }
 declare -F release_topology_counts >/dev/null \
 	|| { printf 'FAIL: release topology count derivation is missing\n' >&2; exit 1; }
 declare -F release_require_main_branch >/dev/null \
@@ -2245,20 +2245,7 @@ assert_current_facts_rejects 'a design guide pinning its own prose to a revision
 assert_boundaries_ignores 'a design guide pinning its own prose to a revision'
 
 # 2. CURRENT FACTS. Stable design/tool behavior remains in these documents;
-# changing release topology and source-dependent results do not.
-write_boundaries_fixture
-printf '\nThe firmware has eight MCU release targets.\n' \
-	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_current_facts_rejects 'a design guide restating the current target count' \
-	'DESIGN_DOCUMENTATION.adoc restates current release topology outside release/README.md'
-assert_boundaries_ignores 'a design guide restating the current target count'
-
-write_boundaries_fixture
-printf '\nA release is the eight-part, 24-image, 20-soak-combination product set.\n' \
-	>> "$boundaries_root/TOOLCHAIN.adoc"
-assert_current_facts_rejects 'a toolchain guide restating the current product shape' \
-	'TOOLCHAIN.adoc restates current release topology outside release/README.md'
-
+# source-dependent results do not.
 write_boundaries_fixture
 printf '\n.Table Measured worst pet-to-pet interval, real image in simavr\n' \
 	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
@@ -2358,60 +2345,50 @@ grep -Fq 'release_validate_claim_boundaries "$REPO_ROOT"' "$RELEASE" \
 	|| fail "make-release.sh no longer validates the bounded claims before a release"
 checks=$((checks + 1))
 
-# --- release topology: one owner, and the numbers are derived ---------------
+# --- release topology: the declaration states the derived counts -----------
 #
-# The rule the project states -- each fact has exactly one live owner -- was
-# enforced for release topology by hand-written denylist patterns naming two
-# documents. README.md was not one of them, and "21 different firmware images"
-# sat in the file a reader arrives at until an audit found it. A denylist
-# refuses the spellings someone thought of.
-#
-# So the numbers are derived from the canonical sets the build uses, and the
-# rule is stated over the derived values. The cases below prove three separate
-# things: that the derivation reaches the real Makefile and the real source
-# tree, that the patterns move when the numbers move rather than matching a
-# literal, and that the two exemptions are load-bearing rather than decorative.
+# The bounded declaration's part, modular-target and shell-source words are
+# literals in the renderer, so they are held to counts derived from the
+# canonical sets the build uses. The cases below prove that the derivation
+# reaches the real Makefile and source tree, that the check follows the numbers
+# it is given rather than a literal, and that the live declaration passes.
 topology_root="$work/topology"
-declare -F release_validate_topology_ownership >/dev/null \
-	|| fail "topology-ownership validator is missing"
+declare -F release_validate_declared_topology >/dev/null \
+	|| fail "declared-topology validator is missing"
 declare -F release_topology_counts >/dev/null \
 	|| fail "topology count derivation is missing"
 
 topology_rc=0
-release_validate_topology_ownership >"$output" 2>&1 || topology_rc=$?
+release_validate_declared_topology >"$output" 2>&1 || topology_rc=$?
 [ "$topology_rc" -eq 2 ] \
-	|| fail "topology contract accepted a call with no arguments"
+	|| fail "declared-topology check accepted a call with no arguments"
 checks=$((checks + 1))
 
 write_topology_fixture() {
 	rm -rf "$topology_root"
-	mkdir -p "$topology_root/release" "$topology_root/docs"
-	cat > "$topology_root/release/README.md" <<'EOF'
-# Releases
-
-<!-- current-release:start -->
-> **Current release contract:** `v1.2.3`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.
-<!-- current-release:end -->
-EOF
-	printf '%s\n' '# Product' '' 'Pick the image that matches your part.' \
-		> "$topology_root/README.md"
-	printf '%s\n' '# A decision record' '' 'Nothing numeric here.' \
-		> "$topology_root/docs/note.md"
+	mkdir -p "$topology_root/release"
+	printf '%s\n' '# Releases' '' '<!-- current-release:start -->' \
+		'> **Current release contract:** `v1.2.3`; seven release parts; 21 images; 18 soak combinations; six modular targets; four shell source files.' \
+		'<!-- current-release:end -->' > "$topology_root/release/README.md"
 }
 
+# $1 description; then the five counts, defaulting to this fixture's own.
 assert_topology_accepts() {
 	local description=$1
-	release_validate_topology_ownership "$topology_root" 7 21 18 6 4 \
+	release_validate_declared_topology "$topology_root" 7 21 18 6 4 \
 			>"$output" 2>&1 \
-		|| fail "topology contract rejected $description: $(<"$output")"
+		|| fail "declared-topology check rejected $description: $(<"$output")"
 	checks=$((checks + 1))
 }
 
+# $1 description, $2 expected diagnostic; then optionally the five counts.
 assert_topology_rejects() {
 	local description=$1 expected=$2
-	if release_validate_topology_ownership "$topology_root" 7 21 18 6 4 \
+	shift 2
+	[ "$#" -gt 0 ] || set -- 7 21 18 6 4
+	if release_validate_declared_topology "$topology_root" "$@" \
 			>"$output" 2>&1; then
-		fail "topology contract accepted $description"
+		fail "declared-topology check accepted $description"
 	fi
 	grep -Fq 'release documentation:' "$output" \
 		|| fail "$description was rejected without a documentation diagnostic"
@@ -2421,12 +2398,8 @@ assert_topology_rejects() {
 }
 
 write_topology_fixture
-assert_topology_accepts 'a tree whose only topology statement is the declaration'
+assert_topology_accepts 'a declaration stating every derived count'
 
-# PRESENCE. The declaration must state every derived number. The three topology
-# words in the contract line are still literals in the renderer, so this is the
-# check that holds them to the sets the build uses: adding a part has to fail
-# here rather than ship a declaration that quietly undercounts.
 write_topology_fixture
 sed -i 's/seven release parts/five release parts/' "$topology_root/release/README.md"
 assert_topology_rejects 'a declaration that understates the part count' \
@@ -2437,154 +2410,22 @@ sed -i 's/four shell source files/three shell source files/' "$topology_root/rel
 assert_topology_rejects 'a declaration that understates the shell source count' \
 	'does not state the shell source file count (4)'
 
-# Deleting the fence is not a way past the presence half, and the failure names
-# the marker rather than the sentence.
+# The check follows the counts it is given, not a literal: the same declaration
+# fails against a tree with nine parts.
+write_topology_fixture
+assert_topology_rejects 'a declaration held to a part count it does not state' \
+	'does not state the release part count (9)' 9 21 18 6 4
+
+# Deleting the fence is not a way past the check, and the failure names the
+# marker rather than the sentence.
 write_topology_fixture
 sed -i '/current-release:end/d' "$topology_root/release/README.md"
 assert_topology_rejects 'a declaration whose fence is unclosed' \
 	'no bounded current-release declaration'
 
-# ABSENCE, and the defect that motivated the rule: the README's own restatement.
-write_topology_fixture
-printf '\nThere are 21 different firmware images.\n' >> "$topology_root/README.md"
-assert_topology_rejects 'the README restating the image count' \
-	'README.md restates the release image count (21)'
-
-# The same claim in the table form a resource table drifts in. The scan reads
-# both directions for exactly this: a row names the thing and then carries the
-# number, and nothing about that is prose.
-write_topology_fixture
-printf '\n| Published images | 21 |\n' >> "$topology_root/docs/note.md"
-assert_topology_rejects 'a table row carrying the image count' \
-	'docs/note.md restates the release image count (21)'
-
-# Each of the five is held, not only the two the release path already compares.
-write_topology_fixture
-printf '\nThe firmware is built from four modular shells.\n' >> "$topology_root/docs/note.md"
-assert_topology_rejects 'a restated shell source count' \
-	'docs/note.md restates the shell source file count (4)'
-
-write_topology_fixture
-printf '\nSix modular targets share the core.\n' >> "$topology_root/docs/note.md"
-assert_topology_rejects 'a restated modular target count' \
-	'docs/note.md restates the modular target count (6)'
-
-write_topology_fixture
-printf '\nThe soak covers 18 soak combinations.\n' >> "$topology_root/docs/note.md"
-assert_topology_rejects 'a restated soak-combination count' \
-	'docs/note.md restates the release soak-combination count (18)'
-
-# THE NUMBERS ARE NOT TYPED. This is the case that separates this rule from the
-# denylist it replaces: the same sentence is invisible while the derived count
-# is 7 and is caught the moment it is 9. A hand-written pattern cannot do that,
-# and a gate that passed only because 7 was spelled into it would pass here too.
-write_topology_fixture
-printf '\nThe design spans nine release parts.\n' >> "$topology_root/docs/note.md"
-assert_topology_accepts 'a count this tree does not have'
-if release_validate_topology_ownership "$topology_root" 9 21 18 6 4 \
-		>"$output" 2>&1; then
-	fail "topology contract accepted a restatement of the count it was given"
-fi
-grep -Fq 'docs/note.md restates the release part count (9)' "$output" \
-	|| fail "the topology patterns did not follow the derived count: $(<"$output")"
-checks=$((checks + 1))
-
-# A number that qualifies no topology noun is some other number. An eight-level
-# return stack, a GCC floor and an instruction budget all pass through, which is
-# what makes a bare digit decidable at all.
-write_topology_fixture
-cat >> "$topology_root/docs/note.md" <<'EOF'
-
-The PIC hardware return stack is 8 levels deep, the toolchain floor is GCC 7,
-and the reviewed ceiling is 21 instruction cycles across 18 ticks with 4 words
-spare and 6 bytes of RAM unused.
-EOF
-assert_topology_accepts 'numbers that qualify no topology noun'
-
-# Naming the form in a code span is describing it, not restating it. Without
-# this escape neither this file, GOVERNANCE.md nor test/README.md could say what
-# the rule refuses -- the trap the ipecmd denial fell into when the enforcement
-# register was first published.
-write_topology_fixture
-printf '\nA document may not write `21 images` outside the declaration.\n' \
-	>> "$topology_root/docs/note.md"
-assert_topology_accepts 'the banned form named in a code span'
-
-# The two documents that are not scanned, and why neither is a second copy.
-write_topology_fixture
-printf '# Changelog\n\n## [1.2.2]\n\n- Reached 21 images and 18 soak combinations.\n' \
-	> "$topology_root/CHANGELOG.md"
-assert_topology_accepts 'a changelog section stating the topology of its own release'
-
-write_topology_fixture
-printf '\nThe v1.2.2 set was six targets and 18 images.\n' \
-	>> "$topology_root/release/README.md"
-assert_topology_accepts 'the owning document describing a past release'
-
-# A branch-only working document quotes the numbers while describing them, and
-# is deleted before release source finalization.
-write_topology_fixture
-cat > "$topology_root/topology-notes.md" <<'EOF'
-# Topology notes
-
-> **Branch-only working document.** Deleted before release source
-> finalization.
-
-The declaration this branch is checking reads 21 images and 18 soak
-combinations.
-EOF
-assert_topology_accepts 'a declared branch-only working document'
-rm -f "$topology_root/topology-notes.md"
-
-# ... and so does its AsciiDoc twin. This is the half of the markup fix the
-# release gate cannot demonstrate: the sweeps walk both markups and always have,
-# so before the detector learned the second one, a root-level AsciiDoc working
-# document was held to the very bans a working document exists to be exempt
-# from -- and could not have quoted the numbers it was written to discuss.
-write_topology_fixture
-cat > "$topology_root/topology-notes.adoc" <<'EOF'
-= Topology notes
-
-> *Branch-only working document.* Deleted before release source
-> finalization.
-
-The declaration this branch is checking reads 21 images and 18 soak
-combinations.
-EOF
-assert_topology_accepts 'a declared branch-only AsciiDoc working document'
-rm -f "$topology_root/topology-notes.adoc"
-
-# AN EXEMPTION IS A FENCE, NOT A NAME. The register names a document and a
-# marker; the marker has to exist in that document. A declared region that has
-# been deleted fails, and every restatement it was covering fails with it --
-# so an exemption cannot be widened by removing the thing that bounds it.
-write_topology_fixture
-mkdir -p "$topology_root/docs"
-cat > "$topology_root/docs/release_proportionality.md" <<'EOF'
-# Proportionality
-
-<!-- release-topology-comparison:start -->
-| | v0.9.9 | v0.9.13 |
-|---|---:|---:|
-| Published images | 21 | 21 |
-<!-- release-topology-comparison:end -->
-EOF
-assert_topology_accepts 'a registered exemption inside its own fence'
-sed -i '/release-topology-comparison/d' "$topology_root/docs/release_proportionality.md"
-assert_topology_rejects 'a registered exemption whose fence has been deleted' \
-	'declares the exempt region release-topology-comparison, which is absent or malformed'
-
-# A walk that reads nothing is indistinguishable from a clean tree, which is the
-# failure this whole rule is written against. A scan root holding only the two
-# documents the rule does not read has nothing left to check, and says so.
-write_topology_fixture
-rm -f "$topology_root/README.md" "$topology_root/docs/note.md"
-assert_topology_rejects 'a scan that read no documents' \
-	'the topology scan read no documents'
-
 # The derivation reaches the real Makefile and the real shipping source, and the
-# live tree satisfies the rule against its own numbers. Both halves matter: a
-# derivation that silently produced nothing would make every pattern vacuous.
+# live declaration states its own numbers. Both halves matter: a derivation that
+# silently produced nothing would make every pattern vacuous.
 topology_counts=$(release_topology_counts "$ROOT") \
 	|| fail "could not derive the release topology counts from the live tree"
 read -r live_parts live_images live_soaks live_modular live_shells \
@@ -2601,17 +2442,17 @@ canonical_images=$("$REAL_MAKE" --no-print-directory -s -C "$ROOT" \
 [ "$live_images" -eq "$(printf '%s' "$canonical_images" | wc -w)" ] \
 	|| fail "the derived image count does not match the canonical release set"
 checks=$((checks + 1))
-release_validate_topology_ownership "$ROOT" "$live_parts" "$live_images" \
+release_validate_declared_topology "$ROOT" "$live_parts" "$live_images" \
 	"$live_soaks" "$live_modular" "$live_shells" >"$output" 2>&1 \
-	|| fail "the checked-in tree fails the topology-ownership contract: $(<"$output")"
+	|| fail "the checked-in declaration does not state the derived topology: $(<"$output")"
 checks=$((checks + 1))
 
-# ...and the release path must not call it. A restated number in a design
-# document is a documentation defect; a release is the most expensive moment
-# available at which to discover one. Same split, same reason, as the
-# current-fact rules above.
-! grep -Fq 'release_validate_topology_ownership' "$RELEASE" \
-	|| fail "make-release.sh calls the topology scanner; a restated number can stop a release"
+# ...and the release path must not call it: a stale declaration is repaired by
+# re-running release-prepare on the commit that caused it, not discovered at the
+# most expensive moment available. Same split, same reason, as the current-fact
+# rules above.
+! grep -Fq 'release_validate_declared_topology' "$RELEASE" \
+	|| fail "make-release.sh calls the declared-topology check; it runs on every commit instead"
 checks=$((checks + 1))
 
 # --- the soak record ---------------------------------------------------------
@@ -3237,11 +3078,6 @@ for claim_doc in FLASHING.md README.md; do
 		"$claim_doc must carry exactly one well-formed pic12f675-helper-required block"
 done
 
-write_flashing_fixture
-printf '\nNeeds only a programmer and its CLI.\n' >> "$flashing_root/FLASHING.md"
-assert_flashing_rejects 'a reinstated universal claim' \
-	'still publishes the retired universal claim'
-
 # 4. The heading a reader skimming for this part actually lands on.
 write_flashing_fixture
 "$REAL_AWK" '{ sub(/^## PIC12F675 .*$/, "## PIC12F675"); print }' \
@@ -3359,42 +3195,6 @@ write_flashing_fixture
 	printf '```\n'
 } > "$flashing_root/docs/field_notes.md"
 assert_flashing_accepts 'prose naming the retired form and another part'\''s one-liner'
-
-# A current document that still says this part has no no-compiler path
-# contradicts the four that publish the helper, whichever document it is.
-flashing_state_case() {
-	local description=$1 name=$2 sentence=$3
-	write_flashing_fixture
-	printf '# Notes\n\n%s\n' "$sentence" > "$flashing_root/$name"
-	assert_flashing_rejects "$description" \
-		"$name still publishes the superseded PIC12F675 state"
-}
-
-flashing_state_case 'the retired no-compiler-path claim' docs/field_notes.md \
-	'The prebuilt file is reproducible, but there is not yet a no-compiler path that admits it to the transaction.'
-flashing_state_case 'the retired direct-from-download claim' docs/field_notes.md \
-	'It is the one place where a qualified direct-from-download path is not available today.'
-flashing_state_case 'the retired checkout-and-toolchain claim' docs/field_notes.md \
-	'Its guarded workflow requires a clean source checkout of the same release tag and the pinned XC8/DFP toolchain.'
-
-# The three publishers are held to it too -- the reopened defect was one of them
-# disagreeing with the other three.
-write_flashing_fixture
-printf '\n\nThere is not yet a no-compiler path for this part.\n' \
-	>> "$flashing_root/release/README.md"
-assert_flashing_rejects 'a publisher that contradicts the other three' \
-	'release/README.md still publishes the superseded PIC12F675 state'
-
-# Recording HOW that state was retired is not restating it: a document that
-# says so in the past tense has to keep passing, or a pattern wide enough to
-# catch the live claim would make the retirement undocumentable.
-write_flashing_fixture
-{
-	printf '# Notes\n\n'
-	printf 'The position was that no no-compiler path into the transaction had\n'
-	printf 'been designed or gated yet. One has been, from v0.9.10.\n'
-} > "$flashing_root/docs/history.md"
-assert_flashing_accepts 'a past-tense record of the retired position'
 
 # Shipped release directories are immutable artifacts of past releases and
 # legitimately carry the retired raw block; branch-only working documents quote

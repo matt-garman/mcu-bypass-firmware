@@ -914,11 +914,10 @@ release_validate_hardware_claims() {
 #      overclaim in words this does not enumerate.
 #   3. CURRENT FACTS. DESIGN_DOCUMENTATION.adoc retains architecture, capacities,
 #      reviewed ceilings and enforcing gates; TOOLCHAIN.adoc retains tool
-#      requirements and behavior. Numeric release topology belongs only in the
-#      bounded declaration in release/README.md, while current timing, size and
-#      current-draw results belong to build output or source/toolchain-bound
-#      release evidence. Focused lexical rules reject the concrete result and
-#      inventory forms removed from those two live specifications, and
+#      requirements and behavior. Current timing, size and current-draw results
+#      belong to build output or source/toolchain-bound release evidence.
+#      Focused lexical rules reject the concrete result forms removed from
+#      those two live specifications, and
 #      DESIGN_DOCUMENTATION.adoc additionally carries no date and no source
 #      revision: binding durable prose to either one is the mitigation a
 #      misplaced measurement asks for, so the rule that removes the measurement
@@ -944,10 +943,9 @@ release_validate_hardware_claims() {
 # a stronger claim than its evidence supports, and the release path checks it.
 #
 # These rules are a different kind. They keep durable design prose from
-# restating release topology that release/README.md owns, from carrying a
-# measurement bound to nothing that would age out of true, and from pinning
-# itself to a date or a revision. Every one of those is a drift this project has
-# actually had -- but a drifted sentence in DESIGN_DOCUMENTATION.adoc is a
+# carrying a measurement bound to nothing that would age out of true, and from
+# pinning itself to a date or a revision. Each of those is a drift this project
+# has actually had -- but a drifted sentence in DESIGN_DOCUMENTATION.adoc is a
 # documentation defect, not a defect in the release, and a release is the most
 # expensive moment available at which to discover one.
 #
@@ -961,9 +959,6 @@ release_validate_current_fact_rules() {
 	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
 	# alternation available without inventing an escaping convention.
 	local -a current_fact_rules=(
-		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+(MCU[[:space:]]+)?release[[:space:]]+(targets|parts)\trestates current release topology outside release/README.md'
-		$'DESIGN_DOCUMENTATION.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+targets[[:space:]]+use[[:space:]]+the[[:space:]]+modular[[:space:]]+architecture|all[[:space:]]+[0-9]+[[:space:]]+images|([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+shell[[:space:]]+source[[:space:]]+files\trestates current release topology outside release/README.md'
-		$'TOOLCHAIN.adoc\t([0-9]+|one|two|three|four|five|six|seven|eight|nine)-part,[[:space:]]*[0-9]+-image,[[:space:]]*[0-9]+-soak-combination[[:space:]]+product[[:space:]]+set|build(s|ing)?[[:space:]]+(its[[:space:]]+)?([0-9]+|one|two|three|four|five|six|seven|eight|nine)[[:space:]]+images[[:space:]]+into[[:space:]]+the[[:space:]]+published[[:space:]]+product[[:space:]]+set\trestates current release topology outside release/README.md'
 		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
 		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
 		$'DESIGN_DOCUMENTATION.adoc\t[0-9]{4}-[0-9]{2}-[0-9]{2}|(at|on)[[:space:]]+(source[[:space:]]+)?commit[[:space:]]+.?[0-9a-f]{7}|(main|HEAD)[[:space:]]+at[[:space:]]+.?[0-9a-f]{7}\tbinds durable design prose to a date or a source revision'
@@ -984,44 +979,25 @@ release_validate_current_fact_rules() {
 }
 
 # ============================================================================
-# RELEASE TOPOLOGY: ONE OWNER, AND THE NUMBERS ARE NOT TYPED
+# RELEASE TOPOLOGY: THE DECLARATION STATES THE DERIVED COUNTS
 # ============================================================================
 #
-# THE DEFECT CLASS. The project states that each fact has exactly one live
-# owner, and release topology -- how many parts, images, soak combinations,
-# modular targets and shell source files a release contains -- is owned by the
-# one bounded declaration in release/README.md. Until this rule, that ownership
-# was enforced by hand-written denylist patterns covering two documents.
-# README.md was not among them, which is how "there are 21 different firmware
-# images" sat in the file a reader arrives at, unchallenged, until an audit
-# found it. A denylist can only refuse the spellings someone thought of; the
-# README's was not one of them.
+# The bounded declaration in release/README.md is the one live statement of
+# release topology -- how many parts, images, soak combinations, modular
+# targets and shell source files a release contains. Its image and soak counts
+# reach the renderer as arguments, but its part, modular-target and
+# shell-source words are still literals in release_render_contract_line above.
+# This holds all five to numbers derived from the canonical sets the build
+# itself uses, so adding a part fails here rather than shipping a declaration
+# that quietly undercounts.
 #
-# So the numbers are not written here. They are derived from the canonical sets
-# the build itself uses, and the rule is stated over the derived values: the
-# bounded declaration must state each of them, and no other durable document may
-# state any of them as topology. Add a part and every number moves, the patterns
-# move with them, and the sentences that restate the old figures stop matching
-# because they are no longer the figures -- which is the correct outcome for
-# prose that was already historical.
-#
-# THIS IS THE SAME MOVE test_resource_tables.py MADE FOR MEASUREMENTS. That gate
-# kept four documents' restated flash and RAM figures synchronized until the
-# figures were removed instead, and it now measures images rather than reading
-# prose. Here the fact cannot be removed -- a release does have a topology, and
-# a reader needs it -- so it is confined to one declaration rather than deleted.
-#
-# WHAT IT DOES NOT DO. It is lexical, it reads no build output, and it cannot
-# tell a correct restatement from an incorrect one: any restatement outside the
-# declaration fails, because a copy that agrees today is the copy that disagrees
-# next release. It also spells numbers as words only up to twenty, which is
-# where this project's prose stops spelling them out; above that the digit form
-# is the only spelling scanned. That is a stated bound, not an oversight.
+# It reads the declaration only. A count restated in other prose is not refused:
+# that sentence ages into a stale number a reader repairs in a commit, and the
+# ban that used to refuse it was retired under GOVERNANCE.md's review of
+# existing gates.
 #
 # WHERE IT RUNS. On the tree, on every commit, and NOT from the release path --
-# the same split, for the same reason, as the current-fact rules above. A
-# restated number in a design document is a documentation defect. A release is
-# the most expensive moment available at which to discover one.
+# the same split, for the same reason, as the current-fact rules above.
 
 # The English spellings this project actually writes. Small counts are spelled
 # out -- "seven release parts", "four shell source files" -- and larger ones are
@@ -1038,12 +1014,8 @@ _release_number_word() {
 	printf '%s\n' "${spelled[$1]}"
 }
 
-# Reduce a document to the text a topology rule is matched against: quoted and
-# code spans blanked, then flowed to one line. Naming a banned form in backticks
-# is describing it, not restating it -- the same escape the retired hardware
-# idiom allows, and the reason this file, GOVERNANCE.md and test/README.md can
-# say what the rule refuses. It reads stdin so an exempt region can be removed
-# before the blanking happens.
+# Reduce text to what a count is matched against: quoted and code spans
+# blanked, then flowed to one line.
 _release_topology_scan_text() {
 	sed -e 's/`[^`]*`/ /g' -e 's/"[^"]*"/ /g' | tr '\n\t' '  ' | tr -s ' '
 }
@@ -1114,29 +1086,22 @@ release_topology_counts() {
 }
 
 # The rule itself. The counts are arguments rather than a query, so a caller can
-# hold the scanner to numbers this tree does not have and prove the patterns
-# follow the input instead of a literal.
-release_validate_topology_ownership() {
+# hold the declaration to numbers this tree does not have and prove the
+# patterns follow the input instead of a literal.
+release_validate_declared_topology() {
 	[ "$#" -eq 6 ] || return 2
 	local scan_root=$1 parts=$2 images=$3 soaks=$4 modular=$5 shells=$6
-	local count entry key value noun description word pattern
-	local document label marker reason exempt text block matched rc=0
-	local scanned=0
-	local -a topology_facts=() offenders=()
+	local count entry key value noun description word pattern text block rc=0
+	local -a topology_facts=()
 
 	for count in "$parts" "$images" "$soaks" "$modular" "$shells"; do
 		[[ "$count" =~ ^[1-9][0-9]*$ ]] \
 			|| _release_documentation_error "topology counts must be positive integers: $count" || return
 	done
 
-	# <key><TAB><value><TAB><noun alternation><TAB><what the number is>.
-	#
-	# The noun is what makes a digit decidable. "21" is not release topology;
-	# "21 images" is. Every alternative here is a spelling this project's own
-	# prose has used for the thing being counted, and a number that qualifies
-	# none of them is some other number -- an instruction budget, a pin, a
-	# version -- which is why an eight-level stack and a GCC 7 floor pass
-	# through untouched.
+	# <key><TAB><value><TAB><noun alternation><TAB><what the number is>. A
+	# number counts only beside a noun this project's prose uses for the thing
+	# being counted.
 	topology_facts=(
 		$'parts\t'"$parts"$'\trelease parts?|supported parts?|MCU targets?|parts?\trelease part count'
 		$'images\t'"$images"$'\tfirmware images?|release images?|images?\trelease image count'
@@ -1145,27 +1110,6 @@ release_validate_topology_ownership() {
 		$'shells\t'"$shells"$'\tshell source files?|modular shells?|MCU shells?|shells?\tshell source file count'
 	)
 
-	# <document><TAB><marker><TAB><why that fenced region may state the numbers>.
-	#
-	# An exemption is a fence in the document itself, not a name in this list
-	# alone: the region is visible where it applies, a declared fence that is
-	# absent or malformed fails like any other, and a restatement anywhere else
-	# in the same document still fails.
-	local -a topology_exemptions=(
-		$'docs/release_proportionality.md\trelease-topology-comparison\tthe growth table is measured at two named tags, which its own column headers state, and its image and soak rows are the evidence for the finding that the product did not grow'
-	)
-
-	# <document><TAB><why it is not a second copy>. Only two, and neither is a
-	# live restatement: one is the owner, and one is an archive.
-	local -a topology_not_scanned=(
-		$'CHANGELOG.md\tits release sections are historical accounts by the document lifecycle, each stating the topology of the release it describes and never edited to stay true'
-		$'release/README.md\tthe declared owner: its bounded declaration is required below, a second bounded block anywhere is already refused by name, and its errata state the topology of the past releases they name'
-	)
-
-	# PRESENCE. The declaration must state every derived number. The three
-	# topology words in it are still literals in the renderer above; this is
-	# what holds them to the sets the build uses, so adding a part fails here
-	# rather than shipping a declaration that quietly undercounts.
 	block=$(_release_marker_block current-release "$scan_root/release/README.md") \
 		|| _release_documentation_error "release/README.md has no bounded current-release declaration to hold the topology to" || return
 	text=$(printf '%s\n' "$block" | _release_topology_scan_text) || return
@@ -1176,59 +1120,6 @@ release_validate_topology_ownership() {
 		grep -Eqi -- "(^|[^[:alnum:]])$pattern" <<<"$text" \
 			|| _release_documentation_error "the bounded release declaration does not state the $description ($value); re-run release-prepare or correct the renderer" || rc=1
 	done
-
-	# ABSENCE. Nowhere else.
-	while IFS= read -r -d '' document; do
-		label=${document#$scan_root/}
-		_release_is_branch_only_document "$document" "$label" && continue
-		exempt=0
-		for entry in "${topology_not_scanned[@]}"; do
-			IFS=$'\t' read -r name reason <<<"$entry"
-			[ "$label" = "$name" ] && exempt=1
-		done
-		[ "$exempt" -eq 1 ] && continue
-		scanned=$((scanned + 1))
-
-		# Remove any fenced exemption first, and require the fence to be real.
-		text=$(cat -- "$document") || return
-		for entry in "${topology_exemptions[@]}"; do
-			IFS=$'\t' read -r name marker reason <<<"$entry"
-			[ "$label" = "$name" ] || continue
-			_release_marker_block "$marker" "$document" >/dev/null \
-				|| _release_documentation_error "$label declares the exempt region $marker, which is absent or malformed" || { rc=1; continue; }
-			text=$(awk -v marker="$marker" '
-				{ line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line) }
-				line == "<!-- " marker ":start -->" || line == "// " marker ":start" { inside=1; next }
-				line == "<!-- " marker ":end -->" || line == "// " marker ":end" { inside=0; next }
-				inside { next }
-				{ print }
-			' <<<"$text") || _release_documentation_error "could not remove the exempt region $marker from $label" || { rc=1; continue; }
-		done
-		text=$(printf '%s\n' "$text" | _release_topology_scan_text) || return
-
-		for entry in "${topology_facts[@]}"; do
-			IFS=$'\t' read -r key value noun description <<<"$entry"
-			word=$(_release_number_word "$value") || return
-			# Both directions: prose qualifies the noun with the number, and a
-			# table row names the noun and then carries it.
-			pattern="(^|[^[:alnum:]])($value${word:+|$word})[-[:space:]]([[:alnum:]]+[-[:space:]])?($noun)([^[:alnum:]]|$)"
-			pattern="$pattern|($noun)[^[:alnum:]]{1,4}($value${word:+|$word})([^[:alnum:]]|$)"
-			matched=$(grep -Eoi -m1 -- "$pattern" <<<"$text" | head -1) || true
-			[ -n "$matched" ] || continue
-			offenders+=("$label")
-			_release_documentation_error "$label restates the $description ($value), which the bounded declaration in release/README.md owns: \"$(printf '%s' "$matched" | sed -e 's/^[^[:alnum:]]*//' -e 's/[[:space:]]*$//')\". Remove the number, point at the declaration, or fence the region and register the exemption" || rc=1
-		done
-	done < <(find "$scan_root" \
-		\( -name .git -o -name third_party -o -path "$scan_root/release/v[0-9]*" \) -prune -o \
-		-type f \( -name '*.md' -o -name '*.adoc' \) -print0)
-
-	# A walk that reads nothing is the failure mode this whole rule is written
-	# against: it is indistinguishable from a clean tree, and it is what a
-	# pruned-away scan root, an unreadable directory or a mistyped exclusion
-	# each look like. Every tree with a release declaration in it has documents
-	# to scan, so finding none is a broken scan and not a quiet pass.
-	[ "$scanned" -gt 0 ] \
-		|| _release_documentation_error "the topology scan read no documents; the walk found nothing to check" || rc=1
 
 	return "$rc"
 }
@@ -1481,13 +1372,6 @@ release_validate_pic12f675_flashing_helper() {
 	# Always scanned, so deleting the helper instruction from any of them is a
 	# failure with a precise diagnostic rather than a silently empty scan.
 	local -a publishers=("README.md" "FLASHING.md" "release/README.md")
-	# Universal claims the helper requirement retires. Each was true of the six
-	# flash-and-forget parts and false of this one.
-	local -a retired_claims=(
-		'Needs only a programmer and its CLI'
-		'needs no toolchain at all'
-		'no build toolchain, no clone of this repository'
-	)
 	# The sentence that resolves the contradiction B6 found. The selected policy
 	# is "helper published now, software-tested, not hardware-qualified", and
 	# each half of it was being dropped somewhere: FLASHING.md published the
@@ -1507,7 +1391,6 @@ release_validate_pic12f675_flashing_helper() {
 	# does NOT ban is a claim SCOPED to a route ("this route offers no operator
 	# ipecmd procedure"), which must stay sayable.
 	local unscoped_ipecmd_denial='no ipecmd( (hardware|user|write|operator|programming))? procedure is published'
-	local retired
 
 	[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] \
 		|| _release_documentation_error "requested version is not vX.Y.Z: $version" || return
@@ -1525,21 +1408,14 @@ release_validate_pic12f675_flashing_helper() {
 	grep -Fq "$helper_name=$helper_source" "$repo_root/Makefile" \
 		|| _release_documentation_error "the Makefile does not bind $helper_name to $helper_source as a required release artifact (RELEASE_HELPER_MAP)" || rc=1
 
-	# 3. Every publisher names the helper, and the two entry-point documents
-	#    carry the precise claim rather than an implicit escape clause.
+	# 3. Every publisher names the helper and publishes no raw writer command,
+	#    and the two entry-point documents carry the precise claim.
 	for label in "${publishers[@]}"; do
 		document="$repo_root/$label"
 		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
 			|| { _release_documentation_error "flashing document is not a regular nonempty file: $label" || rc=1; continue; }
 		grep -Fq "$helper_name" "$document" \
 			|| _release_documentation_error "$label does not name the release-shipped PIC12F675 flashing helper $helper_name" || rc=1
-		flowed=$(_release_flowed_text "$document") || return
-		for retired in "${retired_claims[@]}"; do
-			case "$flowed" in
-				*"$retired"*)
-					_release_documentation_error "$label still publishes the retired universal claim: $retired" || rc=1 ;;
-			esac
-		done
 		_release_pic12f675_raw_writer_scan "$label" < "$document" || rc=1
 	done
 
@@ -1555,37 +1431,17 @@ release_validate_pic12f675_flashing_helper() {
 		"$repo_root/FLASHING.md" \
 		|| _release_documentation_error "the FLASHING.md PIC12F675 heading does not state that it is not a raw write target" || rc=1
 
-	# 5. Any OTHER current document that publishes a raw writer command fails the
-	#    day it is written, and any current document -- these three included --
-	#    that still says this part has no no-compiler path contradicts them.
-	#    Shipped release directories are immutable artifacts of past releases and
-	#    legitimately carry retired wording; root-level working documents quote
-	#    the defective form while describing the defect.
-	#
-	#    The superseded states are named as exact sentences rather than matched
-	#    by pattern. A document may legitimately record its own retired
-	#    position IN THE PAST TENSE ("The position was that no no-compiler
-	#    path ... had been designed"), and a pattern wide enough to catch the
-	#    live claim would fail on the record of how it was retired.
-	#    Matched case-insensitively, and so spelled in lower case here: the same
-	#    sentence at the start of a sentence is the same claim.
-	local -a retired_state=(
-		'there is not yet a no-compiler path'
-		'the one place where a qualified direct-from-download path is not available today'
-		'requires a clean source checkout of the same release tag and the pinned xc8/dfp toolchain'
-	)
+	# 5. Any OTHER current document that publishes a raw writer command, or
+	#    denies that any ipecmd procedure is published, fails the day it is
+	#    written. Shipped release directories are immutable artifacts of past
+	#    releases and legitimately carry retired wording; root-level working
+	#    documents quote the defective form while describing the defect.
 	while IFS= read -r -d '' document; do
 		label=${document#$repo_root/}
 		if _release_is_branch_only_document "$document" "$label"; then
 			continue
 		fi
 		flowed=$(_release_flowed_text "$document") || return
-		for retired in "${retired_state[@]}"; do
-			case "${flowed,,}" in
-				*"$retired"*)
-					_release_documentation_error "$label still publishes the superseded PIC12F675 state, which the helper retired: $retired" || rc=1 ;;
-			esac
-		done
 		# The blanket denial, scanned over EVERY current document rather than
 		# the three publishers: it was TOOLCHAIN.adoc -- which publishes no
 		# procedure of its own -- that carried one of the three offending
