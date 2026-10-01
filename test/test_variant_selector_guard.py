@@ -35,6 +35,19 @@ TWO HALVES, because either alone leaves the hole open.
   including rules written after this file. A guard a human has to remember to
   extend has the failure mode it exists to prevent.
 
+PER-VARIANT MAPS are the same severance one level down. A map is a family of
+variables keyed by variant name, read through a dereference such as
+$(pic_soak_block_$(PIC10F322_SOAK_VARIANT)). require_variant_map checks a
+REGISTERED map's keys at parse time; this checks that every map is registered.
+v0.9.8 renamed the variants and left pic_soak_block_* on the old keys,
+unregistered: every lookup expanded empty, the PIC10F322 soak driver stopped
+compiling and its WDT mutant degraded to a SKIP, while the PIC10F320 copy of
+the same map had been renamed correctly. Maps are harvested by DEREFERENCE, not
+by definition -- pic_soak_block_cd4053 ends in no current variant name, so a
+definition-keyed harvest would not have seen the broken map. Template
+parameters $(1)/$(2) are not matched: $(mmcu_$(1)) and $(part_$(1)) are
+per-chip tables, not per-variant maps.
+
 THE CONTRACT HALF NEEDS A TRANSITIVE CLOSURE, and that is the whole difficulty.
 Almost no rule mentions a selector directly: pic10f322-test-soak reads
 $(PIC10F322_SOAK_HEX), which is composed from PIC10F322_SOAK_VARIANT three
@@ -169,6 +182,17 @@ def harvest(text, members):
     return out
 
 
+MAP_DEREF = re.compile(
+    r"\$\(([a-z][a-z0-9_]*)_\$\((?:v|VARIANT|[A-Z][A-Z0-9_]*VARIANT)\)")
+MAP_REGISTERED = re.compile(
+    r"\$\(call\s+require_variant_map,([a-z][a-z0-9_]*)_,")
+
+
+def variant_maps(text):
+    """(dereferenced map prefixes, prefixes registered with the guard)."""
+    return set(MAP_DEREF.findall(text)), set(MAP_REGISTERED.findall(text))
+
+
 def run_make(*args, env=None):
     """Run make from ROOT. _MAKE_SERIAL_LOCK_HELD is inherited on purpose: it is
     what lets a nested make skip the worktree lock the outer `make test` already
@@ -259,6 +283,30 @@ def main():
         fail("negative case: an unguarded selector consumer was not detected")
     checks += 1
 
+    # ------------------------------------------------------------------ maps --
+    used, registered = variant_maps(text)
+    if len(used) < 5:
+        fail(f"harvested only {len(used)} per-variant map dereferences; expected "
+             ">= 5 -- the dereference parse has stopped matching")
+    checks += 1
+    unregistered = sorted(used - registered)
+    if unregistered:
+        fail("per-variant map(s) not registered with require_variant_map: "
+             + ", ".join(unregistered))
+    checks += 1
+    unread = sorted(registered - used)
+    if unread:
+        fail("require_variant_map registers map(s) nothing dereferences "
+             "(a rename left the call behind?): " + ", ".join(unread))
+    checks += 1
+
+    # NEGATIVE CASE: an unregistered per-variant dereference must be reported.
+    neg_used, neg_registered = variant_maps(
+        text + "\nBOGUS = $(bogus_map_$(PIC10F322_SOAK_VARIANT))\n")
+    if neg_used - neg_registered != {"bogus_map"}:
+        fail("negative case: an unregistered per-variant map was not detected")
+    checks += 1
+
     # ------------------------------------------------------------ behavioural --
     rc, out = run_make(GUARD)
     if rc != 0:
@@ -337,7 +385,7 @@ def main():
 
     print(f"variant selector guard: {checks} checks, 0 failures "
           f"({len(table)} selectors, {len(members) - len(table)} derived variables, "
-          f"{len(rules)} consuming rules)")
+          f"{len(rules)} consuming rules, {len(used)} per-variant maps)")
 
 
 if __name__ == "__main__":

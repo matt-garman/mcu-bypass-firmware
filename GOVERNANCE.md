@@ -276,3 +276,36 @@ held by review rather than by a gate. That is deliberate, and it is the first
 obligation applied to itself: no gate has yet landed that this list would have
 refused, so the defect class is unproven and the machinery is unearned. When
 one does land, that is the defect -- and it goes in the register.
+
+## Review of existing gates
+
+The obligations above bind a gate on the way in. Nothing bound one afterwards,
+so the apparatus could only grow. An existing gate is held to the same
+obligations, and one that cannot discharge them is reduced or deleted rather
+than kept for the assurance it appears to give: a gate that has never fired
+looks exactly like one that is working, and the resemblance is not evidence.
+
+The review covers gates that read the build, release, CI or documentation
+machinery rather than produce evidence about the firmware. It happens whenever
+a change touches the gate or reshapes what the gate reads, and it asks four
+questions:
+
+1. **Did the defect happen?** The gate's own header names the commit or release
+   where its defect class occurred, or says plainly that the class is
+   hypothetical. A header that does neither has not stated the purpose the last
+   obligation asks for.
+2. **Is it the only guard?** When the property is now held by construction, by
+   a parse-time refusal or by another gate, the second guard goes.
+3. **Does it restate the tree?** A check that compares the tree with a literal
+   copy of the tree's own value -- an expected list, count or setting -- fires
+   on every correct edit to that value and on nothing else. The literal goes,
+   and the property it stood for stays only if something else can hold it. The
+   exception is a value someone outside the tree depends on, such as a
+   published file name or a programming command, where an independent copy is
+   the point.
+4. **Is its cost sized to where the defect lands?** The asymmetry above applies
+   to a gate already in the tree exactly as it does to a proposal.
+
+A retirement removes the gate whole, in one change: its rule, its inventory
+entries, its register row if it has one, and every document that cites it. The
+commit message names the question that retired it.

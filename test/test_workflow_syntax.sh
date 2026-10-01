@@ -30,6 +30,32 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 #   Actions runner; they assert the file is loadable and internally consistent,
 #   which is the class of failure a local run can otherwise never see.
 #
+# WHAT IT HOLDS
+#   - both workflows load, with no duplicate or merge keys, and every run body
+#     passes `bash -n`;
+#   - supply chain and credentials: actions pinned to full commit SHAs,
+#     GH_TOKEN reachable from the one publication step, no persisted checkout
+#     credentials, an unconditional XC8/DFP cache verify, and cache keys bound
+#     to the inputs they cache;
+#   - release.yml verifies the committed release before exposing it, and its
+#     publication-kind branches agree with make-release.sh's version grammar;
+#   - nothing reaches a gate except through a declared Make goal, with no Make
+#     flags and exactly the pins that goal declares, and no gate step can
+#     continue after failure or be switched off by any condition but the
+#     reviewed pull-request exclusion;
+#   - every declared goal has a local counterpart, each goal keeps its
+#     fail-closed policy, and the resource-policy pins agree on every surface
+#     that carries one.
+#
+# WHAT IT DELIBERATELY DOES NOT CHECK
+#   The exact shape of a job, step or recipe: which packages a job installs,
+#   how many cache steps there are, which pins a recipe forwards to which
+#   sub-make, what the reviewed goal lists contain. Each of those either fails
+#   loudly on the next CI run or was a literal copy of the file it read, which
+#   fires on every correct edit and on nothing else. The publication step's
+#   commands are executed, with failures injected, by test-release-provenance
+#   rather than restated here.
+#
 # TOOL POLICY
 #   Needs PyYAML. Absent, this SKIPS cleanly by default (so a bare checkout can
 #   still run `make test`) but FAILS under STRICT_TOOLS=1 -- which is what
@@ -397,27 +423,18 @@ for workflow_name in REQUIRED:
             "it must run on every restore (hit or miss)",
         )
 
-check(len(pic_cache_steps) == 4, f"found {len(pic_cache_steps)} PIC cache steps, expected 4")
 for name, job_id, idx, key in pic_cache_steps:
     check(
         "hashFiles('scripts/install_pic_toolchain.sh')" in key,
         f"{name}: job '{job_id}' PIC cache step {idx} is not keyed by the installer pin",
     )
 
-check(
-    len(attiny_cache_steps) == 6,
-    f"found {len(attiny_cache_steps)} ATtiny_DFP cache steps, expected 6",
-)
 for name, job_id, idx, key in attiny_cache_steps:
     check(
         "hashFiles('scripts/fetch_attiny_dfp.sh')" in key,
         f"{name}: job '{job_id}' ATtiny_DFP cache step {idx} is not keyed by its pins",
     )
 
-check(
-    len(yasimavr_cache_steps) == 6,
-    f"found {len(yasimavr_cache_steps)} yasimavr cache steps, expected 6",
-)
 for name, job_id, idx, key in yasimavr_cache_steps:
     check(
         "'scripts/fetch_yasimavr.sh'" in key
@@ -578,356 +595,91 @@ if check(isinstance(release_steps, list), "release.yml: release job has no step 
                 "release.yml: committed-release verification is not fail-closed",
             )
 
-    if len(repro_steps) == 1:
-        repro = repro_steps[0]
-        repro_run = repro.get("run")
-        check(isinstance(repro_run, str), "release.yml: frozen-bundle producer has no shell body")
-        if isinstance(repro_run, str):
-            commands = shell_tokens(repro_run)
-            private_dir_command = [
-                "sudo", "install", "-d", "-o", "root", "-g", "root", "-m",
-                "0700", "--", "$frozen_root", "$publish",
-            ]
-            asset_install_command = [
-                "sudo", "install", "-o", "root", "-g", "root", "-m", "0444",
-                "--", "$publish_stage/$asset", "$publish/$asset",
-            ]
-            # The provenance files are no longer named here: they come from
-            # Makefile RELEASE_PROVENANCE_FILES, so the checksum list and the
-            # published set cannot drift apart. What stays pinned is that the
-            # checksum list and its detached signature are added exactly once.
-            metadata_command = [
-                "expected_assets+=(SHA256SUMS", "SHA256SUMS.asc)",
-            ]
-            provenance_command = [
-                "expected_assets+=(${release_provenance_names[@]})",
-            ]
-            snapshot_command = [
-                "cp", "-p", "--", "$dir/*.hex", "$dir/SHA256SUMS",
-                "$dir/SHA256SUMS.asc", "$publish_stage/",
-            ]
-            inventory_mode_command = [
-                "sudo", "chmod", "0444", "--", "$inventory",
-            ]
-            harden_command = [
-                "sudo", "chmod", "0555", "--", "$publish", "$frozen_root",
-            ]
-            initial_verify_command = [
-                "python3", "scripts/verify_release_publication.py", "verify",
-                "$publish", "$inventory", "$inventory_sha256",
-            ]
-            private_dir_indices = [
-                i for i, command in enumerate(commands) if command == private_dir_command
-            ]
-            asset_install_indices = [
-                i for i, command in enumerate(commands) if command == asset_install_command
-            ]
-            metadata_indices = [
-                i for i, command in enumerate(commands) if command == metadata_command
-            ]
-            provenance_indices = [
-                i for i, command in enumerate(commands) if command == provenance_command
-            ]
-            snapshot_indices = [
-                i for i, command in enumerate(commands) if command == snapshot_command
-            ]
-            record_indices = [
-                i for i, command in enumerate(commands)
-                if command == [
-                    "inventory_sha256=$(sudo", "python3",
-                    "scripts/verify_release_publication.py", "record", "$publish",
-                    "$inventory", "${expected_assets[@]})",
-                ]
-            ]
-            inventory_mode_indices = [
-                i for i, command in enumerate(commands) if command == inventory_mode_command
-            ]
-            harden_indices = [
-                i for i, command in enumerate(commands) if command == harden_command
-            ]
-            initial_verify_indices = [
-                i for i, command in enumerate(commands) if command == initial_verify_command
-            ]
-            output_indices = [
-                i for i, command in enumerate(commands) if command == ["echo", "inventory=$inventory"]
-            ]
-            check(
-                commands[:1] == [["set", "-euo", "pipefail"]]
-                and not any(command[:2] in (["set", "+e"], ["set", "+u"])
-                            or command == ["set", "+o", "pipefail"] for command in commands),
-                "release.yml: frozen-bundle producer does not retain strict shell mode",
-            )
-            check(
-                len(private_dir_indices) == 1 and len(asset_install_indices) == 1
-                and len(metadata_indices) == 1 and len(provenance_indices) == 1
-                and len(snapshot_indices) == 1
-                and len(record_indices) == 1 and len(inventory_mode_indices) == 1
-                and len(harden_indices) == 1
-                and len(initial_verify_indices) == 1 and len(output_indices) == 1,
-                "release.yml: active root-owned freeze commands are not exact",
-            )
-            if metadata_indices and snapshot_indices and private_dir_indices \
-                    and asset_install_indices and record_indices \
-                    and inventory_mode_indices and harden_indices \
-                    and initial_verify_indices and output_indices:
-                check(
-                    metadata_indices[0] < snapshot_indices[0] < private_dir_indices[0]
-                    < asset_install_indices[0] < record_indices[0]
-                    < inventory_mode_indices[0] < harden_indices[0]
-                    < initial_verify_indices[0] < output_indices[0],
-                    "release.yml: root-owned publication inventory is not hardened and verified before outputs",
-                )
-            check(
-                ["frozen_root=/opt/mcu-bypass-publication"] in commands
-                and ["echo", "inventory_sha256=$inventory_sha256"] in commands,
-                "release.yml: frozen-bundle producer omits the inventory digest output",
-            )
-            check(
-                "if" not in repro
-                and repro.get("continue-on-error", False) is False
-                and "|| true" not in repro_run,
-                "release.yml: frozen-bundle producer can be skipped or ignored",
-            )
-
-    if len(publish_steps) == 1:
-        publish = publish_steps[0]
-        publish_env = publish.get("env")
-        publish_run = publish.get("run")
-        check(isinstance(publish_env, dict), "release.yml: publication step has no environment")
-        if isinstance(publish_env, dict):
-            check(
-                publish_env.get("RELEASE_INVENTORY") == "${{ steps.repro.outputs.inventory }}",
-                "release.yml: publication inventory path is not routed through step output/env",
-            )
-            check(
-                publish_env.get("RELEASE_INVENTORY_SHA256")
-                == "${{ steps.repro.outputs.inventory_sha256 }}",
-                "release.yml: publication inventory digest is not routed through step output/env",
-            )
-            check(
-                publish_env.get("RELEASE_HELPER_ASSETS")
-                == "${{ steps.repro.outputs.helper_assets }}",
-                "release.yml: helper assets are not routed through frozen-bundle step output/env",
-            )
-        check(isinstance(publish_run, str), "release.yml: publication step has no shell body")
-        if isinstance(publish_run, str):
-            commands = shell_tokens(publish_run)
-            tag_command = [
-                "scripts/verify-release-tag-target.sh", "origin", "$tag",
-                "$VERIFIED_RELEASE_COMMIT",
-            ]
-            inventory_command = [
-                "python3", "scripts/verify_release_publication.py", "verify", "$dir",
-                "$RELEASE_INVENTORY", "$RELEASE_INVENTORY_SHA256",
-            ]
-            signature_command = [
-                "scripts/verify-release-signature.sh", "detached",
-                "$dir/SHA256SUMS.asc", "$dir/SHA256SUMS",
-            ]
-            # The strict checksum command carries its own ::error:: handler: the
-            # tool is third-party and its failure wording is not stable (coreutils
-            # 9.x dropped the "SHA256" token), so the workflow emits a
-            # project-owned annotation that the provenance test can assert on.
-            # shlex glues the trailing ";" onto the preceding quoted token.
-            checksum_command = [
-                "(cd", "$dir", "&&", "sha256sum", "--check", "--strict", "--",
-                "SHA256SUMS)", "||", "{", "echo",
-                "::error::strict image checksum verification failed;",
-                "exit", "1;", "}",
-            ]
-            tag_indices = [i for i, command in enumerate(commands) if command == tag_command]
-            inventory_indices = [
-                i for i, command in enumerate(commands) if command == inventory_command
-            ]
-            signature_indices = [
-                i for i, command in enumerate(commands) if command == signature_command
-            ]
-            checksum_indices = [
-                i for i, command in enumerate(commands) if command == checksum_command
-            ]
-            publish_indices = [
-                i for i, command in enumerate(commands)
-                if command == [
-                    "gh", "release", "create", "$tag", "--title", "Firmware $tag",
-                    "--notes-file", "$notes", "--verify-tag",
-                    "${prerelease_flag[@]}", "${assets[@]}",
-                ]
-            ]
-            check(
-                len(tag_indices) == 1 and len(inventory_indices) == 2
-                and len(signature_indices) == 1
-                and len(checksum_indices) == 1 and len(publish_indices) == 1,
-                "release.yml: active final publication command inventory is not exact",
-            )
-            if tag_indices and len(inventory_indices) == 2 \
-                    and signature_indices and checksum_indices and publish_indices:
-                check(
-                    tag_indices[0] < inventory_indices[0]
-                    < signature_indices[0] < checksum_indices[0] < inventory_indices[1]
-                    and publish_indices[0] == inventory_indices[1] + 1,
-                    "release.yml: active final checks do not dominate immediate gh publication",
-                )
-            check(
-                commands[:1] == [["set", "-euo", "pipefail"]]
-                and not any(command[:2] in (["set", "+e"], ["set", "+u"])
-                            or command == ["set", "+o", "pipefail"] for command in commands)
-                and "|| true" not in publish_run,
-                "release.yml: publication shell does not retain strict fail-closed mode",
-            )
-            check(
-                "if" not in publish
-                and publish.get("continue-on-error", False) is False,
-                "release.yml: publication step may be skipped or continue after verification failure",
-            )
-
-            # --- publication kind -------------------------------------------
-            # A suffixed tag (v1.0.0-rc.1) must publish as a GitHub prerelease
-            # so a candidate cannot take latest-release selection away from the
-            # newest stable version; a bare vX.Y.Z must not. The workflow
-            # decides that with two regex branches over $tag, which makes this
-            # ANOTHER copy of the project's version grammar -- so do not just
-            # look for the flag: extract both branch patterns and require that
-            # together they accept exactly what scripts/make-release.sh accepts,
-            # and that they split that grammar stable-vs-suffixed.
-            flag_init = ["prerelease_flag=()"]
-            flag_set = ["prerelease_flag=(", "--prerelease", ")"]
-            init_indices = [i for i, command in enumerate(commands) if command == flag_init]
-            set_indices = [i for i, command in enumerate(commands) if command == flag_set]
-            check(
-                len(init_indices) == 1 and len(set_indices) == 1
-                and init_indices[0] < set_indices[0]
-                and bool(publish_indices) and set_indices[0] < publish_indices[0],
-                "release.yml: publication does not build one prerelease flag before publishing",
-            )
-
-            # The suffixed branch must set the flag, and the fall-through must
-            # abort -- not silently publish an unrecognized shape as either kind.
-            publish_lines = [line.strip() for line in publish_run.split("\n")]
-            elif_lines = [
-                i for i, line in enumerate(publish_lines)
-                if line.startswith('elif [[ "$tag" =~ ')
-            ]
-            fail_closed_tail = [
-                "prerelease_flag=( --prerelease )",
-                "else",
-                "echo \"::error::tag '$tag' is not vX.Y.Z (optionally -suffix)\"",
-                "exit 1",
-                "fi",
-            ]
-            check(
-                len(elif_lines) == 1
-                and publish_lines[elif_lines[0] + 1:elif_lines[0] + 6] == fail_closed_tail,
-                "release.yml: unrecognized tag shapes do not fail closed before publication",
-            )
-
-            branch_patterns = re.findall(
-                r'^\s*(?:if|elif) \[\[ "\$tag" =~ (\S+) \]\]; then$',
-                publish_run,
-                re.M,
-            )
-            NEVER = r"(?!)"
-            stable_pattern, suffixed_pattern = (
-                branch_patterns if len(branch_patterns) == 2 else (NEVER, NEVER)
-            )
-            canonical_pattern = NEVER
-            try:
-                with open(os.path.join(root, "scripts", "make-release.sh"), encoding="utf-8") as fh:
-                    canonical_match = re.search(r'\[\[ "\$VERSION" =~ (\S+) \]\]', fh.read())
-                if canonical_match:
-                    canonical_pattern = canonical_match.group(1)
-            except OSError:
-                pass
-            check(
-                canonical_pattern != NEVER and len(branch_patterns) == 2,
-                "release.yml: publication-kind branches or the producer's version "
-                "grammar could not be extracted for comparison",
-            )
-
-            # Stable, prerelease, and malformed shapes, including the ones the
-            # `on:` tag globs admit but the grammar does not (`v1.0.0-`).
-            TAG_CASES = (
-                ("v0.9.10", "stable"),
-                ("v1.0.0", "stable"),
-                ("v10.20.30", "stable"),
-                ("v1.0.0-rc.1", "prerelease"),
-                ("v1.0.0-rc1", "prerelease"),
-                ("v1.0.0-rc-1", "prerelease"),
-                ("v1.0.0-alpha.1.2", "prerelease"),
-                ("v1.0.0-", "rejected"),
-                ("v1.0.0-rc.", "rejected"),
-                ("v1.0.0-rc..1", "rejected"),
-                ("v1.0.0--rc", "rejected"),
-                ("v1.0.0+build", "rejected"),
-                ("v1.0.0.rc1", "rejected"),
-                ("v1.0", "rejected"),
-                ("v1.0.0.0", "rejected"),
-                ("1.0.0", "rejected"),
-                ("v1.0.0 rc1", "rejected"),
-                ("", "rejected"),
-            )
-            overlapping = []
-            disagreeing = []
-            misclassified = []
-            for tag_case, kind in TAG_CASES:
-                stable_ok = re.fullmatch(stable_pattern, tag_case) is not None
-                suffixed_ok = re.fullmatch(suffixed_pattern, tag_case) is not None
-                canonical_ok = re.fullmatch(canonical_pattern, tag_case) is not None
-                if stable_ok and suffixed_ok:
-                    overlapping.append(tag_case)
-                if (stable_ok or suffixed_ok) != canonical_ok:
-                    disagreeing.append(tag_case)
-                expected = {"stable": (True, False), "prerelease": (False, True)}.get(
-                    kind, (False, False))
-                if (stable_ok, suffixed_ok) != expected:
-                    misclassified.append(f"{tag_case or '(empty)'} != {kind}")
-            check(
-                not overlapping,
-                "release.yml: a tag matches both publication-kind branches: "
-                + ", ".join(overlapping),
-            )
-            check(
-                not disagreeing,
-                "release.yml: publication-kind branches disagree with the "
-                "scripts/make-release.sh version grammar on: " + ", ".join(disagreeing),
-            )
-            check(
-                not misclassified,
-                "release.yml: publication kind is wrong for: " + ", ".join(misclassified),
-            )
-def apt_packages(step):
-    run = step.get("run") if isinstance(step, dict) else None
-    packages = set()
-    if not isinstance(run, str):
-        return packages
-    for tokens in shell_tokens(run):
-        if tokens[:1] == ["sudo"]:
-            tokens = tokens[1:]
-        if tokens[:2] != ["apt-get", "install"]:
-            continue
+    # --- publication kind -----------------------------------------------------
+    # A suffixed tag (v1.0.0-rc.1) must publish as a GitHub prerelease so a
+    # candidate cannot take latest-release selection away from the newest
+    # stable version; a bare vX.Y.Z must not. The workflow decides that with two
+    # regex branches over $tag, which makes this ANOTHER copy of the project's
+    # version grammar -- so extract both branch patterns and require that
+    # together they accept exactly what scripts/make-release.sh accepts, and
+    # that they split that grammar stable-vs-suffixed. What the step then does
+    # with each kind is executed by test-release-provenance.
+    publish_run = publish_steps[0].get("run") if len(publish_steps) == 1 else None
+    if isinstance(publish_run, str):
+        branch_patterns = re.findall(
+            r'^\s*(?:if|elif) \[\[ "\$tag" =~ (\S+) \]\]; then$',
+            publish_run,
+            re.M,
+        )
+        NEVER = r"(?!)"
+        stable_pattern, suffixed_pattern = (
+            branch_patterns if len(branch_patterns) == 2 else (NEVER, NEVER)
+        )
+        canonical_pattern = NEVER
         try:
-            yes = tokens.index("-y", 2)
-        except ValueError:
-            continue
-        for token in tokens[yes + 1:]:
-            if token in {"&&", "||", ";"}:
-                break
-            if not token.startswith("-"):
-                packages.add(token)
-    return packages
+            with open(os.path.join(root, "scripts", "make-release.sh"), encoding="utf-8") as fh:
+                canonical_match = re.search(r'\[\[ "\$VERSION" =~ (\S+) \]\]', fh.read())
+            if canonical_match:
+                canonical_pattern = canonical_match.group(1)
+        except OSError:
+            pass
+        check(
+            canonical_pattern != NEVER and len(branch_patterns) == 2,
+            "release.yml: publication-kind branches or the producer's version "
+            "grammar could not be extracted for comparison",
+        )
 
-
-def run_step_asserts(step, requirement):
-    run = step.get("run") if isinstance(step, dict) else None
-    if not isinstance(run, str):
-        return False
-    for tokens in shell_tokens(run):
-        if requirement == "PyYAML":
-            if tokens[:3] == ["python3", "-c", "import yaml"]:
-                return True
-        elif tokens[:3] == ["command", "-v", requirement]:
-            return True
-    return False
-
+        # Stable, prerelease, and malformed shapes, including the ones the
+        # `on:` tag globs admit but the grammar does not (`v1.0.0-`).
+        TAG_CASES = (
+            ("v0.9.10", "stable"),
+            ("v1.0.0", "stable"),
+            ("v10.20.30", "stable"),
+            ("v1.0.0-rc.1", "prerelease"),
+            ("v1.0.0-rc1", "prerelease"),
+            ("v1.0.0-rc-1", "prerelease"),
+            ("v1.0.0-alpha.1.2", "prerelease"),
+            ("v1.0.0-", "rejected"),
+            ("v1.0.0-rc.", "rejected"),
+            ("v1.0.0-rc..1", "rejected"),
+            ("v1.0.0--rc", "rejected"),
+            ("v1.0.0+build", "rejected"),
+            ("v1.0.0.rc1", "rejected"),
+            ("v1.0", "rejected"),
+            ("v1.0.0.0", "rejected"),
+            ("1.0.0", "rejected"),
+            ("v1.0.0 rc1", "rejected"),
+            ("", "rejected"),
+        )
+        overlapping = []
+        disagreeing = []
+        misclassified = []
+        for tag_case, kind in TAG_CASES:
+            stable_ok = re.fullmatch(stable_pattern, tag_case) is not None
+            suffixed_ok = re.fullmatch(suffixed_pattern, tag_case) is not None
+            canonical_ok = re.fullmatch(canonical_pattern, tag_case) is not None
+            if stable_ok and suffixed_ok:
+                overlapping.append(tag_case)
+            if (stable_ok or suffixed_ok) != canonical_ok:
+                disagreeing.append(tag_case)
+            expected = {"stable": (True, False), "prerelease": (False, True)}.get(
+                kind, (False, False))
+            if (stable_ok, suffixed_ok) != expected:
+                misclassified.append(f"{tag_case or '(empty)'} != {kind}")
+        check(
+            not overlapping,
+            "release.yml: a tag matches both publication-kind branches: "
+            + ", ".join(overlapping),
+        )
+        check(
+            not disagreeing,
+            "release.yml: publication-kind branches disagree with the "
+            "scripts/make-release.sh version grammar on: " + ", ".join(disagreeing),
+        )
+        check(
+            not misclassified,
+            "release.yml: publication kind is wrong for: " + ", ".join(misclassified),
+        )
 
 def ci_goal_recipe(goal):
     """Return the recipe lines of a Makefile goal, without their leading tabs.
@@ -958,72 +710,6 @@ def ci_goal_recipe(goal):
     return recipe
 
 
-def prior_steps(workflow_name, job_id, first_use, description):
-    doc = docs.get(workflow_name)
-    jobs = doc.get("jobs") if isinstance(doc, dict) else None
-    job = jobs.get(job_id) if isinstance(jobs, dict) else None
-    steps = job.get("steps") if isinstance(job, dict) else None
-    if not check(isinstance(steps, list), f"{workflow_name}: job '{job_id}' has no step list"):
-        return []
-    matches = []
-    for idx, step in enumerate(steps):
-        run = step.get("run") if isinstance(step, dict) else None
-        if isinstance(run, str) and any(first_use(tokens) for tokens in shell_tokens(run)):
-            matches.append(idx)
-    if not check(
-        bool(matches),
-        f"{workflow_name}: job '{job_id}' has no {description} invocation",
-    ):
-        return []
-    return steps[:min(matches)]
-
-
-# Strict host suites consume Git history, GnuPG fixtures, and PyYAML. Hosted
-# runners happen to carry some of them, but the workflow contract must install
-# and assert them before the first make test/stress invocation.
-for job_id, gate_name in (
-    ("verify", "ci-verify"),
-    ("stress", "ci-stress"),
-):
-    before = prior_steps(
-        "ci.yml",
-        job_id,
-        lambda tokens, target=gate_name: tokens[:2] == ["make", target],
-        "strict suite",
-    )
-    for package in ("git", "gnupg", "python3-yaml"):
-        check(
-            any(package in apt_packages(step) for step in before),
-            f"ci.yml: job '{job_id}' does not install {package} before its strict suite",
-        )
-    for command in ("git", "gpg", "PyYAML"):
-        check(
-            any(run_step_asserts(step, command) for step in before),
-            f"ci.yml: job '{job_id}' does not assert {command} before its strict suite",
-        )
-
-# Release signature/history/qualification verification occurs near the top of
-# the job. Its small prerequisite install must precede that first use rather
-# than relying on the larger compiler installation later in the workflow.
-before_release_verify = prior_steps(
-    "release.yml",
-    "release",
-    lambda tokens: bool(tokens) and re.fullmatch(
-        r"scripts/verify-release-(?:signature|qualification|history)\.sh", tokens[0]
-    ) is not None,
-    "release signature/history/qualification verifier",
-)
-for package in ("make", "git", "gnupg", "python3", "python3-yaml"):
-    check(
-        any(package in apt_packages(step) for step in before_release_verify),
-        f"release.yml: release verification does not install {package} before first use",
-    )
-for command in ("make", "git", "gpg", "PyYAML"):
-    check(
-        any(run_step_asserts(step, command) for step in before_release_verify),
-        f"release.yml: release verification does not assert {command} before first use",
-    )
-
 # --- the local mirror EXECUTES the inventory ---------------------------------
 # ci-local.sh used to carry a prose CI-JOB MAPPING header, and this gate checked
 # that its entries named the same jobs ci.yml declares. That proved someone had
@@ -1034,217 +720,13 @@ for command in ("make", "git", "gpg", "PyYAML"):
 # to start unless every sequenced goal has a handler. The checks further down
 # close the two links that structure cannot carry on its own: that CI_GOALS is
 # exactly the set ci.yml invokes, and that the folded claim is true of Make's
-# graph. Only the file itself is needed here; the later PIC-routing and
-# resource-pin checks read these lines.
+# graph. Only the file itself is needed here; the handler, strict-export and
+# resource-pin checks below read these lines.
 ci_local = os.path.join(root, "scripts", "ci-local.sh")
 ci_local_present = check(os.path.isfile(ci_local), "scripts/ci-local.sh: missing")
 if ci_local_present:
     with open(ci_local, encoding="utf-8") as fh:
         lines = fh.read().splitlines()
-
-# --- pin the complete PIC CI contract independently of ci-local.sh ------------
-# Set equality is not enough here: both files could lose one part together, and
-# sets erase duplicates. These are five Make processes containing six required
-# aggregates; PIC12F675's two goals deliberately share one retained matrix.
-RESOURCE_POLICY = {
-    "XT_STATIC_RAM_LIMIT": "16",
-    "XT_STACK_MAX_FRAME": "32",
-    "PIC12F675_DATA_LIMIT": "48",
-}
-CI_RESOURCE_ENV = {
-    f"CI_{name}": value for name, value in RESOURCE_POLICY.items()
-}
-RELEASE_RESOURCE_ENV = {
-    f"RELEASE_{name}": value for name, value in RESOURCE_POLICY.items()
-}
-CI_RESOURCE_REFS = {
-    name: f"$CI_{name}" for name in RESOURCE_POLICY
-}
-RELEASE_RESOURCE_REFS = {
-    name: f"$RELEASE_{name}" for name in RESOURCE_POLICY
-}
-
-
-def release_resource_routes(refs):
-    """Which release.yml commands carry which resource-policy pins.
-
-    Keyed on the GOALS the workflow now invokes. The consumers those goals
-    reach -- attiny202, pic12f675, test-long, attiny202-test and the rest -- are
-    checked inside each recipe by RELEASE_GOAL_RESOURCE_ROUTES below, so the
-    routing is asserted end to end rather than only at whichever end happens to
-    be visible.
-    """
-    static = refs["XT_STATIC_RAM_LIMIT"]
-    stack = refs["XT_STACK_MAX_FRAME"]
-    data = refs["PIC12F675_DATA_LIMIT"]
-    return {
-        "release-rebuild": {
-            "XT_STATIC_RAM_LIMIT": static,
-            "PIC12F675_DATA_LIMIT": data,
-        },
-        "release-test-long": {
-            "XT_STATIC_RAM_LIMIT": static,
-            "PIC12F675_DATA_LIMIT": data,
-        },
-        "release-attiny202": {
-            "XT_STATIC_RAM_LIMIT": static,
-            "XT_STACK_MAX_FRAME": stack,
-        },
-        "ci-pic": {"PIC12F675_DATA_LIMIT": data},
-    }
-
-
-def make_release_resource_routes(refs):
-    """Which scripts/make-release.sh commands carry which resource-policy pins.
-
-    This is the map release.yml used before its steps invoked goals: the local
-    pipeline still names each consumer directly, so the expectation stays
-    consumer-keyed. Keeping the two apart is the point -- they are different
-    callers, and folding them back together would make one of the two vacuous.
-    """
-    static = refs["XT_STATIC_RAM_LIMIT"]
-    stack = refs["XT_STACK_MAX_FRAME"]
-    data = refs["PIC12F675_DATA_LIMIT"]
-    return {
-        "attiny202": {"XT_STATIC_RAM_LIMIT": static},
-        "pic12f675": {"PIC12F675_DATA_LIMIT": data},
-        "test-long": {
-            "XT_STATIC_RAM_LIMIT": static,
-            "PIC12F675_DATA_LIMIT": data,
-        },
-        "attiny202-test": {
-            "XT_STATIC_RAM_LIMIT": static,
-            "XT_STACK_MAX_FRAME": stack,
-        },
-        "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": static},
-        "pic12f675-test": {"PIC12F675_DATA_LIMIT": data},
-    }
-
-
-CI_RESOURCE_ROUTES = {
-    # The workflow hands the data limit to the goal; ci-pic's own recipe is
-    # separately checked (CI_GOAL_RESOURCE_ROUTES) to route it to the one
-    # PIC12F675 command and nowhere else.
-    "ci-pic": {
-        "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
-    },
-    "ci-mutation": {
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "PIC12F675_DATA_LIMIT": CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
-    },
-    "ci-attiny202-build": {
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "XT_STACK_MAX_FRAME": CI_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
-    },
-    "ci-attiny202-target": {
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-    },
-}
-RELEASE_RESOURCE_ROUTES = release_resource_routes(RELEASE_RESOURCE_REFS)
-# scripts/make-release.sh is NOT a workflow: it drives the local release
-# pipeline and invokes the gate goals directly, so its routing is checked
-# against the consumers themselves rather than against workflow goals.
-MAKE_RELEASE_RESOURCE_ROUTES = make_release_resource_routes(RELEASE_RESOURCE_REFS)
-# Inside a CI goal's recipe the same routing question is asked of $(VAR)
-# forwards rather than of shell references.
-# Keyed by CI goal, because each recipe is its own surface: asking ci-pic's
-# recipe to route the mutation limits, or the reverse, would fail on a goal
-# that correctly does not run that consumer.
-CI_GOAL_RESOURCE_ROUTES = {
-    "ci-pic": {
-        "pic12f675-test": {"PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)"},
-    },
-    "ci-mutation": {
-        "test-mutation": {
-            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
-            "PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)",
-        },
-    },
-    "ci-attiny202-build": {
-        "attiny202-test": {
-            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
-            "XT_STACK_MAX_FRAME": "$(XT_STACK_MAX_FRAME)",
-        },
-    },
-    "ci-attiny202-target": {
-        "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
-        "attiny202-soak": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
-    },
-    "release-rebuild": {
-        "attiny202": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
-        "pic12f675": {"PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)"},
-    },
-    "release-test-long": {
-        "test-long": {
-            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
-            "PIC12F675_DATA_LIMIT": "$(PIC12F675_DATA_LIMIT)",
-        },
-    },
-    "release-attiny202": {
-        "attiny202-test": {
-            "XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)",
-            "XT_STACK_MAX_FRAME": "$(XT_STACK_MAX_FRAME)",
-        },
-        "attiny202-test-target": {"XT_STATIC_RAM_LIMIT": "$(XT_STATIC_RAM_LIMIT)"},
-    },
-}
-
-for workflow_name, expected in (
-        ("ci.yml", CI_RESOURCE_ENV),
-        ("release.yml", RELEASE_RESOURCE_ENV)):
-    doc = docs.get(workflow_name)
-    env = doc.get("env") if isinstance(doc, dict) else None
-    actual = {
-        name: str(env.get(name)) if isinstance(env, dict) and name in env else None
-        for name in expected
-    }
-    check(
-        actual == expected,
-        f"{workflow_name}: resource-policy pins are {actual!r}, expected {expected!r}",
-    )
-
-# The five-process PIC boundary, stated once. Only the VALUES differ by
-# surface: a hosted workflow pins the installer's real paths, ci-pic's recipe
-# forwards whatever its caller pinned, and release.yml pins the same paths CI
-# does. Parameterising keeps one description of the boundary rather than three
-# that could drift apart while each still passed its own check.
-def pic_commands(refs):
-    cc, dfp = refs["PIC_CC"], refs["PIC_DFP"]
-    cc320, dfp320 = refs["PIC10F320_CC"], refs["PIC10F320_DFP"]
-    return (
-        (("pic10f322-test",),
-         {"STRICT_TOOLS": "1", "PIC_CC": cc, "PIC_DFP": dfp}),
-        (("pic10f322-test-target-variants",),
-         {"STRICT_TOOLS": "1", "PIC_CC": cc, "PIC_DFP": dfp}),
-        (("pic10f320-test",),
-         {"STRICT_TOOLS": "1", "PIC10F320_CC": cc320, "PIC10F320_DFP": dfp320}),
-        (("pic10f320-test-target-variants",),
-         {"STRICT_TOOLS": "1", "PIC10F320_CC": cc320, "PIC10F320_DFP": dfp320}),
-        (("pic12f675-test", "pic12f675-test-target-variants"),
-         {"STRICT_TOOLS": "1", "PIC_CC": cc, "PIC_DFP": dfp}),
-    )
-
-
-XC8_PIC_REFS = {
-    "PIC_CC": "${XC8_DIR}/bin/xc8-cc",
-    "PIC_DFP": "${XC8_DFP_ROOT}/xc8",
-    "PIC10F320_CC": "${XC8_DIR}/bin/xc8-cc",
-    "PIC10F320_DFP": "${XC8_DFP_ROOT}/xc8",
-}
-# Inside the recipe the pins are forwarded, not spelled: $(call ci_pin,...)
-# has already refused anything the caller did not supply.
-MAKE_PIC_REFS = {name: f"$({name})" for name in XC8_PIC_REFS}
-# scripts/ci-local.sh resolves each path once in its preflight -- from the
-# environment, else the Makefile default -- and hands that same value to the
-# goal it asserted the toolchain for.
-CI_LOCAL_PIC_REFS = {name: f"$PIN_{name}" for name in XC8_PIC_REFS}
-
-# The goal NAMES are the same whichever refs are substituted, so take them from
-# the Make-level form -- the one ci-pic's recipe is checked against. There is no
-# longer a workflow-level PIC command list: both workflows invoke ci-pic, and
-# the boundary is asserted once, against its recipe.
-PIC_GOALS = tuple(goal for goals, _ in pic_commands(MAKE_PIC_REFS) for goal in goals)
-
 
 def make_command(tokens):
     if tokens[:1] != ["make"]:
@@ -1319,17 +801,6 @@ RELEASE_GOALS = makefile_goal_list("RELEASE_GOALS")
 # Every goal a workflow may invoke. Recipe edges are seeded from this, so a
 # release goal's sub-makes are as visible to the routing checks as a CI goal's.
 WORKFLOW_GOALS = CI_GOALS + RELEASE_GOALS
-check(
-    CI_GOALS == (
-        "ci-verify", "ci-stress", "ci-pic", "ci-mutation",
-        "ci-attiny202-build", "ci-attiny202-target", "ci-build-classic",
-    ),
-    f"Makefile: CI_GOALS is {CI_GOALS!r}, expected the reviewed seven",
-)
-check(
-    RELEASE_GOALS == ("release-rebuild", "release-test-long", "release-attiny202"),
-    f"Makefile: RELEASE_GOALS is {RELEASE_GOALS!r}, expected the reviewed three",
-)
 
 # A goal the release PATH runs and no workflow does: the artifact commit exists
 # only after an operator has committed by hand, which is a tree no workflow can
@@ -1337,41 +808,7 @@ check(
 # from a recipe like every other one, and it stays out of RELEASE_GOALS so that
 # list can keep meaning "what release.yml runs" and be checked against the file.
 RELEASE_PATH_GOALS = makefile_goal_list("RELEASE_PATH_GOALS")
-check(
-    RELEASE_PATH_GOALS == ("release-artifact-gates",),
-    f"Makefile: RELEASE_PATH_GOALS is {RELEASE_PATH_GOALS!r}, expected the "
-    "reviewed one",
-)
 DECLARED_GOALS = WORKFLOW_GOALS + RELEASE_PATH_GOALS
-
-
-def check_resource_routes(commands, surface, routes):
-    for goal, expected in routes.items():
-        matches = [parsed for parsed in commands if goal in parsed[0]]
-        check(
-            len(matches) == 1,
-            f"{surface}: resource consumer '{goal}' occurs {len(matches)} "
-            "time(s), expected 1",
-        )
-        if len(matches) != 1:
-            continue
-        goals, assignments, duplicate_assignment = matches[0]
-        actual = {
-            name: value for name, value in assignments.items()
-            if name in RESOURCE_POLICY
-        }
-        check(
-            not duplicate_assignment and actual == expected,
-            f"{surface}: resource consumer '{goal}' receives {actual!r}, "
-            f"expected {expected!r}",
-        )
-
-
-def non_resource_assignments(assignments):
-    return {
-        name: value for name, value in assignments.items()
-        if name not in RESOURCE_POLICY
-    }
 
 
 ci_doc = docs.get("ci.yml")
@@ -1388,10 +825,8 @@ NORMAL_NON_PR_CONDITION = (
     "github.event_name == 'workflow_dispatch'"
 )
 
-# Normal CI owns one fully provisioned mutation run. The hosted stress job must
-# retain the FULL workload without reaching mutation directly or through
-# test-long; test/test_workload_rebuild.sh independently proves what `stress`
-# expands to in Make.
+# Every Make invocation ci.yml makes, parsed once; the mutation-path check
+# below asks which of them reach test-mutation.
 ci_make_invocations = []
 if isinstance(ci_jobs, dict):
     for job_id, job in ci_jobs.items():
@@ -1532,8 +967,8 @@ for listing_goal, listing_variable in (
 
 
 # --- nothing reaches a gate except through a declared goal --------------------
-# Everything below this point asks whether the RIGHT goals run, in the right
-# order, with the right pins. This section asks the prior question, of both
+# The checks after this one ask whether the RIGHT goals run, under the right
+# policy. This section asks the prior question, of both
 # files at once: is there anything ELSE? A gate reached any other way -- a bare
 # `make test`, a suite under test/ run directly, a `-k` that turns a red gate
 # into a green job, a variable no goal declares -- has no local counterpart,
@@ -1736,6 +1171,54 @@ for workflow_name in ("ci.yml", "release.yml"):
     )
 
 
+# --- a gate cannot pass while failing, or be switched off --------------------
+# continue-on-error turns a red gate into a green run, and nothing in either
+# workflow needs it. A condition is how a gate is switched off without anyone
+# reading a failure: the one reviewed condition keeps the FULL and mutation runs
+# off pull requests, which they are too slow for, and no other condition may
+# sit on a job or step that runs a declared goal.
+for workflow_name, doc in sorted(docs.items()):
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    for job_id, job in sorted((jobs or {}).items()):
+        if not isinstance(job, dict):
+            continue
+        check(
+            job.get("continue-on-error", False) is False,
+            f"{workflow_name}: job '{job_id}' may continue after failure",
+        )
+        for idx, step in enumerate(job.get("steps") or [], 1):
+            if not isinstance(step, dict):
+                continue
+            check(
+                step.get("continue-on-error", False) is False,
+                f"{workflow_name}: job '{job_id}' step {idx} may continue after failure",
+            )
+            # An upload that finds nothing must fail: a job whose build quietly
+            # produced no image would otherwise upload nothing and pass.
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+                options = step.get("with")
+                check(
+                    isinstance(options, dict)
+                    and options.get("if-no-files-found") == "error",
+                    f"{workflow_name}: job '{job_id}' step {idx} uploads without "
+                    "if-no-files-found: error",
+                )
+            run = step.get("run")
+            if not (isinstance(run, str) and any(
+                    goal in DECLARED_GOALS
+                    for _, goals, _ in make_invocations(run) for goal in goals)):
+                continue
+            for owner, label in ((job, f"job '{job_id}'"), (step, f"step {idx}")):
+                condition = owner.get("if")
+                check(
+                    condition is None
+                    or normalized_condition(condition) == NORMAL_NON_PR_CONDITION,
+                    f"{workflow_name}: {label} runs a declared goal under "
+                    f"{condition!r}; the only reviewed condition is the "
+                    "pull-request exclusion",
+                )
+
+
 # --- the local mirror runs what ci.yml runs, by construction ------------------
 # Three links, none of which a comment can carry:
 #
@@ -1751,18 +1234,6 @@ for workflow_name in ("ci.yml", "release.yml"):
 # the files rather than a claim in a header.
 CI_LOCAL_SEQUENCE = makefile_goal_list("CI_LOCAL_SEQUENCE")
 CI_LOCAL_FOLDED = makefile_goal_list("CI_LOCAL_FOLDED")
-check(
-    CI_LOCAL_SEQUENCE == (
-        "ci-pic", "ci-build-classic",
-        "ci-attiny202-build", "ci-attiny202-target",
-    ),
-    f"Makefile: CI_LOCAL_SEQUENCE is {CI_LOCAL_SEQUENCE!r}, expected the "
-    "reviewed four, in the order a serial run needs them",
-)
-check(
-    CI_LOCAL_FOLDED == ("ci-verify", "ci-stress", "ci-mutation"),
-    f"Makefile: CI_LOCAL_FOLDED is {CI_LOCAL_FOLDED!r}, expected the reviewed three",
-)
 
 # The partition is enforced by a parse-time $(error), so it cannot be checked by
 # reading a value -- a broken partition produces no value at all. Break it on
@@ -1820,8 +1291,8 @@ if isinstance(ci_jobs, dict):
 # The same closing direction for release.yml. Not CI_GOALS: that workflow runs
 # different work -- it rebuilds from the tag and deliberately does not soak --
 # plus the one PIC gate both share, which is what makes "release re-runs the
-# identical PIC gate" true by construction. RELEASE_WORKFLOW_GOALS below holds
-# each of the four to its canonical step; this says there is nothing else.
+# identical PIC gate" true by construction. The bypass scan above holds each
+# step to its goal's declared pins; this says there is nothing else.
 release_yml_goals = set()
 for (workflow_name, job_id), goals in workflow_job_goals.items():
     if workflow_name == "release.yml":
@@ -1877,210 +1348,28 @@ if ci_local_present:
     )
 
 
-def prior_job_steps(job_id, step_index):
-    job = ci_jobs.get(job_id) if isinstance(ci_jobs, dict) else None
-    steps = job.get("steps", []) if isinstance(job, dict) else []
-    return [step for step in steps[:step_index - 1] if isinstance(step, dict)]
-
-
-def provisions_pic(job_id, step_index):
-    return any(
-        "scripts/assert_pic_toolchain.sh --github-actions" in str(step.get("run", ""))
-        for step in prior_job_steps(job_id, step_index)
-    )
-
-
-def provisions_attiny202(job_id, step_index):
-    required = (
-        "command -v cppcheck",
-        "third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202",
-        "third_party/attiny_dfp/include/avr/iotn202.h",
-    )
-    return any(
-        step.get("name") == "Assert ATtiny202 build + analysis inputs present"
-        and all(fragment in str(step.get("run", "")) for fragment in required)
-        for step in prior_job_steps(job_id, step_index)
-    )
-
-
-target_gate_routes = {
-    "test-pic-guard-mutations": ("pic", provisions_pic),
-    "test-attiny202-guard-mutations": ("attiny202", provisions_attiny202),
-}
-for gate, (expected_job, provisioned) in target_gate_routes.items():
-    routes = [
-        invocation for invocation in ci_make_invocations
-        if any(target_reaches(goal, gate) for goal in invocation[4][0])
-    ]
-    check(
-        len(routes) == 1,
-        f"ci.yml: target-toolchain gate '{gate}' is reached by {len(routes)} "
-        "Make invocations, expected 1",
-    )
-    if len(routes) == 1:
-        job_id, idx, _, _, _, _ = routes[0]
-        check(
-            job_id == expected_job,
-            f"ci.yml: target-toolchain gate '{gate}' is owned by job "
-            f"'{job_id}', expected '{expected_job}'",
-        )
-        check(
-            provisioned(job_id, idx),
-            f"ci.yml: job '{job_id}' does not provision {gate}'s inputs before use",
-        )
-
-check_resource_routes(
-    [invocation[4] for invocation in ci_make_invocations],
-    "ci.yml",
-    CI_RESOURCE_ROUTES,
+# --- the fail-closed assertions the ATtiny202 goals carry ---------------------
+# Every attiny202-* target exits 0 when the device pack or the simulator venv is
+# absent, so two assertions that used to be loose shell in the workflow are what
+# keep that job from passing on nothing: the build goal checks that every
+# declared image was actually built, and the target goal counts one soak PASS
+# per supported variant.
+build_lines = ci_goal_recipe("ci-attiny202-build")
+check(
+    any("XT_RELEASE_IMAGES" in line for line in build_lines)
+    and any("$(XT_BUILD_DIR)/$$hex" in line for line in build_lines),
+    "Makefile: ci-attiny202-build no longer asserts every declared image "
+    "was actually built",
+)
+target_lines = ci_goal_recipe("ci-attiny202-target")
+check(
+    any("SOAK PASS" in line for line in target_lines)
+    and any("XT_VARIANTS_SUPPORTED" in line for line in target_lines),
+    "Makefile: ci-attiny202-target no longer counts one soak PASS per "
+    "supported variant",
 )
 
-# Hosted CI must consume the same fail-closed ATtiny202 target aggregate as
-# release qualification. test-target-matrix independently executes the aggregate
-# with a fake Make and proves sim, fault, and lock-step remain required members;
-# this check owns only workflow routing and does not restate that orchestration.
-#
-# The job runs TWO goals, in order, and the split is load-bearing: the first
-# needs only the vendored ATtiny_DFP (compile the images and prove they exist),
-# the second needs the patched yasimavr venv (run them). The workflow
-# provisions the venv and caches the DFP between them, so a single folded goal
-# would spend a simulator build before knowing the image compiled.
-ATTINY_CI_GOALS = (
-    ("ci-attiny202-build", {
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "XT_STACK_MAX_FRAME": CI_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
-    }),
-    ("ci-attiny202-target", {
-        "XT_STATIC_RAM_LIMIT": CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-    }),
-)
 
-attiny_job = ci_jobs.get("attiny202") if isinstance(ci_jobs, dict) else None
-if check(isinstance(attiny_job, dict), "ci.yml: required job 'attiny202' is missing"):
-    attiny_step_index = {}
-    for goal, expected_pins in ATTINY_CI_GOALS:
-        invocations = [
-            invocation for invocation in ci_make_invocations
-            if goal in invocation[4][0]
-        ]
-        check(
-            len(invocations) == 1,
-            f"ci.yml: {goal} is invoked {len(invocations)} time(s), expected 1",
-        )
-        if len(invocations) != 1:
-            continue
-        job_id, idx, step, command_count, parsed, tokens = invocations[0]
-        attiny_step_index[goal] = idx
-        check(
-            job_id == "attiny202" and not parsed[2]
-            and parsed[:2] == ((goal,), expected_pins),
-            f"ci.yml: the {goal} invocation is not canonical: {' '.join(tokens)}",
-        )
-        check(
-            command_count == 1,
-            f"ci.yml: {goal} step {idx} must contain only its Make command",
-        )
-        check("if" not in step, f"ci.yml: {goal} step {idx} is conditional")
-        check(
-            step.get("continue-on-error", False) is False,
-            f"ci.yml: {goal} step {idx} may continue after failure",
-        )
-    check(
-        attiny_step_index.get("ci-attiny202-build") is not None
-        and attiny_step_index.get("ci-attiny202-target") is not None
-        and attiny_step_index["ci-attiny202-build"]
-        < attiny_step_index["ci-attiny202-target"],
-        "ci.yml: the ATtiny202 build gate must run before the target/soak gate, "
-        "so a broken image is found before a simulator is built",
-    )
-
-    # Every ATtiny202 gate must be reached THROUGH those goals. A step naming
-    # one directly would run it under a second, unpinned policy -- and the two
-    # component checks below (that the aggregate is not bypassed, and that the
-    # soak stays a separately counted lane) are why the aggregate is trusted.
-    direct_goals = {
-        "attiny202-test", "attiny202-test-target", "attiny202-soak",
-        "attiny202-sim", "attiny202-fault", "attiny202-lockstep",
-    }
-    direct_attiny = [
-        f"{invocation[0]} step {invocation[1]}: {goal}"
-        for invocation in ci_make_invocations
-        for goal in invocation[4][0] if goal in direct_goals
-    ]
-    check(
-        not direct_attiny,
-        "ci.yml: a job bypasses the ATtiny202 CI goals with direct calls: "
-        + ", ".join(direct_attiny),
-    )
-
-    build_recipe = ci_goal_commands("ci-attiny202-build")
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in build_recipe
-        ) == ((("attiny202-test",), {"STRICT_TOOLS": "1"}),)
-        and not any(duplicate for _, _, duplicate in build_recipe),
-        "Makefile: ci-attiny202-build no longer runs the pre-hardware gate "
-        "under STRICT_TOOLS=1: "
-        + " | ".join(" ".join(goals) for goals, _, _ in build_recipe),
-    )
-    check(
-        sorted(ci_goal_pins("ci-attiny202-build"))
-        == ["XT_STACK_MAX_FRAME", "XT_STATIC_RAM_LIMIT"],
-        "Makefile: ci-attiny202-build does not refuse every pin its callers "
-        f"supply: {ci_goal_pins('ci-attiny202-build')}",
-    )
-    check_resource_routes(
-        build_recipe, "Makefile ci-attiny202-build",
-        CI_GOAL_RESOURCE_ROUTES["ci-attiny202-build"],
-    )
-    # The assertion that used to be loose shell in the workflow. Without it a
-    # failed DFP fetch is a green run that produced no images, because every
-    # attiny202-* target exits 0 when the DFP is absent.
-    build_lines = ci_goal_recipe("ci-attiny202-build")
-    check(
-        any("XT_RELEASE_IMAGES" in line for line in build_lines)
-        and any("$(XT_BUILD_DIR)/$$hex" in line for line in build_lines),
-        "Makefile: ci-attiny202-build no longer asserts every declared image "
-        "was actually built",
-    )
-
-    target_recipe = ci_goal_commands("ci-attiny202-target")
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in target_recipe
-        ) == (
-            (("attiny202-test-target",), {"STRICT_TOOLS": "1"}),
-            (("attiny202-soak",), {
-                "XT_SOAK_DURATION_MS": "$(CI_XT_SOAK_DURATION_MS)",
-                "XT_SOAK_PROGRESS_INTERVAL_MS": "$(CI_XT_SOAK_DURATION_MS)",
-            }),
-        )
-        and not any(duplicate for _, _, duplicate in target_recipe),
-        "Makefile: ci-attiny202-target no longer runs the fail-closed aggregate "
-        "and one separately routed soak: "
-        + " | ".join(" ".join(goals) for goals, _, _ in target_recipe),
-    )
-    check(
-        ci_goal_pins("ci-attiny202-target") == ["XT_STATIC_RAM_LIMIT"],
-        "Makefile: ci-attiny202-target does not refuse every pin its callers "
-        f"supply: {ci_goal_pins('ci-attiny202-target')}",
-    )
-    check_resource_routes(
-        target_recipe, "Makefile ci-attiny202-target",
-        CI_GOAL_RESOURCE_ROUTES["ci-attiny202-target"],
-    )
-    # The other assertion the workflow carried as loose shell: a soak that skips
-    # a variant still exits 0, so the PASS count is the only thing that proves
-    # the matrix was covered. XT_VARIANTS_SUPPORTED is the immutable expectation.
-    target_lines = ci_goal_recipe("ci-attiny202-target")
-    check(
-        any("SOAK PASS" in line for line in target_lines)
-        and any("XT_VARIANTS_SUPPORTED" in line for line in target_lines),
-        "Makefile: ci-attiny202-target no longer counts one soak PASS per "
-        "supported variant",
-    )
 # Exactly one normal-CI path may run mutants, and it must be the fully
 # provisioned one. The question is asked by REACHABILITY, not by goal name: a
 # wrapper hides the inner goal, and `test-long` carries mutation too, so
@@ -2094,122 +1383,6 @@ check(
     f"ci.yml: {len(mutation_invocations)} Make invocations reach test-mutation, "
     "expected 1",
 )
-if len(mutation_invocations) == 1:
-    job_id, idx, step, command_count, parsed, tokens = mutation_invocations[0]
-    expected_mutation_pins = dict(XC8_PIC_REFS)
-    expected_mutation_pins["XT_STATIC_RAM_LIMIT"] = \
-        CI_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"]
-    expected_mutation_pins["PIC12F675_DATA_LIMIT"] = \
-        CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"]
-    check(
-        job_id == "pic" and not parsed[2]
-        and parsed[:2] == (("ci-mutation",), expected_mutation_pins),
-        "ci.yml: the one mutation command is not the canonical pinned "
-        f"ci-mutation invocation: {' '.join(tokens)}",
-    )
-    check(
-        command_count == 1,
-        f"ci.yml: pic mutation step {idx} must contain only its Make command",
-    )
-    check(
-        normalized_condition(step.get("if")) == NORMAL_NON_PR_CONDITION,
-        "ci.yml: pic mutation gate does not use the exact "
-        "push/schedule/workflow_dispatch condition",
-    )
-    check(
-        step.get("continue-on-error", False) is False,
-        "ci.yml: pic mutation gate may continue after failure",
-    )
-
-    # The fail-closed policy the step used to carry now lives in the recipe.
-    # Asserting nothing here would retire the one check that makes this a gate
-    # rather than a report: a skipped mutant must fail, on every substrate.
-    mutation_recipe = ci_goal_commands("ci-mutation")
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in mutation_recipe
-        ) == ((
-            ("test-mutation",),
-            dict(MAKE_PIC_REFS, STRICT_TOOLS="1", MUTATION_ALLOW_SKIP="0"),
-        ),)
-        and not any(duplicate for _, _, duplicate in mutation_recipe),
-        "Makefile: ci-mutation is not the canonical fail-closed mutation run: "
-        + " | ".join(" ".join(goals) for goals, _, _ in mutation_recipe),
-    )
-    check(
-        sorted(ci_goal_pins("ci-mutation")) == sorted(
-            list(XC8_PIC_REFS) + ["XT_STATIC_RAM_LIMIT", "PIC12F675_DATA_LIMIT"]
-        ),
-        "Makefile: ci-mutation does not refuse every pin its callers supply: "
-        f"{ci_goal_pins('ci-mutation')}",
-    )
-    check_resource_routes(
-        mutation_recipe, "Makefile ci-mutation", CI_GOAL_RESOURCE_ROUTES["ci-mutation"]
-    )
-
-stress_job = ci_jobs.get("stress") if isinstance(ci_jobs, dict) else None
-if check(isinstance(stress_job, dict), "ci.yml: required job 'stress' is missing"):
-    check(
-        normalized_condition(stress_job.get("if")) == NORMAL_NON_PR_CONDITION,
-        "ci.yml: stress job does not use the exact "
-        "push/schedule/workflow_dispatch condition",
-    )
-    check(
-        stress_job.get("continue-on-error", False) is False,
-        "ci.yml: stress job may continue after failure",
-    )
-    stress_invocations = [
-        invocation for invocation in ci_make_invocations
-        if invocation[0] == "stress"
-    ]
-    check(
-        len(stress_invocations) == 1,
-        f"ci.yml: stress job has {len(stress_invocations)} Make invocations, expected 1",
-    )
-    if len(stress_invocations) == 1:
-        _, idx, step, command_count, parsed, tokens = stress_invocations[0]
-        check(
-            not parsed[2] and parsed[:2] == (("ci-stress",), {}),
-            "ci.yml: stress job does not invoke exactly the ci-stress goal "
-            f"with no overrides: {' '.join(tokens)}",
-        )
-        verify_recipe = ci_goal_recipe("ci-verify")
-        check(
-            any(line.split()[1:] == ["test", "STRICT_TOOLS=1"]
-                for line in verify_recipe if line.startswith("$(MAKE) ")),
-            "Makefile: ci-verify does not invoke the default suite under "
-            f"STRICT_TOOLS=1: {verify_recipe}",
-        )
-        stress_recipe = ci_goal_recipe("ci-stress")
-        check(
-            any(line.split()[1:] == ["stress", "STRICT_TOOLS=1"]
-                for line in stress_recipe if line.startswith("$(MAKE) ")),
-            "Makefile: ci-stress does not invoke the canonical mutation-free "
-            f"FULL aggregate under STRICT_TOOLS=1: {stress_recipe}",
-        )
-        check(
-            not any("MUTATION_ALLOW_SKIP" in line for line in stress_recipe),
-            "Makefile: mutation-free ci-stress still configures mutation skip policy",
-        )
-        check(
-            command_count == 1,
-            f"ci.yml: stress suite step {idx} must contain only its Make command",
-        )
-        check(
-            step.get("continue-on-error", False) is False,
-            "ci.yml: stress suite may continue after failure",
-        )
-    # Membership in the parsed goal tuple, not a substring: the FULL aggregate
-    # is now reached through ci-stress, and only that goal may reach it.
-    all_stress_invocations = [
-        invocation for invocation in ci_make_invocations
-        if "ci-stress" in invocation[4][0] or "stress" in invocation[4][0]
-    ]
-    check(
-        all_stress_invocations == stress_invocations,
-        "ci.yml: another normal-CI job invokes the FULL stress aggregate",
-    )
 
 # A matrix row selects its work through an expression, which literal command
 # parsing cannot resolve. It used to be pinned here as a reviewed list of
@@ -2241,261 +1414,25 @@ if check(
         "which targets a part builds",
     )
 
-    build_invocations = [
-        invocation for invocation in ci_make_invocations
-        if "ci-build-classic" in invocation[4][0]
-    ]
-    check(
-        len(build_invocations) == 1,
-        f"ci.yml: ci-build-classic is invoked {len(build_invocations)} time(s), "
-        "expected 1",
-    )
-    if len(build_invocations) == 1:
-        job_id, idx, step, command_count, parsed, tokens = build_invocations[0]
-        check(
-            job_id == "build-matrix" and not parsed[2]
-            and parsed[:2] == (
-                ("ci-build-classic",), {"CI_CLASSIC_PART": "${{ matrix.mcu }}"}
-            ),
-            "ci.yml: the build-matrix invocation is not the canonical pinned "
-            f"ci-build-classic command: {' '.join(tokens)}",
-        )
-        check(
-            command_count == 1,
-            f"ci.yml: build-matrix step {idx} must contain only its Make command",
-        )
-        check("if" not in step, f"ci.yml: build-matrix step {idx} is conditional")
-        check(
-            step.get("continue-on-error", False) is False,
-            f"ci.yml: build-matrix step {idx} may continue after failure",
-        )
 
-    # No job may name a classic part target directly: the pin is what makes an
-    # unsupported part fail loudly instead of expanding to some other goal.
-    direct_classic = [
-        f"{invocation[0]} step {invocation[1]}: {goal}"
-        for invocation in ci_make_invocations
-        for goal in invocation[4][0]
-        if goal in declared_parts or goal in {f"{p}-size" for p in declared_parts}
-    ]
-    check(
-        not direct_classic,
-        "ci.yml: a job bypasses ci-build-classic with a direct part target: "
-        + ", ".join(direct_classic),
+# ci-local.sh stands in for every job, so it runs them strict as well.
+ci_local_text = "\n".join(lines) if ci_local_present else ""
+if ci_local_present:
+    strict_exports = sum(
+        tokens == ["export", "STRICT_TOOLS=1"] for tokens in shell_tokens(ci_local_text)
     )
-
-    build_recipe = ci_goal_commands("ci-build-classic")
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in build_recipe
-        ) == (
-            (("$(CI_CLASSIC_PART)",), {}),
-            (("$(CI_CLASSIC_PART)-size",), {"AVR_REBUILD_PREREQ": ""}),
-        )
-        and not any(duplicate for _, _, duplicate in build_recipe),
-        "Makefile: ci-build-classic no longer builds the part and re-reports "
-        "its size without rebuilding: "
-        + " | ".join(" ".join(goals) for goals, _, _ in build_recipe),
-    )
-    check(
-        ci_goal_pins("ci-build-classic") == ["CI_CLASSIC_PART"],
-        "Makefile: ci-build-classic does not refuse the pin its callers supply: "
-        f"{ci_goal_pins('ci-build-classic')}",
-    )
-    # The pin reaches a sub-make as a goal name, so it must be checked against
-    # the declared set FIRST. Without this the recipe would run whatever it was
-    # handed.
-    check(
-        any("CI_CLASSIC_PARTS" in line for line in ci_goal_recipe("ci-build-classic")),
-        "Makefile: ci-build-classic does not validate CI_CLASSIC_PART against "
-        "CI_CLASSIC_PARTS before using it as a goal",
-    )
-pic_job = ci_jobs.get("pic") if isinstance(ci_jobs, dict) else None
-if check(isinstance(pic_job, dict), "ci.yml: required job 'pic' is missing"):
-    check("if" not in pic_job, "ci.yml: job 'pic' must be unconditional")
-    check(
-        pic_job.get("continue-on-error", False) is False,
-        "ci.yml: job 'pic' may continue after failure",
-    )
-    # The job invokes ONE goal. What that goal runs is asserted against the
-    # recipe below, so the boundary is described once and both the hosted job
-    # and scripts/ci-local.sh are held to the same description.
-    ci_pic_invocations = [
-        invocation for invocation in ci_make_invocations
-        if "ci-pic" in invocation[4][0]
-    ]
-    check(
-        len(ci_pic_invocations) == 1,
-        f"ci.yml: ci-pic is invoked {len(ci_pic_invocations)} time(s), expected 1",
-    )
-    if len(ci_pic_invocations) == 1:
-        job_id, idx, step, command_count, parsed, tokens = ci_pic_invocations[0]
-        expected_pic_pins = dict(XC8_PIC_REFS)
-        expected_pic_pins["PIC12F675_DATA_LIMIT"] = \
-            CI_RESOURCE_REFS["PIC12F675_DATA_LIMIT"]
-        check(
-            job_id == "pic" and not parsed[2]
-            and parsed[:2] == (("ci-pic",), expected_pic_pins),
-            "ci.yml: the PIC gate invocation is not the canonical pinned "
-            f"ci-pic command: {' '.join(tokens)}",
-        )
-        check(
-            command_count == 1,
-            f"ci.yml: pic gate step {idx} must contain only its Make command",
-        )
-        check("if" not in step, f"ci.yml: pic gate step {idx} is conditional")
-        check(
-            step.get("continue-on-error", False) is False,
-            f"ci.yml: pic gate step {idx} may continue after failure",
-        )
-
-    # Every PIC aggregate must be reached THROUGH the goal. A step that named
-    # one directly would run the same gate under a second, unpinned policy.
-    direct_pic_invocations = [
-        invocation for invocation in ci_make_invocations
-        if any(goal in PIC_GOALS for goal in invocation[4][0])
-    ]
-    check(
-        not direct_pic_invocations,
-        "ci.yml: a job bypasses ci-pic with direct PIC aggregate calls: "
-        + ", ".join(
-            f"{invocation[0]} step {invocation[1]}"
-            for invocation in direct_pic_invocations
-        ),
-    )
-
-    # ...and the goal itself must still be the reviewed five-process boundary,
-    # forwarding the caller's pins and refusing to run without them.
-    recipe_commands = ci_goal_commands("ci-pic")
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in recipe_commands
-        ) == pic_commands(MAKE_PIC_REFS)
-        and not any(duplicate for _, _, duplicate in recipe_commands),
-        "Makefile: ci-pic no longer runs the reviewed five PIC commands: "
-        + " | ".join(" ".join(goals) for goals, _, _ in recipe_commands),
-    )
-    check(
-        sorted(ci_goal_pins("ci-pic")) == sorted(
-            list(XC8_PIC_REFS) + ["PIC12F675_DATA_LIMIT"]
-        ),
-        "Makefile: ci-pic does not refuse every pin its callers supply: "
-        f"{ci_goal_pins('ci-pic')}",
-    )
-    check_resource_routes(
-        recipe_commands, "Makefile ci-pic", CI_GOAL_RESOURCE_ROUTES["ci-pic"]
-    )
-
-    expected_uploads = {
-        "firmware-pic10f322": "build_pic10f322/*.hex",
-        "firmware-pic10f320": "build_pic10f320/*.hex",
-        "firmware-pic12f675": "build_pic12f675/*.hex",
-    }
-    actual_uploads = []
-    for step in pic_job.get("steps") or []:
-        if not isinstance(step, dict) \
-                or not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
-            continue
-        options = step.get("with") or {}
-        actual_uploads.append((
-            options.get("name"), options.get("path"),
-            options.get("if-no-files-found"),
-        ))
-    check(
-        len(actual_uploads) == len(expected_uploads),
-        f"ci.yml: PIC job has {len(actual_uploads)} firmware uploads, "
-        f"expected {len(expected_uploads)}",
-    )
-    for artifact, path in expected_uploads.items():
-        matches = [upload for upload in actual_uploads if upload[0] == artifact]
-        check(
-            matches == [(artifact, path, "error")],
-            f"ci.yml: PIC artifact {artifact} must upload {path} exactly once "
-            "with if-no-files-found: error",
-        )
-
-    for job_id in ("verify", "attiny202", "build-matrix", "stress"):
-        job = ci_jobs.get(job_id)
-        needs = job.get("needs", []) if isinstance(job, dict) else []
-        if isinstance(needs, str):
-            needs = [needs]
-        check(
-            isinstance(needs, list) and "pic" in needs,
-            f"ci.yml: job '{job_id}' must declare needs: pic",
-        )
-
-    # Local CI now invokes the SAME goal the hosted job does, so the
-    # five-process boundary is asserted once, above, against ci-pic's recipe.
-    # What remains local is which installation to point it at: the paths this
-    # script resolved in its own preflight, plus the production data limit.
-    local_shell = shell_tokens("\n".join(lines))
-    local_invocations = []
-    for tokens in local_shell:
-        if len(tokens) >= 4 and tokens[0] == "run_step" \
-                and tokens[1].startswith("pic job:") and tokens[2] == "make":
-            parsed = make_command(tokens[2:])
-            if parsed is not None:
-                local_invocations.append(parsed)
-    check(
-        len(local_invocations) == 1,
-        f"scripts/ci-local.sh: the PIC job runs {len(local_invocations)} Make "
-        "commands, expected 1",
-    )
-    if len(local_invocations) == 1:
-        goals, assignments, duplicate_assignment = local_invocations[0]
-        expected_local_pins = dict(CI_LOCAL_PIC_REFS)
-        expected_local_pins["PIC12F675_DATA_LIMIT"] = "$CI_PIC12F675_DATA_LIMIT"
-        check(
-            not duplicate_assignment
-            and (goals, assignments) == (("ci-pic",), expected_local_pins),
-            "scripts/ci-local.sh: noncanonical PIC job command: make "
-            f"{' '.join(goals)}"
-            + "".join(f" {key}={value}" for key, value in assignments.items()),
-        )
-    strict_exports = sum(tokens == ["export", "STRICT_TOOLS=1"] for tokens in local_shell)
     check(
         strict_exports == 1,
         f"scripts/ci-local.sh: export STRICT_TOOLS=1 occurs {strict_exports} "
         "time(s), expected 1",
     )
 
-
-def check_shell_resource_constants(text, surface, prefix):
-    expected = {f"{prefix}_{name}": value for name, value in RESOURCE_POLICY.items()}
-    actual = {}
-    for name in expected:
-        matches = re.findall(
-            rf"(?m)^readonly {re.escape(name)}=([^\s#]+)\s*$", text
-        )
-        actual[name] = matches[0] if len(matches) == 1 else matches
-    check(
-        actual == expected,
-        f"{surface}: resource-policy pins are {actual!r}, expected {expected!r}",
-    )
-
-
-ci_local_text = "\n".join(lines)
-check_shell_resource_constants(ci_local_text, "scripts/ci-local.sh", "CI")
+release_script_text = ""
 
 release_script_path = os.path.join(root, "scripts", "make-release.sh")
 if check(os.path.isfile(release_script_path), "scripts/make-release.sh: missing"):
     with open(release_script_path, encoding="utf-8") as fh:
         release_script_text = fh.read()
-    check_shell_resource_constants(
-        release_script_text, "scripts/make-release.sh", "RELEASE"
-    )
-    release_script_commands = []
-    for tokens in shell_tokens(release_script_text):
-        parsed = make_command(tokens)
-        if parsed is not None:
-            release_script_commands.append(parsed)
-    check_resource_routes(
-        release_script_commands,
-        "scripts/make-release.sh",
-        MAKE_RELEASE_RESOURCE_ROUTES,
-    )
 
     # The local release pipeline must COVER the public attestation. Every gate
     # release.yml runs on the tag has to have run here first, or a release
@@ -2542,338 +1479,221 @@ if check(os.path.isfile(release_script_path), "scripts/make-release.sh: missing"
         )
 
 
-# The public release attestation runs three goals. Two are release-specific
-# because release runs DIFFERENT work from CI -- it rebuilds from the tag, and
-# it does not soak. The third is ci-pic itself: normal CI and the attestation
-# re-run the identical PIC gate, which is the strongest form of the parity this
-# whole item exists for, and it is now true by construction rather than by two
-# command lists happening to match.
-RELEASE_WORKFLOW_GOALS = (
-    ("release-rebuild", {
-        **XC8_PIC_REFS,
-        "XT_STATIC_RAM_LIMIT": RELEASE_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "PIC12F675_DATA_LIMIT": RELEASE_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
-    }),
-    ("release-test-long", {
-        "XT_STATIC_RAM_LIMIT": RELEASE_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "PIC12F675_DATA_LIMIT": RELEASE_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
-    }),
-    ("release-attiny202", {
-        "XT_STATIC_RAM_LIMIT": RELEASE_RESOURCE_REFS["XT_STATIC_RAM_LIMIT"],
-        "XT_STACK_MAX_FRAME": RELEASE_RESOURCE_REFS["XT_STACK_MAX_FRAME"],
-    }),
-    ("ci-pic", {
-        **XC8_PIC_REFS,
-        "PIC12F675_DATA_LIMIT": RELEASE_RESOURCE_REFS["PIC12F675_DATA_LIMIT"],
-    }),
-)
+# --- the resource-policy pins agree wherever they are carried -----------------
+# The static-RAM, stack-frame and PIC12F675 data ceilings are pinned outside the
+# Makefile on purpose: each caller states its own value, so a Makefile default
+# that moves fails the gate instead of agreeing with itself. That works only
+# while every caller states the SAME value. Four surfaces carry them -- ci.yml
+# and release.yml as workflow env, ci-local.sh and make-release.sh as readonly
+# constants -- and the pin names are read from ci.yml rather than listed here,
+# so adding a pin needs no edit to this file.
+def workflow_pins(workflow_name, prefix):
+    doc = docs.get(workflow_name)
+    env = doc.get("env") if isinstance(doc, dict) else None
+    if not isinstance(env, dict):
+        return {}
+    return {
+        name[len(prefix):]: str(value)
+        for name, value in env.items() if name.startswith(prefix)
+    }
 
-if check(isinstance(release_job, dict), "release.yml: required job 'release' is missing"):
-    release_make_commands = []
-    release_goal_steps = {}
-    for idx, step in enumerate(release_job.get("steps") or [], 1):
-        run = step.get("run") if isinstance(step, dict) else None
-        commands = shell_tokens(run) if isinstance(run, str) else []
-        for tokens in commands:
-            parsed = make_command(tokens)
-            if parsed is None:
-                continue
-            release_make_commands.append(parsed)
-            for goal in parsed[0]:
-                if goal in WORKFLOW_GOALS:
-                    release_goal_steps.setdefault(goal, []).append(
-                        (idx, step, len(commands), parsed, tokens)
-                    )
 
-    check_resource_routes(
-        release_make_commands,
-        "release.yml",
-        RELEASE_RESOURCE_ROUTES,
-    )
+def readonly_pins(text, prefix):
+    return {
+        match.group(1): match.group(2)
+        for match in re.finditer(
+            rf"(?m)^readonly {prefix}([A-Z][A-Z0-9_]*)=([^\s#]+)\s*$", text)
+    }
 
-    for goal, expected_pins in RELEASE_WORKFLOW_GOALS:
-        invocations = release_goal_steps.get(goal, [])
-        check(
-            len(invocations) == 1,
-            f"release.yml: {goal} is invoked {len(invocations)} time(s), expected 1",
-        )
-        if len(invocations) != 1:
-            continue
-        idx, step, command_count, parsed, tokens = invocations[0]
-        check(
-            not parsed[2] and parsed[:2] == ((goal,), expected_pins),
-            f"release.yml: the {goal} invocation is not canonical: {' '.join(tokens)}",
-        )
-        check(
-            command_count == 1,
-            f"release.yml: {goal} step {idx} must contain only its Make command",
-        )
-        check("if" not in step, f"release.yml: {goal} step {idx} is conditional")
-        check(
-            step.get("continue-on-error", False) is False,
-            f"release.yml: {goal} step {idx} may continue after failure",
-        )
 
-    # The rebuild must reproduce from NOTHING, and must cover the same parts the
-    # Makefile declares. "The committed images reproduce bit-for-bit" is a claim
-    # about a clean build; a rebuild that skipped the clean would compare the
-    # committed images against whatever happened to be on disk.
-    rebuild_recipe = ci_goal_commands("release-rebuild")
-    check(
-        rebuild_recipe and rebuild_recipe[0][0] == ("clean",),
-        "Makefile: release-rebuild does not start from a clean tree: "
-        + " | ".join(" ".join(goals) for goals, _, _ in rebuild_recipe),
-    )
-    check(
-        any("$(CI_CLASSIC_PARTS)" in line for line in ci_goal_recipe("release-rebuild")),
-        "Makefile: release-rebuild names its own classic-AVR set instead of "
-        "the declared CI_CLASSIC_PARTS",
-    )
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in rebuild_recipe
-        ) == (
-            (("clean",), {}),
-            (("$(CI_CLASSIC_PARTS)",), {}),
-            (("attiny202",), {"STRICT_TOOLS": "1"}),
-            (("pic10f322",), dict(PIC_CC=MAKE_PIC_REFS["PIC_CC"],
-                                  PIC_DFP=MAKE_PIC_REFS["PIC_DFP"])),
-            (("pic10f320-variants",),
-             dict(PIC10F320_CC=MAKE_PIC_REFS["PIC10F320_CC"],
-                  PIC10F320_DFP=MAKE_PIC_REFS["PIC10F320_DFP"])),
-            (("pic12f675",), dict(PIC_CC=MAKE_PIC_REFS["PIC_CC"],
-                                  PIC_DFP=MAKE_PIC_REFS["PIC_DFP"])),
-        )
-        and not any(duplicate for _, _, duplicate in rebuild_recipe),
-        "Makefile: release-rebuild no longer rebuilds the reviewed release image "
-        "set: " + " | ".join(" ".join(goals) for goals, _, _ in rebuild_recipe),
-    )
-
-    # The whole reason release-test-long is not ci-verify or a bare test-long.
-    check(
-        any("PIC12F675_FLASH_IMAGES=build" in line
-            for line in ci_goal_recipe("release-test-long")),
-        "Makefile: release-test-long no longer points the flashing-helper gate "
-        "at the images rebuilt from the tagged source",
-    )
-
-    # Release does NOT soak: qualification soaks belong to make-release.sh and
-    # run for the full duration before the tag exists. A 5-minute smoke here
-    # would attest to something weaker than the release already claims.
-    attiny_release_recipe = ci_goal_commands("release-attiny202")
-    check(
-        tuple(
-            (goals, non_resource_assignments(assignments))
-            for goals, assignments, _ in attiny_release_recipe
-        ) == (
-            (("attiny202-test",), {"STRICT_TOOLS": "1"}),
-            (("attiny202-test-target",), {"STRICT_TOOLS": "1"}),
-        )
-        and not any(duplicate for _, _, duplicate in attiny_release_recipe),
-        "Makefile: release-attiny202 no longer runs exactly the pre-hardware "
-        "gate and the fail-closed target aggregate: "
-        + " | ".join(" ".join(goals) for goals, _, _ in attiny_release_recipe),
-    )
-
-    for goal in RELEASE_GOALS:
-        check_resource_routes(
-            ci_goal_commands(goal), f"Makefile {goal}",
-            CI_GOAL_RESOURCE_ROUTES[goal],
-        )
-
-    # --- the artifact-commit verifier's composition -------------------------
-    # The last gate composition in the release path that lived in a shell
-    # script: `make $gates STRICT_TOOLS=1 <pins>`, assembled by
-    # verify-release-artifact-commit.sh and therefore readable by nothing.
-    # It is now a goal, and these are the three properties that made it worth
-    # moving: WHICH gates (the declared list, by name, so the two cannot
-    # diverge), WHAT policy (strictness, the whole of what the goal owns), and
-    # WHAT ELSE (nothing).
-    artifact_recipe = ci_goal_commands("release-artifact-gates")
-    check(
-        artifact_recipe == [
-            (("$(RELEASE_ARTIFACT_GATES)",), {"STRICT_TOOLS": "1"}, False),
-        ],
-        "Makefile: release-artifact-gates no longer runs exactly "
-        "$(RELEASE_ARTIFACT_GATES) under STRICT_TOOLS=1: "
-        + " | ".join(
-            " ".join(goals) + "".join(f" {k}={v}" for k, v in a.items())
-            for goals, a, _ in artifact_recipe
-        ),
-    )
-    # No pins, and that is an assertion. The script used to hand these gates
-    # release.yml's three independent pins; not one of the eight reads any of
-    # them, in its recipe or in the script it runs, and what they did do was
-    # reach the gates' own nested Makes as ENVIRONMENT origin -- unreviewed
-    # build input by the release guard's own definition, which is why
-    # test-release-preflight (a member of this list) scrubs inherited
-    # build-input names before its first case. A gate added here that genuinely
-    # reads a pin must be given it deliberately, and fail this check first.
-    artifact_pins = ci_goal_pins("release-artifact-gates")
-    check(
-        artifact_pins == [],
-        f"Makefile: release-artifact-gates requires pin(s) {artifact_pins!r}; "
-        "no gate it runs reads one",
-    )
-    # An empty inventory must refuse, not run zero gates and report the commit
-    # publishable. The script checks this too, earlier and with a friendlier
-    # diagnostic; the goal is what any other caller gets.
-    check(
-        any("RELEASE_ARTIFACT_GATES" in line and "$(error" in line
-            for line in ci_goal_recipe("release-artifact-gates")),
-        "Makefile: release-artifact-gates does not refuse an empty "
-        "RELEASE_ARTIFACT_GATES, so it would prove a release publishable by "
-        "running nothing",
-    )
-
-    # The script must reach the gates through that goal and no other way -- the
-    # same rule every workflow step is held to. The workflow step parser is not
-    # reusable here: it joins continuations into one logical line, and this
-    # script's `make ... || die "<multi-line message>"` leaves an unbalanced
-    # quote that shlex refuses, so every command would silently drop out and the
-    # check would pass on an empty list. Scan lines instead, skipping comments
-    # and requiring `make` in command position -- at the start of a line or
-    # right after `$(`. Prose is full of the word: the header says
-    # "make-release.sh", and the printed handoff explains that no workflow can
-    # "make two separate GitHub API operations atomic", which a looser scan
-    # reported as a Make goal named "two". print- is a variable read, not
-    # dispatch, and is excluded by name.
-    verifier_path = os.path.join(root, "scripts", "verify-release-artifact-commit.sh")
-    if check(os.path.isfile(verifier_path),
-             "scripts/verify-release-artifact-commit.sh: missing"):
-        with open(verifier_path, encoding="utf-8") as fh:
-            verifier_text = fh.read()
-        verifier_goals = []
-        for raw in verifier_text.splitlines():
-            if raw.lstrip().startswith("#"):
-                continue
-            for match in re.finditer(r"(?:^|\$\()\s*make\s+(.*)$", raw):
-                words = [
-                    word.strip("()\"'")
-                    for word in match.group(1).split()
-                    if word != "\\" and not word.startswith("-")
-                    and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word)
-                ]
-                if words:
-                    verifier_goals.append(words[0])
-        dispatched = [g for g in verifier_goals if not g.startswith("print-")]
-        check(
-            dispatched == ["release-artifact-gates"],
-            "scripts/verify-release-artifact-commit.sh must dispatch the gates "
-            "through release-artifact-gates and nothing else; it runs: "
-            + ", ".join(dispatched or ["(nothing -- did the scan break?)"]),
-        )
-        # The pins are gone from the script, not merely unused by the goal:
-        # re-adding the release.yml parse would restore an environment-origin
-        # leak into every nested Make these gates run. Scoped to the dispatch
-        # section, because the handoff below it legitimately names
-        # RELEASE_SIGNING_FINGERPRINT.
-        dispatch_section = verifier_text.split("# 3. The gates")[-1].split("# 4. Hand off")[0]
-        leaked = sorted(set(re.findall(r"\bRELEASE_[A-Z0-9_]+\b", dispatch_section))
-                        - {"RELEASE_ARTIFACT_GATES"})
-        check(
-            not leaked,
-            "scripts/verify-release-artifact-commit.sh hands the gates "
-            f"{leaked!r} again; no gate it runs consumes one",
-        )
-
-    # Nothing in release.yml may reach a gate except through a declared goal.
-    release_direct = [
-        f"step {idx}: {goal}"
-        for idx, step in enumerate(release_job.get("steps") or [], 1)
-        for tokens in (shell_tokens(step.get("run"))
-                       if isinstance(step, dict) and isinstance(step.get("run"), str)
-                       else [])
-        for parsed in (make_command(tokens),) if parsed is not None
-        for goal in parsed[0]
-        if goal in PIC_GOALS
-        or goal in {"test-long", "attiny202-test", "attiny202-test-target"}
-    ]
-    check(
-        not release_direct,
-        "release.yml: a step bypasses the declared goals with a direct gate "
-        "call: " + ", ".join(release_direct),
-    )
-
-# Normal CI must invoke the same strict PIC capability helper as ci-local, with
-# every independently selectable tool/header surface explicit. The helper's own
-# behavioral regression proves the three-header and malformed-input contracts;
-# this check owns only unconditional workflow routing and complete argv.
-ci_doc = docs.get("ci.yml")
-ci_jobs = ci_doc.get("jobs") if isinstance(ci_doc, dict) else None
-pic_job = ci_jobs.get("pic") if isinstance(ci_jobs, dict) else None
-pic_steps = pic_job.get("steps", []) if isinstance(pic_job, dict) else []
-pic_assert_steps = [
-    (idx, step) for idx, step in enumerate(pic_steps)
-    if isinstance(step, dict)
-    and step.get("name") == "Assert PIC toolchain present (fail loud, do NOT skip)"
-]
+ci_pins = workflow_pins("ci.yml", "CI_")
+release_pins = workflow_pins("release.yml", "RELEASE_")
+check(bool(ci_pins), "ci.yml: the workflow env carries no CI_* resource-policy pins")
 check(
-    len(pic_assert_steps) == 1,
-    f"ci.yml: found {len(pic_assert_steps)} canonical PIC assertion steps, expected 1",
+    set(release_pins) == set(ci_pins),
+    f"release.yml pins {sorted(release_pins)!r} but ci.yml pins {sorted(ci_pins)!r}",
 )
-if len(pic_assert_steps) == 1:
-    assert_idx, step = pic_assert_steps[0]
-    run = step.get("run")
-    required_fragments = (
-        "scripts/assert_pic_toolchain.sh --github-actions",
-        '--pic-cc "${XC8_DIR}/bin/xc8-cc"',
-        '--pic-dfp "${XC8_DFP_ROOT}/xc8"',
-        '--pic10f320-cc "${XC8_DIR}/bin/xc8-cc"',
-        '--pic10f320-dfp "${XC8_DFP_ROOT}/xc8"',
-        "--gpsim gpsim",
-        "--cppcheck cppcheck",
-        "--pic-cxx c++",
-        "--pic-gpsim-inc /usr/include/gpsim",
-        "--pic10f320-cxx c++",
-        "--pic10f320-gpsim-inc /usr/include/gpsim",
-    )
-    check(isinstance(run, str), "ci.yml: PIC assertion step has no run body")
-    if isinstance(run, str):
-        for fragment in required_fragments:
-            check(
-                run.count(fragment) == 1,
-                f"ci.yml: PIC assertion must contain {fragment!r} exactly once",
-            )
-    check("if" not in step, "ci.yml: PIC toolchain assertion is conditional")
-    check(
-        step.get("continue-on-error", False) is False,
-        "ci.yml: PIC toolchain assertion may continue after failure",
-    )
-    verify_indices = [
-        idx for idx, candidate in enumerate(pic_steps)
-        if isinstance(candidate, dict)
-        and candidate.get("run") == "scripts/verify_pic_toolchain_cache.sh"
-    ]
-    save_indices = [
-        idx for idx, candidate in enumerate(pic_steps)
-        if isinstance(candidate, dict)
-        and candidate.get("name") == "Save XC8 + DFP cache"
-    ]
-    # Found by what the step RUNS, not by its name: the gate steps were folded
-    # into one goal invocation once already, and a name-matched search would
-    # have gone quietly vacuous rather than failing.
-    first_pic_gate = [
-        idx for idx, candidate in enumerate(pic_steps)
-        if isinstance(candidate, dict)
-        and any(
-            make_command(tokens) is not None and "ci-pic" in make_command(tokens)[0]
-            for tokens in shell_tokens(str(candidate.get("run", "")))
+for surface, pins in (
+    ("release.yml", release_pins),
+    ("scripts/ci-local.sh", readonly_pins(ci_local_text, "CI_")),
+    ("scripts/make-release.sh", readonly_pins(release_script_text, "RELEASE_")),
+):
+    for name, value in sorted(ci_pins.items()):
+        check(
+            pins.get(name) == value,
+            f"{surface}: {name} is {pins.get(name)!r}, but ci.yml pins {value!r}",
         )
-    ]
+
+
+# The rebuild must reproduce from NOTHING, and must cover the same parts the
+# Makefile declares. "The committed images reproduce bit-for-bit" is a claim
+# about a clean build; a rebuild that skipped the clean would compare the
+# committed images against whatever happened to be on disk.
+rebuild_recipe = ci_goal_commands("release-rebuild")
+check(
+    rebuild_recipe and rebuild_recipe[0][0] == ("clean",),
+    "Makefile: release-rebuild does not start from a clean tree: "
+    + " | ".join(" ".join(goals) for goals, _, _ in rebuild_recipe),
+)
+check(
+    any("$(CI_CLASSIC_PARTS)" in line for line in ci_goal_recipe("release-rebuild")),
+    "Makefile: release-rebuild names its own classic-AVR set instead of "
+    "the declared CI_CLASSIC_PARTS",
+)
+
+# The whole reason release-test-long is not ci-verify or a bare test-long.
+check(
+    any("PIC12F675_FLASH_IMAGES=build" in line
+        for line in ci_goal_recipe("release-test-long")),
+    "Makefile: release-test-long no longer points the flashing-helper gate "
+    "at the images rebuilt from the tagged source",
+)
+
+# --- the artifact-commit verifier's composition -------------------------
+# The last gate composition in the release path that lived in a shell
+# script: `make $gates STRICT_TOOLS=1 <pins>`, assembled by
+# verify-release-artifact-commit.sh and therefore readable by nothing.
+# It is now a goal, and these are the three properties that made it worth
+# moving: WHICH gates (the declared list, by name, so the two cannot
+# diverge), WHAT policy (strictness, the whole of what the goal owns), and
+# WHAT ELSE (nothing).
+artifact_recipe = ci_goal_commands("release-artifact-gates")
+check(
+    artifact_recipe == [
+        (("$(RELEASE_ARTIFACT_GATES)",), {"STRICT_TOOLS": "1"}, False),
+    ],
+    "Makefile: release-artifact-gates no longer runs exactly "
+    "$(RELEASE_ARTIFACT_GATES) under STRICT_TOOLS=1: "
+    + " | ".join(
+        " ".join(goals) + "".join(f" {k}={v}" for k, v in a.items())
+        for goals, a, _ in artifact_recipe
+    ),
+)
+# No pins, and that is an assertion. The script used to hand these gates
+# release.yml's three independent pins; not one of the eight reads any of
+# them, in its recipe or in the script it runs, and what they did do was
+# reach the gates' own nested Makes as ENVIRONMENT origin -- unreviewed
+# build input by the release guard's own definition, which is why
+# test-release-preflight (a member of this list) scrubs inherited
+# build-input names before its first case. A gate added here that genuinely
+# reads a pin must be given it deliberately, and fail this check first.
+artifact_pins = ci_goal_pins("release-artifact-gates")
+check(
+    artifact_pins == [],
+    f"Makefile: release-artifact-gates requires pin(s) {artifact_pins!r}; "
+    "no gate it runs reads one",
+)
+# An empty inventory must refuse, not run zero gates and report the commit
+# publishable. The script checks this too, earlier and with a friendlier
+# diagnostic; the goal is what any other caller gets.
+check(
+    any("RELEASE_ARTIFACT_GATES" in line and "$(error" in line
+        for line in ci_goal_recipe("release-artifact-gates")),
+    "Makefile: release-artifact-gates does not refuse an empty "
+    "RELEASE_ARTIFACT_GATES, so it would prove a release publishable by "
+    "running nothing",
+)
+
+# The script must reach the gates through that goal and no other way -- the
+# same rule every workflow step is held to. The workflow step parser is not
+# reusable here: it joins continuations into one logical line, and this
+# script's `make ... || die "<multi-line message>"` leaves an unbalanced
+# quote that shlex refuses, so every command would silently drop out and the
+# check would pass on an empty list. Scan lines instead, skipping comments
+# and requiring `make` in command position -- at the start of a line or
+# right after `$(`. Prose is full of the word: the header says
+# "make-release.sh", and the printed handoff explains that no workflow can
+# "make two separate GitHub API operations atomic", which a looser scan
+# reported as a Make goal named "two". print- is a variable read, not
+# dispatch, and is excluded by name.
+verifier_path = os.path.join(root, "scripts", "verify-release-artifact-commit.sh")
+if check(os.path.isfile(verifier_path),
+         "scripts/verify-release-artifact-commit.sh: missing"):
+    with open(verifier_path, encoding="utf-8") as fh:
+        verifier_text = fh.read()
+    verifier_goals = []
+    for raw in verifier_text.splitlines():
+        if raw.lstrip().startswith("#"):
+            continue
+        for match in re.finditer(r"(?:^|\$\()\s*make\s+(.*)$", raw):
+            words = [
+                word.strip("()\"'")
+                for word in match.group(1).split()
+                if word != "\\" and not word.startswith("-")
+                and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", word)
+            ]
+            if words:
+                verifier_goals.append(words[0])
+    dispatched = [g for g in verifier_goals if not g.startswith("print-")]
     check(
-        len(verify_indices) == 1 and verify_indices[0] < assert_idx,
-        "ci.yml: PIC assertion must run after unconditional cache verification",
+        dispatched == ["release-artifact-gates"],
+        "scripts/verify-release-artifact-commit.sh must dispatch the gates "
+        "through release-artifact-gates and nothing else; it runs: "
+        + ", ".join(dispatched or ["(nothing -- did the scan break?)"]),
     )
+    # The pins are gone from the script, not merely unused by the goal:
+    # re-adding the release.yml parse would restore an environment-origin
+    # leak into every nested Make these gates run. Scoped to the dispatch
+    # section, because the handoff below it legitimately names
+    # RELEASE_SIGNING_FINGERPRINT.
+    dispatch_section = verifier_text.split("# 3. The gates")[-1].split("# 4. Hand off")[0]
+    leaked = sorted(set(re.findall(r"\bRELEASE_[A-Z0-9_]+\b", dispatch_section))
+                    - {"RELEASE_ARTIFACT_GATES"})
     check(
-        len(save_indices) == 1 and assert_idx < save_indices[0],
-        "ci.yml: PIC assertion must run before saving the XC8/DFP cache",
+        not leaked,
+        "scripts/verify-release-artifact-commit.sh hands the gates "
+        f"{leaked!r} again; no gate it runs consumes one",
     )
+
+# --- the policy each declared goal owns ---------------------------------------
+# A job's fail-closed policy used to sit in its workflow step; it now sits in
+# the recipe of the goal the step invokes, so it is asserted there. Every
+# sub-make that runs gates runs them under STRICT_TOOLS=1, so a missing tool
+# fails the job instead of skipping, and a sub-make that reaches the mutation
+# run cannot let a mutant skip. A sub-make that only builds -- clean, an image,
+# the soak smoke -- runs no gate and is not held to it. A list dispatch is
+# judged by what it expands to.
+def dispatched_names(word):
+    listed = re.fullmatch(r"\$\(([A-Za-z_][A-Za-z0-9_]*)\)", word)
+    return make_variable(listed.group(1)) if listed else [word]
+
+
+def runs_gates(word):
+    return any(
+        name == "stress" or "test" in name.split("-")
+        for name in dispatched_names(word)
+    )
+
+
+gate_dispatches = 0
+for goal in DECLARED_GOALS:
+    commands = ci_goal_commands(goal)
     check(
-        len(first_pic_gate) == 1 and assert_idx < first_pic_gate[0],
-        "ci.yml: PIC assertion must run before the first PIC aggregate",
+        bool(commands),
+        f"Makefile: {goal} dispatches no sub-make; the recipe parse has stopped matching",
     )
+    for goals, assignments, duplicate in commands:
+        label = f"Makefile: {goal} runs {' '.join(goals)}"
+        check(not duplicate, f"{label} with one variable assigned twice")
+        if any(runs_gates(word) for word in goals):
+            gate_dispatches += 1
+            check(
+                assignments.get("STRICT_TOOLS") == "1",
+                f"{label} without STRICT_TOOLS=1: a missing tool would skip "
+                "instead of failing the job",
+            )
+        if any(target_reaches(word, "test-mutation") for word in goals):
+            check(
+                assignments.get("MUTATION_ALLOW_SKIP", "0") == "0",
+                f"{label} with MUTATION_ALLOW_SKIP="
+                f"{assignments.get('MUTATION_ALLOW_SKIP')!r}: a mutant that "
+                "cannot run must fail the run",
+            )
+check(
+    gate_dispatches > 0,
+    "no declared goal dispatches a gate; the STRICT_TOOLS check has stopped matching",
+)
+
 
 for msg in failures:
     print(f"FAIL: {msg}", file=sys.stderr)

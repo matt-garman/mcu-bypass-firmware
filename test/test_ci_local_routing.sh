@@ -337,8 +337,8 @@ pr_expected=("${build_calls[@]}" $'STRICT_TOOLS=1\tci-verify')
 [ "${#calls[@]}" -eq "${#pr_expected[@]}" ] \
 	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected ${#pr_expected[@]}"
 # ci-verify, not `test`: PR mode invokes the same goal the hosted verify job
-# invokes, so the two cannot drift into equivalent-looking spellings. What that
-# goal runs is asserted where it now lives -- against the recipe, in
+# invokes, so the two cannot drift into equivalent-looking spellings. The policy
+# that goal runs under is asserted where it now lives -- against the recipe, in
 # test_workflow_syntax.sh.
 for i in "${!pr_expected[@]}"; do
 	[ "${calls[$i]}" = "${pr_expected[$i]}" ] \

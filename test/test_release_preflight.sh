@@ -515,27 +515,43 @@ run_preflight() {
 	return "$rc"
 }
 
+# One process for the whole tree. This runs twice per run_preflight case, and
+# a stat, readlink or sha256sum fork per path made each snapshot cost about
+# three seconds -- most of this gate's runtime, spent re-reading files nothing
+# had touched.
+#
+# A tracked path is legitimately absent while its deletion is still unstaged --
+# `git ls-files -c` lists what the index holds, not what the disk does. Record
+# the absence rather than failing the snapshot: the entry still appears on both
+# sides, so a file this preflight run deletes is still caught by the comparison.
 tree_snapshot() {
-	local rel mode digest target
-	while IFS= read -r -d '' rel; do
-		# A tracked path is legitimately absent while its deletion is still
-		# unstaged -- `git ls-files -c` lists what the index holds, not what
-		# the disk does. Record the absence rather than failing the snapshot:
-		# the entry still appears on both sides, so a file this preflight run
-		# deletes is still caught by the comparison.
-		if [ ! -e "$ROOT/$rel" ] && [ ! -L "$ROOT/$rel" ]; then
-			printf 'X %q\n' "$rel"
-			continue
-		fi
-		mode=$(stat -c '%a' "$ROOT/$rel") || return 1
-		if [ -L "$ROOT/$rel" ]; then
-			target=$(readlink "$ROOT/$rel") || return 1
-			printf 'L %q %s %q\n' "$rel" "$mode" "$target"
-		elif [ -f "$ROOT/$rel" ]; then
-			digest=$(sha256sum "$ROOT/$rel") || return 1
-			printf 'F %q %s %s\n' "$rel" "$mode" "${digest%% *}"
-		fi
-	done < <(git -C "$ROOT" ls-files -co --exclude-standard -z | sort -z)
+	git -C "$ROOT" ls-files -co --exclude-standard -z \
+		| SNAPSHOT_ROOT="$ROOT" "$REAL_PYTHON" -c '
+import hashlib
+import os
+import stat
+import sys
+
+root = os.fsencode(os.environ["SNAPSHOT_ROOT"])
+out = sys.stdout
+for rel in sorted(set(p for p in sys.stdin.buffer.read().split(b"\0") if p)):
+    path = os.path.join(root, rel)
+    name = repr(os.fsdecode(rel))
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        out.write(f"X {name}\n")
+        continue
+    mode = format(stat.S_IMODE(st.st_mode), "o")
+    if stat.S_ISLNK(st.st_mode):
+        out.write(f"L {name} {mode} {os.fsdecode(os.readlink(path))!r}\n")
+    elif stat.S_ISREG(st.st_mode):
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 16), b""):
+                digest.update(block)
+        out.write(f"F {name} {mode} {digest.hexdigest()}\n")
+'
 }
 
 assert_no_release_scratch() {

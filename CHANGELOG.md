@@ -64,6 +64,29 @@ lengths.
 - **Relay pulse oracles check the vendor figure.** The simulator, image and
   recovery lanes held relay coil pulses to 4 ms; they now require the 10 ms
   Panasonic recommends.
+- **Existing gates are reviewed, not only new ones.** `GOVERNANCE.md` held a
+  proposed gate to written proof obligations and held nothing already in the
+  tree to them, so the apparatus could only grow. A new section applies the same
+  obligations afterwards, as four questions: did the defect happen, is this the
+  only guard, does the check restate the tree, and is its cost sized to where
+  the defect lands. `release/README.md` now says when a release is cut: when an
+  image or a programming helper changes, not for machinery alone.
+- **`test-workflow-syntax` holds properties, not file shapes.** About 1,200
+  lines that compared the workflows and CI recipes with literal copies of
+  themselves are gone: the reviewed goal lists, cache-step counts, per-recipe
+  goal and pin tuples, installed packages, and the publication step's exact
+  commands. What they carried that mattered is now asserted directly. Every
+  sub-make that runs gates passes `STRICT_TOOLS=1`, and none that reaches the
+  mutation run may let a mutant skip. No gate step may continue after failure
+  or run under any condition but the pull-request exclusion. Every upload fails
+  when it finds nothing, and the resource-policy pins agree on all four surfaces
+  that carry them. The publication step stays covered by
+  `test-release-provenance`, which executes it.
+- **`make test` runs about six and a half minutes faster.**
+  `test-release-preflight` compares the tree before and after each of its
+  cases, and each snapshot forked a process or more per tracked file. It now
+  hashes the tree in one process, 0.05 s instead of about 3 s, and the gate
+  drops from about nine minutes to two and a half.
 
 ### Fixed
 
@@ -82,6 +105,19 @@ lengths.
   rather than left as a note to check, and `hw_set_bypass_state()` /
   `hw_set_engaged_state()` are described as driving outputs rather than setting
   the effect state, which the shell owns.
+
+### Removed
+
+- **`test-clean-contract`.** It held `make clean`'s hand-written list against
+  Make's inventory of test binaries. A stale name there leaves files behind; it
+  cannot put a stale binary into a run, because rebuilding at the current
+  workload sizing is held by `test-workload-rebuild`, not by `clean`. It also
+  pinned verbatim sentences in `release/README.md`, which `GOVERNANCE.md` says
+  no rule does.
+- **`test-variant-map-contract`**, folded into `test-variant-selector-guard`.
+  Both hold the variant vocabulary to the Makefile's parse-time guard, one for
+  selectors and one for per-variant maps, and now share one harvest of the
+  Makefile.
 
 ## [0.9.16] - 2026-09-29
 

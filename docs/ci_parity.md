@@ -185,9 +185,8 @@ question: which workflow invocations can reach `test-mutation` at all. That is
 strictly stronger -- it catches a second wrapper, not just a second literal --
 and it is only askable because the edge set now sees through goals. Prove a
 replaced check still bites before trusting it: adding a stray `make test-long`
-step reports `2 Make invocations reach test-mutation, expected 1`, and deleting
-`MUTATION_ALLOW_SKIP=0` from the recipe reports that `ci-mutation` is no longer
-the canonical fail-closed run.
+step reports `2 Make invocations reach test-mutation, expected 1`, and setting
+`MUTATION_ALLOW_SKIP=1` in the recipe reports that a mutant could skip.
 
 Counting the checks before and after is the way to prove nothing was lost: this
 conversion moved `test-workflow-syntax` from 670 to 626, and every one of the 44
@@ -196,6 +195,14 @@ is accounted for -- five fewer steps means five fewer generic per-step checks
 PIC checks collapse into one recipe-equality check plus a stronger one (no job
 anywhere in `ci.yml` may name a PIC aggregate directly, not merely no *other*
 step in the `pic` job).
+
+Those recipe-equality checks were later retired under `GOVERNANCE.md`'s review
+of existing gates. Each was a literal copy of the recipe it read -- which goals
+it runs, with which forwarded pins -- so it fired on every correct edit and on
+nothing else, and the direct-aggregate rule was a second guard behind the
+declared-goal scan. What they carried that mattered, the policy, is asserted
+directly instead: every sub-make that runs gates passes `STRICT_TOOLS=1`, and
+none that reaches the mutation run may let a mutant skip.
 
 `scripts/ci-local.sh` needs a fourth edit only where it mirrors a converted job
 directly. Its non-PR path deliberately folds `verify`, `stress` and the mutation

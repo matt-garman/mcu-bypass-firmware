@@ -1046,12 +1046,12 @@ FORCE:
 		test-xc8-helpers test-pic-toolchain-assert \
         test-stack-bound-pic-regression test-pic-build-rebuild \
         test-soak-timing test-strict-tools test-workload-rebuild \
-        test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
+        test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
-        test-clean-contract test-fuse-injection-contract test-static-assert-guards \
+        test-fuse-injection-contract test-static-assert-guards \
         test-attiny202-guard-mutations test-pic-guard-mutations \
         test-deliberate-duplication \
 		pic12f675-target-selector-valid \
@@ -3087,9 +3087,9 @@ attiny202-test-target:
 # is not there is a successful `rm -f`.
 #
 # These MUST mirror the rule heads in "SIMULATION TESTS" below character for
-# character -- `test-clean-contract` checks the list against Make's own target
-# inventory rather than against a second copy of the spelling, so a divergence
-# in either direction is a failing gate rather than a leftover file.
+# character. Nothing checks that any more: a divergence leaves files behind,
+# and cannot feed a stale binary into a run, because every one of those rules
+# carries FORCE and rebuilds at the current workload sizing on each use.
 AVR_SIM_BINARIES = \
 	$(foreach v,$(VARIANTS),test/avr/test_trace_$(v) test/avr/test_sim_$(v)_attiny13a) \
 	$(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test/avr/test_sim_$(v)_attiny$(n)))
@@ -3276,12 +3276,12 @@ TEST_GATES_LATE = \
 		test-target-lane-markers test-pic-target-result-records \
 		test-lockstep-progress test-soak-timing test-xc8-helpers \
 		test-pic-toolchain-assert \
-        test-variant-map-contract test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
+        test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
         test-analyze-variant-guard test-variant-selector-guard \
-        test-clean-contract test-fuse-injection-contract \
+        test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools test-workload-rebuild \
         test-pic-build-rebuild coverage-check coverage-check-core
 TEST_GATES = $(TEST_GATES_EARLY) $(TEST_GATES_LATE)
@@ -3906,19 +3906,12 @@ test-build-serialization:
 test-ci-local-routing:
 	./test/test_ci_local_routing.sh
 
-# Host-only proof that every per-variant map is registered with the parse-time
-# require_variant_map guard. The guard catches a registered map whose keys go
-# stale; this catches a map that was never registered, which is the half that
-# let pic_soak_block_* sever silently through the whole v0.9.8 rename.
 # Host-only source contract for the per-part gpsim watchdog note the
 # libgpsim fault harness prints into retained evidence: each adapter must
 # supply its own PIC_FAULT_WDT_NOTE and the core must consume it, so the
 # PIC12F675 lane no longer reports the PIC10F32x period. Reads source only.
 test-fault-wdt-note-contract:
 	@python3 test/test_fault_wdt_note_contract.py
-
-test-variant-map-contract:
-	./test/test_variant_map_contract.sh
 
 # Host-only proof that the names other files and documents exchange with this
 # Makefile are names it actually knows. All five axes of the name-contract item:
@@ -3946,10 +3939,8 @@ test-makefile-name-contract: python-version-valid
 # 2026-08-10 MISRA-review commit added a section with no summary row. Same
 # family as the name contract above: a document that claims a correspondence
 # should have that correspondence enforced rather than reviewed.
-# The checker is named as a PREREQUISITE, not just inside the recipe: the
-# clean-contract oracle is `make -rRn --print-data-base`, which sees only files
-# that are targets or prerequisites, so a helper mentioned in recipe text alone
-# can stay untracked forever.
+# The checker and its subject are named as prerequisites, so a missing one
+# fails as `No rule to make target` before the recipe runs.
 .PHONY: test-todo-index
 test-todo-index: python-version-valid test/test_todo_index.py TODO.md
 	@python3 test/test_todo_index.py
@@ -4044,19 +4035,11 @@ test-misra-output-contract: test/misra_output_gate.py test/test_misra_output_con
 # Checks that the guard rejects all three malformed shapes and that it is still
 # attached to every rule consuming a selector, transitively: almost none name a
 # selector directly, they read a HEX path composed from one three definitions
-# away.
+# away. Also checks that every per-variant map is registered with the parse-time
+# require_variant_map guard -- the half that let pic_soak_block_* sever silently
+# through the whole v0.9.8 rename.
 test-variant-selector-guard: python-version-valid
 	./test/test_variant_selector_guard.py
-
-# `rm -f` of a path that does not exist SUCCEEDS, so a `clean` list that has
-# drifted from the rules producing the files is completely silent -- which is
-# what the v0.9.8 rename left behind: both clean and clean-tests named
-# `test_sim_<v>` / `test_sim_<v>_t<n>` while the rules had moved to
-# `test_sim_<v>_attiny<n>`, so every path they named was gone and all nine
-# binaries actually built survived. Checks both targets against Make's own
-# inventory of what it can build.
-test-clean-contract:
-	./test/test_clean_contract.sh
 
 # `-D<MACRO>=$(VAR)` is a name contract the four Makefile name-contract axes
 # deliberately do not cover: the C macro names are the tests' own interface and
@@ -4125,10 +4108,11 @@ test-pic-guard-mutations:
 test-deliberate-duplication: python-version-valid
 	./test/test_deliberate_duplication.py
 
-# Parse the GitHub workflow files and cross-check ci.yml's job list against
-# ci-local.sh. Nothing else here loads them as YAML, so an unparseable workflow
-# -- which stops the entire CI matrix before a single job starts -- would
-# otherwise pass every local gate.
+# Parse the GitHub workflow files and hold them to the declared Make goals:
+# every gate reached through a goal, run fail-closed, with a local counterpart.
+# Nothing else here loads them as YAML, so an unparseable workflow -- which
+# stops the entire CI matrix before a single job starts -- would otherwise pass
+# every local gate.
 test-workflow-syntax:
 	./test/test_workflow_syntax.sh
 
@@ -9005,7 +8989,7 @@ help:
 	@echo "  test-fetch-yasimavr  safe destination/rebuild/install checks for the yasimavr venv"
 	@echo "  test-supply-chain  external download, cache, dependency and action pin checks"
 	@echo "  test-ci-local-routing  local-CI skip-option command routing checks"
-	@echo "  test-workflow-syntax  GitHub workflow YAML + ci-local job-map checks"
+	@echo "  test-workflow-syntax  GitHub workflows parse and reach gates only through declared goals"
 	@echo "  test-klee-build  linked harness/pure-core KLEE bitcode regression"
 	@echo "  test-pic-build  PIC image validation + PIC10F320 rebuild-trigger checks"
 	@echo "  test-release-images  exact committed/listed/fresh release artifact checks"
@@ -9024,7 +9008,6 @@ help:
 	@echo "                  8-level PIC hardware return-stack depth gates"
 	@echo "  test-lockstep-progress  all three PIC exact-pin/stall-propagation checks"
 	@echo "  test-soak-timing  host-only soak timing/block-value checks (included in test)"
-	@echo "  test-variant-map-contract  every per-variant map is guard-registered (included in test)"
 	@echo "  test-fault-wdt-note-contract  each PIC fault adapter supplies its own gpsim watchdog note (included in test)"
 	@echo "  test-makefile-name-contract  every make goal, variable and child-environment name a file or doc uses really exists (included in test)"
 	@echo "  test-todo-index    TODO.md's priority summary matches its open sections, both ways (included in test)"
@@ -9035,8 +9018,7 @@ help:
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-analysis-matrix  exact 30-row cppcheck/MISRA target/TU/selector contract (included in test)"
 	@echo "  test-misra-output-contract  authored source/header MISRA diagnostics fail every lane (included in test)"
-	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector instead of skipping (included in test)"
-	@echo "  test-clean-contract  clean/clean-tests remove everything the Makefile builds (included in test)"
+	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector, every per-variant map is guard-registered (included in test)"
 	@echo "  test-fuse-injection-contract  every fuse byte survives -D injection into the checker (included in test)"
 	@echo "  test-static-assert-guards  the firmware's compile-time guards really fail the build when violated (included in test)"
 	@echo "  test-deliberate-duplication  the duplications that are second opinions are still two (included in test)"

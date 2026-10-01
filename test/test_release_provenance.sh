@@ -481,8 +481,9 @@ evidence_copy_line=${evidence_copy_lines[0]%%:*}
 checks=$((checks + 1))
 
 # The reproduction step is not practical to execute without a full release
-# toolchain. Keep its security-sensitive freeze boundary structural; parsed
-# workflow topology and publication ordering are owned by test-workflow-syntax.
+# toolchain. Keep its security-sensitive freeze boundary structural. The
+# publication step is executed below, which is what proves its ordering; parsed
+# workflow topology is owned by test-workflow-syntax.
 ci_repro_block=$(awk '/^[[:space:]]+id: repro$/ { in_block=1 }
 	/# --- re-run the gates on the clean runner/ { in_block=0 }
 	in_block { print }' "$RELEASE_WORKFLOW")

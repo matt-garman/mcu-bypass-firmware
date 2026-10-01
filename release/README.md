@@ -294,6 +294,14 @@ every published release, and additionally pins every published file no
 
 ## How a release is sequenced
 
+**When one is cut.** A release is cut when something a user downloads and runs
+changes: a firmware image, or a helper that programs one. A change confined to
+the machinery that builds, checks and documents them waits for the next such
+release, because re-publishing byte-identical images costs a full qualification
+run and gives a user nothing new. A safety warning about a release already
+published is the registered amendment described under *Evidence retention and
+hosted assets*, not a release.
+
 A release is not one commit. Five steps produce it, in this order, and the
 separation between the first and the third is enforced rather than conventional.
 
