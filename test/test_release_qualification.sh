@@ -752,10 +752,20 @@ EOF
 		printf 'simcal fixture: %s\n' "$variant" \
 			> "$matrix_build/simcal/${stem}_simcal.hex"
 	done
-	python3 "$MATRIX_TOOL" record --build-dir "$matrix_build" \
-		--fw-base "$fw_base" --tag "$pic12f675_tag" >/dev/null
-	matrix_record=$(python3 "$MATRIX_TOOL" verify --build-dir "$matrix_build" \
-		--fw-base "$fw_base" --tag "$pic12f675_tag")
+	# The matrix tool's output is a pure function of these fixed fixture bytes,
+	# so it runs on the first reset and every later reset reuses its result.
+	if [ ! -s "$work/matrix-cache.json" ]; then
+		python3 "$MATRIX_TOOL" record --build-dir "$matrix_build" \
+			--fw-base "$fw_base" --tag "$pic12f675_tag" >/dev/null
+		python3 "$MATRIX_TOOL" verify --build-dir "$matrix_build" \
+			--fw-base "$fw_base" --tag "$pic12f675_tag" > "$work/matrix-cache.record"
+		cp -p -- "$matrix_build/.pic12f675-qualified-matrix.json" \
+			"$work/matrix-cache.json"
+	else
+		cp -p -- "$work/matrix-cache.json" \
+			"$matrix_build/.pic12f675-qualified-matrix.json"
+	fi
+	matrix_record=$(<"$work/matrix-cache.record")
 	cp -p -- "$matrix_build/.pic12f675-qualified-matrix.json" \
 		"$release/evidence/pic12f675-qualified-matrix.json"
 	for variant in "${pic12f675_variants[@]}"; do
@@ -992,43 +1002,75 @@ replace_fixture_source_command() {
 # Appends the terminal record to every operation-role log first, because that
 # changes its size and the index records sizes.
 write_evidence_index() {
-	local name role size record lines payload_digest sealing_commit
+	local name role pattern sealing_commit
+	local -a sealable=() unsealed=() names=()
+	local -A lines=() digest=() size=() record=() group=()
 	for name in "${!fixture_role[@]}"; do
-		role=${fixture_role[$name]}
-		case "$role" in
-			build|final-image-build|initial-image-build|target-test|soak|soak-build) ;;
-			*) continue ;;
+		case "${fixture_role[$name]}" in
+			build|final-image-build|initial-image-build|target-test|soak|soak-build)
+				sealable+=("$name") ;;
 		esac
-		grep -q '^EVIDENCE_RESULT ' "$release/evidence/$name" && continue
-		lines=$(wc -l < "$release/evidence/$name")
-		payload_digest=$(sha256sum -- "$release/evidence/$name")
-		payload_digest=${payload_digest%% *}
+	done
+	# Each tool runs once over every member it applies to, from inside the
+	# evidence directory so names come back spelled as the index spells them.
+	# The derivations are the verifier's: wc -l, sha256sum, stat -c%s, and the
+	# first record line for the member's role.
+	mapfile -t unsealed < <(cd "$release/evidence" \
+		&& grep -L '^EVIDENCE_RESULT ' -- "${sealable[@]}")
+	if [ "${#unsealed[@]}" -gt 0 ]; then
+		# wc adds a "total" line when it counts more than one file.
+		while read -r count name; do
+			[ "${#unsealed[@]}" -gt 1 ] && [ "$name" = total ] && continue
+			lines[$name]=$count
+		done < <(cd "$release/evidence" && wc -l -- "${unsealed[@]}")
+		while read -r sum name; do
+			digest[$name]=$sum
+		done < <(cd "$release/evidence" && sha256sum -- "${unsealed[@]}")
+	fi
+	for name in "${unsealed[@]}"; do
+		role=${fixture_role[$name]}
+		[ -n "${lines[$name]:-}" ] && [ -n "${digest[$name]:-}" ] \
+			|| fail "could not measure evidence fixture $name"
 		# Everything the soak record supplied was sealed by the run that produced
 		# it; everything else by the release's own run.
 		sealing_commit=$sha
 		case "$role" in soak|soak-build) sealing_commit=$soak_sha ;; esac
 		printf 'EVIDENCE_RESULT format=2 status=pass role=%s evidence=%s lines=%d payload_sha256=%s source_commit=%s\n' \
-			"$role" "$name" "$lines" "$payload_digest" "$sealing_commit" \
+			"$role" "$name" "${lines[$name]}" "${digest[$name]}" "$sealing_commit" \
 			>> "$release/evidence/$name"
+	done
+	mapfile -t names < <(printf '%s\n' "${!fixture_role[@]}" | sort)
+	while read -r name bytes; do
+		size[$name]=$bytes
+	done < <(cd "$release/evidence" && stat -c '%n %s' -- "${names[@]}")
+	for name in "${names[@]}"; do
+		case "${fixture_role[$name]}" in
+			build|final-image-build|initial-image-build|target-test|soak|soak-build)
+				group[$name]=EVIDENCE_RESULT ;;
+			test-long) group[$name]=TEST_LONG_RESULT ;;
+			resource) group[$name]=RESOURCE_TABLES_RESULT ;;
+			toolchain) group[$name]=TOOLCHAIN_RESULT ;;
+			*) record[$name]=- ;;
+		esac
+	done
+	for pattern in EVIDENCE_RESULT TEST_LONG_RESULT RESOURCE_TABLES_RESULT TOOLCHAIN_RESULT; do
+		local -a members=()
+		for name in "${names[@]}"; do
+			[ "${group[$name]:-}" = "$pattern" ] && members+=("$name")
+		done
+		[ "${#members[@]}" -gt 0 ] || continue
+		while IFS= read -r line; do
+			record[${line%%:*}]=${line#*:}
+		done < <(cd "$release/evidence" && grep -H -m1 "^$pattern " -- "${members[@]}")
 	done
 	{
 		printf 'EVIDENCE_INDEX format=2 source_commit=%s\n' "$sha"
-		while IFS= read -r name; do
-			role=${fixture_role[$name]}
-			size=$(stat -c%s "$release/evidence/$name")
-			case "$role" in
-				build|final-image-build|initial-image-build|target-test|soak|soak-build)
-					record=$(grep -m1 '^EVIDENCE_RESULT ' "$release/evidence/$name") ;;
-				test-long)
-					record=$(grep -m1 '^TEST_LONG_RESULT ' "$release/evidence/$name") ;;
-				resource)
-					record=$(grep -m1 '^RESOURCE_TABLES_RESULT ' "$release/evidence/$name") ;;
-				toolchain)
-					record=$(grep -m1 '^TOOLCHAIN_RESULT ' "$release/evidence/$name") ;;
-				*) record='-' ;;
-			esac
-			printf '%s\t%s\t%s\t%s\n' "$name" "$role" "$size" "$record"
-		done < <(printf '%s\n' "${!fixture_role[@]}" | sort)
+		for name in "${names[@]}"; do
+			[ -n "${size[$name]:-}" ] && [ -n "${record[$name]:-}" ] \
+				|| fail "evidence fixture $name has no size or terminal record"
+			printf '%s\t%s\t%s\t%s\n' \
+				"$name" "${fixture_role[$name]}" "${size[$name]}" "${record[$name]}"
+		done
 		printf 'EVIDENCE_INDEX_RESULT format=2 status=pass members=%d source_commit=%s\n' \
 			"${#fixture_role[@]}" "$sha"
 	} > "$release/evidence/INDEX"

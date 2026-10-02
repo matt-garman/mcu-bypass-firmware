@@ -87,6 +87,14 @@ lengths.
   cases, and each snapshot forked a process or more per tracked file. It now
   hashes the tree in one process, 0.05 s instead of about 3 s, and the gate
   drops from about nine minutes to two and a half.
+- **`test-release-qualification` runs in about half the time**, 84 s instead
+  of 163 s. The release verifier read its twelve inventory values from the
+  Makefile one parse at a time and now reads them in one query. That query
+  passes `-j1`: when the worktree lock is already held, Make runs the goals
+  under the caller's `-j`, and under `-j8` it was measured to swap two values.
+  The suite's evidence-index fixture ran about 110 processes per case and now
+  runs each tool once; its output is byte-identical on all 187 calls. The
+  PIC12F675 matrix tool now runs once per suite instead of once per case.
 - **Every `make test` gate script says what it guards.** Twenty-one gate
   scripts opened with code. Each now opens with a header stating the property
   it holds and the commit where that defect class occurred, as the review of

@@ -190,40 +190,40 @@ expected_checks=$((duration_num / liveness_num))
 # ignores command-line assignments, and CC is not an inventory variable. This
 # must be a command-line assignment -- the Makefile's `CC = avr-gcc` overrides
 # the environment, so only `make CC=:` takes effect.
-canonical_soaks_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_SOAK_NAMES) \
-	|| die "cannot read RELEASE_SOAK_NAMES from the Makefile"
-canonical_evidence_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_EVIDENCE_FILES) \
-	|| die "cannot read RELEASE_EVIDENCE_FILES from the Makefile"
-canonical_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_EVIDENCE_ROLES) \
-	|| die "cannot read RELEASE_EVIDENCE_ROLES from the Makefile"
-result_roles_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_EVIDENCE_RESULT_ROLES) \
-	|| die "cannot read RELEASE_EVIDENCE_RESULT_ROLES from the Makefile"
-canonical_images=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_IMAGES) \
-	|| die "cannot read RELEASE_IMAGES from the Makefile"
-identity_parts_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_IDENTITY_PARTS) \
-	|| die "cannot read RELEASE_IDENTITY_PARTS from the Makefile"
-identity_variants_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-RELEASE_IDENTITY_VARIANTS) \
-	|| die "cannot read RELEASE_IDENTITY_VARIANTS from the Makefile"
-matrix_tool_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-PIC12F675_MATRIX_EVIDENCE) \
-	|| die "cannot read PIC12F675_MATRIX_EVIDENCE from the Makefile"
-fw_base=$(make -s --no-print-directory CC=: -C "$repo_root" print-FW_BASE) \
-	|| die "cannot read FW_BASE from the Makefile"
-pic12f675_tag=$(make -s --no-print-directory CC=: -C "$repo_root" \
-	print-PIC12F675_TAG) \
-	|| die "cannot read PIC12F675_TAG from the Makefile"
-xt_tag=$(make -s --no-print-directory CC=: -C "$repo_root" print-XT_TAG) \
-	|| die "cannot read XT_TAG from the Makefile"
-pic12f675_variants_raw=$(make -s --no-print-directory CC=: -C "$repo_root" \
+#
+# One parse of the Makefile for all twelve values: twelve separate queries cost
+# about a quarter of a second per verification. print-% emits exactly one line
+# per goal, so the values arrive in goal order -- but only when the goals run in
+# that order. When the caller already holds the worktree lock, Make skips its
+# serialized -j1 pass and runs these goals under whatever -j it inherited, and
+# under -j8 two values were measured to swap places. -j1 here takes that off the
+# caller. Command substitution strips only trailing newlines, so an empty LAST
+# value leaves eleven lines and fails the count check rather than shifting a
+# value into the wrong name. The goals stay spelled out so the Makefile name
+# contract can see every name this reads.
+release_values_raw=$(make -s --no-print-directory -j1 CC=: -C "$repo_root" \
+	print-RELEASE_SOAK_NAMES print-RELEASE_EVIDENCE_FILES \
+	print-RELEASE_EVIDENCE_ROLES print-RELEASE_EVIDENCE_RESULT_ROLES \
+	print-RELEASE_IMAGES print-RELEASE_IDENTITY_PARTS \
+	print-RELEASE_IDENTITY_VARIANTS print-PIC12F675_MATRIX_EVIDENCE \
+	print-FW_BASE print-PIC12F675_TAG print-XT_TAG \
 	print-CLASSIC_VARIANTS_SUPPORTED) \
-	|| die "cannot read CLASSIC_VARIANTS_SUPPORTED from the Makefile"
+	|| die "cannot read the release inventory from the Makefile"
+mapfile -t release_values <<<"$release_values_raw"
+[ "${#release_values[@]}" -eq 12 ] \
+	|| die "the Makefile returned ${#release_values[@]} release inventory values, expected 12"
+canonical_soaks_raw=${release_values[0]}
+canonical_evidence_raw=${release_values[1]}
+canonical_roles_raw=${release_values[2]}
+result_roles_raw=${release_values[3]}
+canonical_images=${release_values[4]}
+identity_parts_raw=${release_values[5]}
+identity_variants_raw=${release_values[6]}
+matrix_tool_raw=${release_values[7]}
+fw_base=${release_values[8]}
+pic12f675_tag=${release_values[9]}
+xt_tag=${release_values[10]}
+pic12f675_variants_raw=${release_values[11]}
 case "$matrix_tool_raw" in
 	/*) matrix_tool=$matrix_tool_raw ;;
 	*) matrix_tool="$repo_root/$matrix_tool_raw" ;;
