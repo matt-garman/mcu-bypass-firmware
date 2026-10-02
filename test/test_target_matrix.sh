@@ -13,6 +13,20 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for the authoritative per-variant target aggregates, run
+# against a fake recursive Make.
+#   - A complete matrix runs exactly once per variant.
+#   - An empty, duplicate, unsupported or incomplete matrix, or an invalid
+#     selector, fails before any target runs.
+#   - A lane whose PASS marker or strict result record is missing, or is
+#     extra, withholds aggregate success.
+# Make requests every profile by name, and the script rejects a missing,
+# duplicate or unknown one.
+#
+# THE DEFECT. Before 85cbd19 (2026-07-14) the target aggregates did not
+# validate their variant matrix first. An invalid matrix could partially
+# execute and still report an all-variants PASS.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly -a TM_REQUIRED_PROFILES=(
 	pic10f322-target

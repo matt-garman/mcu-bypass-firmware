@@ -13,6 +13,20 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for the two stack-depth evidence gates:
+# test-stack-bound (Classic AVR, through test/check_stack_usage.sh) and
+# attiny202-test-stack-bound.
+# A fake compiler writes chosen -fstack-usage reports. A report that is stale,
+# missing, malformed, dynamic, extra or over budget must fail the gate rather
+# than pass unmeasured. The suite also pins the compile matrix and the shipping
+# flags, the routing of attiny202-test through its stack gate, and the
+# skip/strict split for an absent ATtiny_DFP.
+#
+# THE DEFECT. Before f9c244e (2026-07-13) the gate neither generated its reports
+# in a private directory nor required one fresh, nonempty report per
+# translation unit, so it could accept evidence it had not just produced. A
+# stack bound is firmware evidence.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-$HOME}/test-stack-bound.XXXXXX")
 trap 'rm -rf "$work"' EXIT

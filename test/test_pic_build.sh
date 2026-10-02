@@ -13,6 +13,23 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only fake-XC8 regression for PIC image generation on all three parts.
+#   - Missing, partial, malformed, symlinked or interrupted XC8 output cannot
+#     become an image.
+#   - Malformed budgets, impossible usage counts and failed arithmetic tools
+#     are rejected.
+#   - A skip removes the complete product matrix, and each part's producer
+#     publishes an immutable complete matrix.
+#   - Stale assembly/symbol sidecars cannot outlive a HEX-only rebuild.
+#   - The PIC10F320 image and host rebuild triggers hold.
+# Make requests every part's profile by name, and the script rejects a missing,
+# duplicate or unknown one.
+#
+# THE DEFECT. Before d15cc7e (2026-07-13) an XC8 image was not validated as
+# Intel HEX before its flash usage was accepted, and a failure could leave part
+# of the requested matrix behind. These are the images programmed into a
+# device.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly -a PB_REQUIRED_PROFILES=(pic10f322 pic10f320 pic12f675)
 readonly -a PB_CANONICAL_VARIANTS=(

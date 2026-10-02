@@ -13,6 +13,24 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Offline regression for the external inputs this tree downloads and caches.
+#   - XC8 and the PIC DFP must match reviewed hashes before any privileged
+#     install, and the install must produce all three device headers.
+#   - The restored ATtiny_DFP cache is re-hashed on every use.
+#   - yasimavr's build dependencies are wheel- and hash-locked and installed
+#     without dependency resolution.
+#   - The cache manifest's stages fail by name, and hostile filenames survive
+#     inventory, comparison and tamper detection.
+#
+# The workflows' single installer and hash-sensitive cache keys are held by
+# test-workflow-syntax.
+#
+# THE DEFECTS. 27cee23 (2026-07-30) moved the XC8 and DFP hash checks ahead of
+# executing either download and hash-locked yasimavr. 7533d52 (2026-08-24)
+# fixed a cache-manifest pipeline in which a failed stage was masked by the
+# stage after it. A substituted compiler would change every image without
+# changing a line of source.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PIC_INSTALL="$ROOT/scripts/install_pic_toolchain.sh"
 PIC_VERIFY="$ROOT/scripts/verify_pic_toolchain_cache.sh"

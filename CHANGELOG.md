@@ -87,6 +87,13 @@ lengths.
   cases, and each snapshot forked a process or more per tracked file. It now
   hashes the tree in one process, 0.05 s instead of about 3 s, and the gate
   drops from about nine minutes to two and a half.
+- **Every `make test` gate script says what it guards.** Twenty-one gate
+  scripts opened with code. Each now opens with a header stating the property
+  it holds and the commit where that defect class occurred, as the review of
+  existing gates in `GOVERNANCE.md` asks; one says plainly that its class is
+  hypothetical. Three gates with no comment above their Make rule gained one.
+  The `test-supply-chain` row of `test/README.md` no longer claims the workflow
+  cache-key checks, which `test-workflow-syntax` holds.
 
 ### Fixed
 
@@ -131,6 +138,12 @@ lengths.
   Both hold the variant vocabulary to the Makefile's parse-time guard, one for
   selectors and one for per-variant maps, and now share one harvest of the
   Makefile.
+- **`test-pic-toolchain-assert`.** It tested `scripts/assert_pic_toolchain.sh`,
+  the fail-fast check CI runs before the PIC lanes. Every way that helper can
+  be wrong already fails loudly. A complete toolchain it rejected stops CI at
+  that step. An incomplete one it let through fails the PIC lanes under
+  `STRICT_TOOLS=1`, and the cache verifier rejects the install on the next run.
+  The helper stays; its second guard goes.
 - **`test-avr-build-rebuild`, `test-workload-rebuild` and
   `test-pic-build-rebuild`**, merged into `test-build-rebuild`. Each re-proved,
   for its own targets, that a changed or identical request recompiles. The

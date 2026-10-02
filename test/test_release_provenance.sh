@@ -13,6 +13,20 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Isolated regression for release provenance: a release names the source that
+# produced its images, and publishes the assets that were verified.
+#   - Final images are rechecked immediately before staging.
+#   - Tag CI requires four-way image reproduction and freezes the asset
+#     inventory before later gates run.
+#   - The publication shell rechecks the remote tag, inventory digest,
+#     signature and checksums immediately before upload.
+#
+# THE DEFECTS. Before 3477cd2 (2026-07-16) nothing rechecked the source between
+# a release's start and its staging, a day later. An edit or a moved HEAD in
+# that window would leave the manifest naming a commit that some evidence was
+# not built from. 5384983 (2026-08-17) added revalidation of the frozen assets
+# before upload.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RELEASE="$ROOT/scripts/make-release.sh"
 QUALIFY="$ROOT/scripts/verify-release-qualification.sh"

@@ -13,6 +13,21 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only boundary checks for every soak timing input: the shared C/C++
+# compile-time contract, the ATtiny202 environment parser and the release CLI.
+#   - Zero, malformed, fractional, negative and counter-wrapping values are
+#     rejected before a harness can report success.
+#   - The liveness interval must fit inside the duration.
+#   - Real release soaks must run at least 24 hours, while short rehearsals
+#     stay explicit.
+#   - Each part's Make timing map must agree with the test-owned values and
+#     the firmware constants.
+#
+# THE DEFECT. Before ff1a448 (2026-07-13) invalid timing values could reach a
+# harness, the ATtiny202 parser substituted defaults instead of failing, and
+# periodic deadlines could overflow. A soak duration is release evidence, so a
+# wrong one is a false claim in a published release.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HEADER="$ROOT/test/soak_timing_config.h"
 MAKEFILE="$ROOT/Makefile"

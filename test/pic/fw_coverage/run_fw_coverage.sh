@@ -14,6 +14,17 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Shipping-source line coverage for one PIC part, run by
+# pic10f322-coverage-check-fw and pic12f675-coverage-check-fw. The part's real
+# shell, the shared debounce core and all three output drivers are compiled for
+# the host against an SFR mock and driven for every variant.
+# test/pic/fw_coverage/check_fw_coverage.sh then requires the annotations to be
+# complete, apart from the constructs it names. For the PIC12F675, a negative
+# probe also proves the checker rejects a reachable res.fault reset.
+#
+# This is firmware evidence, not machinery: a line no host run executes is a
+# line no host test exercised. Introduced in 4feb76f (2026-07-13).
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 CC=${HOSTCC:-cc}
 GCOV_TOOL=${GCOV:-gcov}

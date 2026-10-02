@@ -13,6 +13,17 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only fake-tool regression for ATtiny202 image generation. Missing,
+# partial or malformed avr-gcc, avr-size or objcopy output cannot become an
+# image. Exactly one valid Program and Data record is required, the 2048-byte
+# flash and 16-of-128-byte static-RAM limits hold per variant, and each variant
+# is pinned to its selector and driver. An absent ATtiny_DFP skips or fails as
+# STRICT_TOOLS says.
+#
+# THE DEFECT. Before 93fd739 (2026-07-13) stale ELF and HEX files were not
+# removed before the tool checks, and new ones were not staged under temporary
+# names until they validated. These are the images programmed into a device.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-$HOME}/test-attiny202-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT

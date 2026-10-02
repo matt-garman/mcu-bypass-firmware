@@ -13,6 +13,20 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for scripts/verify-release-qualification.sh, the check
+# between a 24-hour qualification run and publication. Publication requires:
+#   - clean production metadata;
+#   - the exact canonical evidence set, with sealed transcripts that rehash;
+#   - one complete PIC12F675 matrix;
+#   - one complete result for every release soak combination;
+#   - a soak record that covers the images actually built.
+# Resource rows and programming commands are re-derived rather than trusted.
+#
+# THE DEFECT. Before 29a39da (2026-07-28) nothing verified the retained
+# evidence before a release published it, so nothing stood between a short,
+# dirty or partial run and a published qualification claim. This is the
+# release-evidence gate itself, which is why it is large.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERIFY="$ROOT/scripts/verify-release-qualification.sh"
 RENDER="$ROOT/scripts/release-documentation.sh"

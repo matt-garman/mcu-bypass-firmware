@@ -13,6 +13,16 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# The PIC10F320 coverage gate must run from an extracted source archive, which
+# has no Git index. This suite runs the real coverage target and checker from a
+# tar copy with deterministic tool stand-ins. A checker that is not executable
+# must stop the gate before compilation, judged by file mode in the archive and
+# by index mode in a clone.
+#
+# THE DEFECT. Fixed in c0386b2 (2026-07-30). The checker's executable-bit check
+# read the Git index unconditionally, so `make test` failed in any tree that
+# was not a Git worktree, a published source archive among them.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic10f320-coverage-archive.XXXXXX")
 archive="$work/archive"

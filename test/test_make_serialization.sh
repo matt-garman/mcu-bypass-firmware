@@ -13,6 +13,15 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for the worktree lock. Independent top-level Make and
+# release invocations on one worktree must never run recipes concurrently.
+# Three processes race over a probe that records overlap, and any overlapping
+# recipe fails the suite.
+#
+# THE DEFECT. Before b79d942 (2026-07-14) independent invocations raced over
+# shared XC8 intermediates, host binaries, coverage data and simulator logs. A
+# race there does not fail; it leaves one build's output under another's name.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-make-serialization.XXXXXX")
 repo="$work/repo with spaces"

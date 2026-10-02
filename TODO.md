@@ -275,8 +275,9 @@ validate -- a contract test can force a record to exist, not force it to be
 true.
 
 First step: the query goal alone, over the comments that already exist. It
-needs no new file format, and it turns the gates that carry no comment from an
-invisible problem into a visible backlog.
+needs no new file format. Every `make test` gate script now opens with a header
+naming the defect it guards and where that defect occurred, so the query has a
+record to print for each; the contract test is what would keep it that way.
 
 Dependencies: none. Effort: about 3-4 hours for the comment convention and the
 query goal; the contract test and the scope field are a separate pass. Risk if

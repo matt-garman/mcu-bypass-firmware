@@ -13,6 +13,22 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Regression for scripts/verify-release-images.sh. Tag CI runs that verifier,
+# and so does every PIC12F675 field programming against a published release
+# directory.
+#   - Committed images, SHA256SUMS and a fresh build must each equal the
+#     Makefile's canonical image set, byte for byte.
+#   - SHA256SUMS must partition exactly into images, required helpers and
+#     provenance files, under the contract the release's own QUALIFICATION
+#     format selects.
+#   - Production pins the repository Makefile against every Make override
+#     channel.
+#
+# THE DEFECTS. 51180dd (2026-07-13) introduced the exact-set check. 5f5374e
+# fixed it the next day, because committed files could stand in for the fresh
+# build. 470c11d (2026-08-24) pinned the release identity against build
+# overrides. The image set is what a user flashes.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERIFY="$ROOT/scripts/verify-release-images.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-release-images.XXXXXX")

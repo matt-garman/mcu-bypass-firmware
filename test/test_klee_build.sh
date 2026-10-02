@@ -13,6 +13,19 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only fake-tool regression for the optional KLEE proof,
+# `make test-symbolic-klee`. The symbolic harness and the shipping
+# src/bypass_pure.c are compiled to separate bitcode modules and linked with the
+# llvm-link that matches KLEE's clang. Only that linked module reaches KLEE.
+# Stale bitcode is removed before the tool check, so a missing-tool skip cannot
+# leave proof artifacts that look current.
+#
+# THE DEFECT. Fixed in d848e52 (2026-07-16). The KLEE target compiled only the
+# harness, so its calls into the debounce core stayed undefined and the proof
+# was not about the shipping code. KLEE itself is not run in CI
+# (T25-klee-ci), so this is the only check that runs the recipe on every
+# commit.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-klee-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT

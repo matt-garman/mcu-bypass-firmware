@@ -13,6 +13,20 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-side regression for the PIC12F675 lane-result producers. The shared
+# emitter is compiled for every variant and must print exactly the canonical
+# PIC_TARGET_RESULT record for each lane, with the counts in
+# test/pic/pic12f675_target_counts.sh. A source contract then requires each
+# production core to emit its record once, unconditionally, with the status
+# computed from that lane's own pass expression.
+#
+# WHY HERE. The PIC12F675 aggregate already rejects a missing or malformed
+# record, and test-target-lane-markers proves it does. What only this gate holds
+# is that the status a record reports is computed from the lane's verdict, not
+# written beside it. Introduced with the exact aggregate records in f6bba17
+# (2026-08-12). The class is hypothetical: no record has been seen to disagree
+# with its lane.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-pic-target-result-records.XXXXXX")
 trap 'rm -rf "$work"' EXIT

@@ -13,6 +13,19 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for simulator stalls in the PIC lock-step and soak
+# drivers. All three chips' real drivers are compiled against a fake gpsim core
+# that stalls on demand.
+#   - Each route must bind its exact footswitch pin despite substring decoys.
+#   - A stalled lock-step must abort at once.
+#   - A wedged soak must fail within its bound, reporting the cycles it
+#     actually advanced and never the full duration.
+#
+# THE DEFECT. Before 5f853ee (2026-07-14) a run_ms failure in the lock-step
+# settle, calibration and completion phases was not propagated. A frozen
+# simulator could therefore loop forever behind a hard cap that never
+# advanced either.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-lockstep-progress.XXXXXX")
 trap 'rm -rf "$work"' EXIT

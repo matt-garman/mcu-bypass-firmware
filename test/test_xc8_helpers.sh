@@ -13,6 +13,23 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Dependency-free fixtures for the two shared XC8 helpers the PIC build and
+# target lanes use.
+#   - The program-space parser accepts exactly one internally consistent
+#     "Program space used" record. It rejects missing, malformed, duplicate,
+#     mixed, zero, over-capacity, contradictory and percentage-mismatched
+#     transcripts.
+#   - The context resolver requires one non-symlinked assembly/symbol pair and
+#     exactly one _ctx_ allocation in BANK0.
+#
+# THE DEFECTS. Before cee6bab (2026-08-28) each lane parsed these files its own
+# way. A lax parse yields a flash figure or a _ctx_ address that was never
+# measured, and the fault and lock-step harnesses read SRAM at that address.
+# The strictness then failed the other way: until 0dada67 (2026-08-28) the
+# resolver demanded a record shape real XC8 output never has, and all six
+# fault and lock-step lanes rejected their own builds. The fixtures are whole
+# symbol files for that reason.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PROGRAM_PARSER="$ROOT/test/parse_xc8_program_space.sh"
 CONTEXT_CHECKER="$ROOT/test/check_pic_context_layout.sh"

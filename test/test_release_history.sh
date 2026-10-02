@@ -13,6 +13,18 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Scratch-Git regression for the release history and signature gates.
+#   - A tag must peel to a single-parent artifact commit whose parent is the
+#     exact source commit that QUALIFICATION records.
+#   - That commit may change only its release directory and the canonical
+#     registry append.
+#   - SHA256SUMS.asc and the annotated tag must verify against the pinned key.
+#   - The frozen publication oracle must match the asset set exactly,
+#     immediately before publication.
+#
+# THE DEFECT. Before ef7c315 (2026-07-28) a tag was not bound to the qualified
+# source, so the published tree could differ from the one that was soaked.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SOURCE_VERIFY="$ROOT/scripts/verify-release-history.sh"
 IMMUTABILITY_SOURCE="$ROOT/test/test_published_release_immutability.py"

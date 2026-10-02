@@ -13,6 +13,20 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only fake-gpsim regression for the two PIC gpsim wrappers and every lane
+# that calls them. A run that exits nonzero, is killed or times out fails, even
+# when its output already holds every expected register snapshot. The timeout
+# must be a positive decimal, a routed stimulus must attach exactly one
+# footswitch, and a missing gpsim fails under STRICT_TOOLS=1. Each public lane
+# is also probed end to end for the processor it hands gpsim.
+#
+# THE DEFECTS. Before b8cc57c (2026-07-13) the wrappers judged a run by its
+# snapshots alone, so a crashed or timed-out simulator could pass. Then
+# d2104fe (2026-08-03): a rename severed the processor selector, and both
+# PIC10F320 lanes ran the PIC10F320 image on the PIC10F322 model and passed,
+# because the 322 is a superset. The end-to-end processor probes exist for
+# that.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-gpsim-wrappers.XXXXXX")
 trap 'rm -rf "$work"' EXIT

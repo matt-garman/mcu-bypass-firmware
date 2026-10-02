@@ -13,6 +13,17 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for test-flash-budget, the Classic AVR flash-size gate.
+# A fake avr-size proves that a missing, failed, empty, malformed, partial or
+# oversized measurement fails the gate instead of passing unmeasured. It also
+# proves that the complete variant matrix is required before any number is
+# accepted, and that the limit is enforced in exact decimal.
+#
+# THE DEFECT. Before 8b6303a (2026-07-13) the gate did not require one positive
+# Program measurement from a regular, nonempty ELF for every ATtiny13a image.
+# The ATtiny13A has 1 KiB of flash, and a size the gate failed to read is a
+# size nobody checked.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CHECK="$ROOT/test/check_flash_budget.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-flash-budget.XXXXXX")

@@ -13,6 +13,17 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Host-only regression for scripts/ci-local.sh. Local CI must run the goal
+# sequence the Makefile declares, and each skip option must run exactly the
+# commands it claims. Mutation's skip policy is resolved through the real
+# Makefile and helper.
+#
+# THE DEFECT. Fixed in 4c8b309 (2026-07-16). `--skip-pic` still ran the
+# mutation gate with skips forbidden, so on a host without the PIC toolchain it
+# failed late and the option did nothing. The same fix made full local runs
+# pass MUTATION_ALLOW_SKIP=0 explicitly, so their mutation gate cannot quietly
+# become partial.
+
 # The mutation-policy probe reads STRICT_TOOLS and MUTATION_ALLOW_SKIP from its
 # environment (see test/mutation_policy.sh). This regression drives both knobs
 # explicitly on each make command line, so strip any ambient values inherited

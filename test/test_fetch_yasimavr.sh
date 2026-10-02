@@ -13,6 +13,18 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# Offline fake-tool regression for scripts/fetch_yasimavr.sh, which builds the
+# patched yasimavr venv at a caller-chosen path. Destinations are canonicalized
+# and may not be a root, a symlink, a file or an unstamped directory. A failed
+# build or verification keeps the old venv, and only a fully built and verified
+# sibling tree is renamed into place. Rollback must survive signals and late
+# races on the destination.
+#
+# THE DEFECT. Before d07357e (2026-07-30) the fetcher recursively deleted a
+# caller-derived path before rebuilding. No unowned path is known to have been
+# deleted, but the code that could have done it was real, and what it puts at
+# risk is a developer's own files.
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 FETCH="$ROOT/scripts/fetch_yasimavr.sh"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-fetch-yasimavr.XXXXXX")

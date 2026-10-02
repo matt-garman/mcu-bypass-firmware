@@ -1024,7 +1024,7 @@ FORCE:
         _test-make-safe-parallel-probe-b _test-mutation-policy-probe \
 		test-target-matrix test-target-lane-markers test-lockstep-progress \
 		test-pic-target-result-records \
-		test-xc8-helpers test-pic-toolchain-assert \
+		test-xc8-helpers \
         test-stack-bound-pic-regression \
         test-soak-timing test-strict-tools \
         test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
@@ -3258,7 +3258,6 @@ TEST_GATES_LATE = \
 		test-build-serialization test-target-matrix \
 		test-target-lane-markers test-pic-target-result-records \
 		test-lockstep-progress test-soak-timing test-xc8-helpers \
-		test-pic-toolchain-assert \
         test-fault-wdt-note-contract test-makefile-name-contract test-todo-index \
         test-reference-contract test-release-prepare \
         test-resource-tables \
@@ -3756,10 +3755,6 @@ test-pic-build:
 test-xc8-helpers:
 	./test/test_xc8_helpers.sh
 
-# Behavioral contract for the one hosted/local PIC toolchain assertion helper.
-test-pic-toolchain-assert:
-	./test/test_pic_toolchain_assert.sh
-
 # Exact-set and hash checks for the tag workflow's committed/listed/fresh images.
 test-release-images:
 	./test/test_release_images.sh
@@ -3877,6 +3872,8 @@ _test-make-safe-parallel-probe-b:
 	done; \
 	[ -e "$$other" ] || { echo "FAIL: reviewed recursive fan-out was serialized" >&2; exit 1; }
 
+# Three competing top-level invocations must never run recipes concurrently
+# under the worktree lock.
 test-build-serialization:
 	./test/test_make_serialization.sh
 
@@ -4124,6 +4121,8 @@ test-target-matrix:
 test-target-lane-markers:
 	./test/test_target_lane_markers.sh pic10f322 pic10f320 pic12f675
 
+# The PIC12F675 lane-result emitter prints the canonical record, and each core
+# takes the record's status from its own lane verdict.
 test-pic-target-result-records:
 	PIC_SOAK_CXX="$(PIC_SOAK_CXX)" ./test/test_pic_target_result_records.sh
 
@@ -5064,6 +5063,8 @@ test-pic10f320-expected-images:
 	@python3 $(PIC10F320_EXPECTED_IMAGE_CHECKER) --selftest
 	@python3 $(PIC10F320_EXPECTED_IMAGE_CHECKER) $(PIC10F320_EXPECTED_IMAGE_MANIFEST)
 
+# The PIC10F320 coverage gate must also run from a source archive, which has
+# no Git index to read file modes from.
 test-pic10f320-coverage-archive:
 	@./test/test_pic10f320_coverage_archive.sh
 
