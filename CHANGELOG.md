@@ -105,19 +105,41 @@ lengths.
   rather than left as a note to check, and `hw_set_bypass_state()` /
   `hw_set_engaged_state()` are described as driving outputs rather than setting
   the effect state, which the shell owns.
+- **Twelve build rules could reuse a stale binary, and two gates could be
+  skipped.** The new structural rebuild check found file rules that were forced
+  only through another target or not at all. They are the AVR soak binary the
+  release soak builds, the PIC10F322 and PIC12F675 fault, lock-step and I/O
+  harnesses, both PIC configuration checkers, the model checker, the symbolic
+  checker and the ATtiny202 model library. The AVR soak binary was forced only
+  through its ELF, so a request that reused a validated ELF kept an existing
+  binary at whatever duration it was built with. The release path runs
+  `make clean` first, so a release was not exposed, but a direct request was.
+  Each rule now names `FORCE`, and the classic AVR HEX rules name
+  `AVR_REBUILD_PREREQ` beside their ELF. `test-release-artifact-commit` and
+  `test-release-rehearsal` were missing from `.PHONY`, so a file of either name
+  would have satisfied the gate without running it.
 
 ### Removed
 
 - **`test-clean-contract`.** It held `make clean`'s hand-written list against
   Make's inventory of test binaries. A stale name there leaves files behind; it
   cannot put a stale binary into a run, because rebuilding at the current
-  workload sizing is held by `test-workload-rebuild`, not by `clean`. It also
+  workload sizing is held by `test-build-rebuild`, not by `clean`. It also
   pinned verbatim sentences in `release/README.md`, which `GOVERNANCE.md` says
   no rule does.
 - **`test-variant-map-contract`**, folded into `test-variant-selector-guard`.
   Both hold the variant vocabulary to the Makefile's parse-time guard, one for
   selectors and one for per-variant maps, and now share one harvest of the
   Makefile.
+- **`test-avr-build-rebuild`, `test-workload-rebuild` and
+  `test-pic-build-rebuild`**, merged into `test-build-rebuild`. Each re-proved,
+  for its own targets, that a changed or identical request recompiles. The
+  merged gate instead reads Make's rule database and requires every file rule
+  with a recipe to name `FORCE` itself, so a new rule is covered when it is
+  written. What a database cannot show stays: atomic image and fuse-checker
+  publication, the validated-ELF consumer phase, recursive workload phases and
+  PIC harness inputs. The pinned header lists, soak prerequisite list and fuse
+  values went with the old gates, because they restated the tree.
 - **The Make programming path for the PIC12F675.** `pic12f675-preflight`,
   `pic12f675-program`, `pic12f675-release-program` and `pic12f675-finalize` are
   gone, together with the trim-evidence tool, the signed-image binding script

@@ -7,8 +7,9 @@
 # Two harnesses copy the repository into a mktemp directory and run Make inside
 # it:
 #
-#   test/run_mutation_tests.sh  -- one sandbox per mutant
-#   test/test_pic_rebuild.sh    -- one sandbox for the PIC soak file rules
+#   test/run_mutation_tests.sh   -- one sandbox per mutant
+#   test/test_build_rebuild.sh   -- one sandbox for Make's rule database and
+#                                   the PIC harness file rules
 #
 # They used to learn about a new file by different means: the walk below, versus
 # a hand-enumerated list of prerequisites. test/pic/find_pin_exact.h -- made a

@@ -40,7 +40,7 @@ WHERE OVERRIDES LIVE -- four sources, and the last two are the ones that matter.
   1. Lines invoking make, in EVERY file in the tree -- tracked, plus untracked
      and not ignored (see repo_files) -- shell, YAML, and documents.
      Backslash continuations are joined FIRST. This is not optional: in
-     test/test_avr_build_rebuild.sh the `make` sits on one line and its
+     test/test_build_rebuild.sh the `make` sits on one line and its
      overrides five continued lines below, and there are ZERO physical lines in
      this repo containing both `make` and `MCU=`. A physical-line harvest -- the
      first version of this sweep -- reported those three inert overrides as
@@ -104,8 +104,8 @@ DELIBERATELY NOT ANCHORED ON THE MAKE WORD, unlike axis C. `print-` with the
 lookbehind below is already unambiguous in this tree -- every non-query form
 (`--no-print-directory`, `-print-file-name`, `--print-data-base`,
 `--print-targets`) has a hyphen immediately before `print`. Requiring `make` on
-the same line would instead LOSE real reads: test_workload_rebuild.sh reads them
-through its `run_make` wrapper (no bare `make` token), and ci-local.sh's
+the same line would instead LOSE real reads: a suite can read them through a
+wrapper function with no bare `make` token, and ci-local.sh's
 eight-name `print-%` query spreads across a backslash continuation. A harvest that silently stops
 seeing real sites is the exact failure this item exists to catch.
 

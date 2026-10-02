@@ -47,10 +47,7 @@ SCOPE, stated so the next reader does not over-trust it. This covers the eleven
 fuse bytes. The Makefile passes many other -D macros, most of them workload
 knobs where an in-source default is correct behaviour (SIM_*, MODEL_FUZZ_*);
 classifying the rest into "default is meaningful" and "must be injected" is an
-open TODO item, and a severed -DSOAK_DURATION_MS is the one with teeth. A second
-hand-written copy of these eleven names lives in test/test_workload_rebuild.sh's
-fake compiler; it is left alone because it fails CLOSED -- a name it does not
-recognize makes that fake compiler exit 1.
+open TODO item, and a severed -DSOAK_DURATION_MS is the one with teeth.
 """
 
 import os

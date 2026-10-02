@@ -80,7 +80,7 @@ MUTATION_ALLOW_SKIP=$(resolve_mutation_allow_skip)
 policy_rc=$?
 [ "$policy_rc" -eq 0 ] || exit "$policy_rc"
 source "$SCRIPT_DIR/mutation_accounting.sh"
-# The sandbox builder, shared with test/test_pic_rebuild.sh -- the other harness
+# The sandbox builder, shared with test/test_build_rebuild.sh -- the other harness
 # that copies the repo into a mktemp tree and runs Make inside it. It used to
 # enumerate its prerequisites by hand, so a new one had to be added twice; the
 # allowlist walk now serves both. See test/scratch_tree.sh for the two
@@ -820,7 +820,7 @@ MUTATIONS=(
 # Files copied into each sandbox: all firmware sources + headers, the Makefile,
 # scripts/, and every source file under test/ at any depth. The walk itself, and
 # the rationale for every part of it, lives in test/scratch_tree.sh so that this
-# runner and test/test_pic_rebuild.sh cannot drift apart again. This binds it to
+# runner and test/test_build_rebuild.sh cannot drift apart again. This binds it to
 # the real tree; the name stays because the sandbox self-tests, the survivor
 # diagnostics and the merge-plan record all speak of copy_tree.
 copy_tree() {
