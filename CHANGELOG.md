@@ -137,6 +137,14 @@ lengths.
   repairs in a commit. The declared-topology check stays: the bounded
   declaration in `release/README.md` must still state the five counts derived
   from the build, because three of them are literals in the renderer.
+- **The remaining wording rules for design and toolchain prose.** The
+  unbound-measurement ban (patterns for timing and size results removed from
+  `DESIGN_DOCUMENTATION.adoc` and `TOOLCHAIN.adoc`) and the date-and-revision
+  ban on `DESIGN_DOCUMENTATION.adoc` are gone, and with them the validator
+  that held them. So is the check that `README.md`, `TOOLCHAIN.adoc` and
+  `test/README.md` each print the enforced host GCC floor. The floor itself is
+  still probed and enforced: `host-compiler-valid` refuses an older compiler
+  and names the version required.
 
 ## [0.9.16] - 2026-09-29
 

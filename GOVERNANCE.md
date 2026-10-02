@@ -155,8 +155,6 @@ rewrap or an adjective swap does not evade it.
 | attributive `hardware-qualified <noun>` | every durable document, **while the sentinel stands** | the predicate cannot be banned: every true sentence here *is* its negation. Adjective-plus-noun has no negated spelling, which is what makes it decidable. A floor, not a proof — and it lifts by itself when the sentinel goes |
 | a blanket denial that any `ipecmd` procedure has been published — described here rather than quoted, because quoting it *is* making it | durable documents | the same contradiction the `pic12f675-helper-status` row records, in its other direction: a blanket denial stood in one document while the helper published a route in another. Deliberately still permits a claim **scoped to a route**, which must stay sayable |
 | raw-writer `ipecmd` commands | **command contexts only** — fenced, listing, literal, indented, inline spans | a published raw write destroys factory calibration. Prose *mentioning* a tool is not a published command, so the scan reads contexts, not sentences |
-| unbound measurements | `DESIGN_DOCUMENTATION.adoc`, `TOOLCHAIN.adoc` | results that change when the source changes have no stable owner in a hand-edited document |
-| dates and source revisions | `DESIGN_DOCUMENTATION.adoc` | pinning provenance is the mitigation a misplaced measurement asks for, so removing the measurement has to close that door behind it |
 
 ### 3. Structural and derived
 
@@ -167,7 +165,6 @@ rewrap or an adjective swap does not evade it.
 | derived release lines | changelog heading, both compare links, contract and transition lines are **rendered**, not validated | seven hand-edited lines, every one a pure function of three inputs, took four commits and a 22-line test edit to get right |
 | root document allowlist | any root-level document, in either markup this project writes documents in, outside the durable set fails the release unless it carries the branch-only banner | adding one name pattern per working document is exactly how the gate came to miss `pre-v*-fixes.md`. An allowlist fails closed. Restricting the walk to Markdown was that same mistake in a second dimension: an AsciiDoc working document reached a release unseen, while the live-tree sweeps, which have always read both markups, held it to the very bans a working document exists to be exempt from |
 | branch-only banner | declared working documents must be deleted and de-referenced before a release cut | a release is cut from main; none may survive there |
-| GCC floor agreement | each of the three publishing documents states the enforced number beside a host `gcc` mention | the enforced floor and the published floor must not drift. Stated as one form family rather than two accepted sentences: the cross-compiler is excluded because the floor is the host's, and a bumped floor fails rather than matching a version that merely contains it |
 | design contract (14 ordered patterns) | safety-relevant numbers keep every figure and every part association | one pin broke when a `.` became a `;`. Negative coverage is generated from the table: delete the span a rule matches and it must stop matching |
 | `T3-pic12f675-bench` enumeration | the open silicon-only risks stay complete, in order, and in one place, and each still states its own subject | the Makefile, CI notes and release documentation cite them by number; dropping one stops tracking a risk while every citation still reads as though it were tracked. The numbering is the interface and is pinned exactly. The prose is not: each item is held to the terms of its **defining sentence**, because an item's body names its own subject many times and a rule reading the whole item stays satisfied by a body that outlived a gutted headline |
 | lifecycle authorities | every shipped document has exactly one declared kind | a document with no owner is a document nobody has to keep true |
@@ -179,20 +176,13 @@ rewrap or an adjective swap does not evade it.
 is a property of the register, not a coincidence, and it is the one a future
 author must not quietly spend.
 
-Two places held out longest, and both are gone:
-
-1. **`TODO.md`'s residual-risk items**, which were pinned as verbatim sentences
-   down to their `**bold**` markup. Half of that genuinely is an interface: the
-   Makefile, the CI notes and the release documentation cite these risks **by
-   number**, so the enumeration must stay complete and stably numbered. The
-   other half was never an interface. The numbering is now pinned exactly and
-   each item is held to the terms of its defining sentence.
-
-2. **The GCC floor's two accepted spellings.** Listing acceptable sentences is
-   the same antipattern retired everywhere else: *"GCC 10+"* and *"at least
-   GCC 10"* publish the identical requirement and used to fail. The property is
-   that the enforced number appears beside a host `gcc` mention, which one form
-   family states directly.
+The place that held out longest is gone: **`TODO.md`'s residual-risk items**,
+which were pinned as verbatim sentences down to their `**bold**` markup. Half
+of that genuinely is an interface: the Makefile, the CI notes and the release
+documentation cite these risks **by number**, so the enumeration must stay
+complete and stably numbered. The other half was never an interface. The
+numbering is now pinned exactly and each item is held to the terms of its
+defining sentence.
 
 When a rule here has to hold prose, it holds the terms and leaves the sentence
 to whoever is writing it. A proposal that needs an exact sentence is refused by

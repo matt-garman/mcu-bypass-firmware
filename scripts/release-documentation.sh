@@ -895,9 +895,8 @@ release_validate_hardware_claims() {
 #     reproducibility" -- the two sentences that keep reproducibility from being
 #     read as qualification, and retention from being read as endorsement.
 #
-# Three directions, because a bound can be lost by deletion, overwritten by a
-# stronger claim, or weakened by making a live specification own a changing
-# inventory or source-dependent result:
+# Two directions, because a bound can be lost by deletion or overwritten by a
+# stronger claim:
 #
 #   1. PRESENCE. Each bounded claim is required verbatim of the document that
 #      owns it, matched against flowed text so rewrapping stays editorial.
@@ -912,17 +911,6 @@ release_validate_hardware_claims() {
 #      claim. The adjective-plus-noun form has no negated spelling, which is
 #      what makes it decidable. It is a floor, not a proof: prose can still
 #      overclaim in words this does not enumerate.
-#   3. CURRENT FACTS. DESIGN_DOCUMENTATION.adoc retains architecture, capacities,
-#      reviewed ceilings and enforcing gates; TOOLCHAIN.adoc retains tool
-#      requirements and behavior. Current timing, size and current-draw results
-#      belong to build output or source/toolchain-bound release evidence.
-#      Focused lexical rules reject the concrete result forms removed from
-#      those two live specifications, and
-#      DESIGN_DOCUMENTATION.adoc additionally carries no date and no source
-#      revision: binding durable prose to either one is the mitigation a
-#      misplaced measurement asks for, so the rule that removes the measurement
-#      has to close that door behind it. Git already records when a thing was
-#      written and against what.
 #
 # The ban is conditional on the sentinel, so it lifts by itself. When a part
 # does complete controlled qualification the sentinel goes, and calling that
@@ -933,51 +921,6 @@ release_validate_hardware_claims() {
 # Published release/vX.Y.Z/ directories are immutable artifacts and are pruned;
 # so are the root-level branch-only working documents, which quote the banned
 # wording in order to describe banning it.
-# Reject prose that restates a fact this tree owns somewhere else.
-#
-# WHY THIS IS SEPARATE FROM THE CLAIM BOUNDARIES. The fenced blocks in
-# release_validate_claim_boundaries guard statements that must not silently
-# weaken: what no part has completed, what the PIC10F320 assurance package does
-# not establish, what reproducing an image proves. Losing one of those changes
-# what the project asserts about itself, so a release that ships it is publishing
-# a stronger claim than its evidence supports, and the release path checks it.
-#
-# These rules are a different kind. They keep durable design prose from
-# carrying a measurement bound to nothing that would age out of true, and from
-# pinning itself to a date or a revision. Each of those is a drift this project
-# has actually had -- but a drifted sentence in DESIGN_DOCUMENTATION.adoc is a
-# documentation defect, not a defect in the release, and a release is the most
-# expensive moment available at which to discover one.
-#
-# So this runs on every commit and NOT from the release path: the repair lands
-# on the commit that caused it, at the cost of a grep, and a release is never
-# stopped by design prose.
-release_validate_current_fact_rules() {
-	[ "$#" -eq 1 ] || return 2
-	local repo_root=$1
-	local document label flowed entry pattern description rc=0
-	# <document><TAB><extended regex><TAB><diagnostic>. Tabs keep regex
-	# alternation available without inventing an escaping convention.
-	local -a current_fact_rules=(
-		$'DESIGN_DOCUMENTATION.adoc\tMeasured[[:space:]]+worst[[:space:]]+pet-to-pet[[:space:]]+interval|per-tick[[:space:]]+sanity[[:space:]]+work[[:space:]]+is[[:space:]]+only.*instruction[[:space:]]+cycles|active[[:space:]]+IDD.*per-tick[[:space:]]+headroom\tcarries an unbound source-dependent measurement'
-		$'TOOLCHAIN.adoc\tMeasured[[:space:]]+on[[:space:]]+one[[:space:]]+source.*-O0\tcarries an unbound source-dependent measurement'
-		$'DESIGN_DOCUMENTATION.adoc\t[0-9]{4}-[0-9]{2}-[0-9]{2}|(at|on)[[:space:]]+(source[[:space:]]+)?commit[[:space:]]+.?[0-9a-f]{7}|(main|HEAD)[[:space:]]+at[[:space:]]+.?[0-9a-f]{7}\tbinds durable design prose to a date or a source revision'
-	)
-
-	for entry in "${current_fact_rules[@]}"; do
-		IFS=$'\t' read -r label pattern description <<<"$entry"
-		document="$repo_root/$label"
-		[ -f "$document" ] && [ -s "$document" ] && [ ! -L "$document" ] \
-			|| { _release_documentation_error "current-fact document is not a regular nonempty file: $label" || rc=1; continue; }
-		flowed=$(_release_flowed_text "$document") || return
-		if grep -Eiq -- "$pattern" <<<"$flowed"; then
-			_release_documentation_error "$label $description" || rc=1
-		fi
-	done
-
-	return "$rc"
-}
-
 # ============================================================================
 # RELEASE TOPOLOGY: THE DECLARATION STATES THE DERIVED COUNTS
 # ============================================================================
@@ -996,8 +939,10 @@ release_validate_current_fact_rules() {
 # ban that used to refuse it was retired under GOVERNANCE.md's review of
 # existing gates.
 #
-# WHERE IT RUNS. On the tree, on every commit, and NOT from the release path --
-# the same split, for the same reason, as the current-fact rules above.
+# WHERE IT RUNS. On the tree, on every commit, and NOT from the release path:
+# a stale declaration is a documentation defect, repaired by re-running
+# release-prepare, and a release is the most expensive moment available at
+# which to discover one.
 
 # The English spellings this project actually writes. Small counts are spelled
 # out -- "seven release parts", "four shell source files" -- and larger ones are

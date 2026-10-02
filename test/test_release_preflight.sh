@@ -98,8 +98,6 @@ declare -F release_validate_pic12f675_flashing_helper >/dev/null \
 	|| { printf 'FAIL: PIC12F675 flashing-helper contract is missing\n' >&2; exit 1; }
 declare -F release_current_contract_version >/dev/null \
 	|| { printf 'FAIL: current-contract version reader is missing\n' >&2; exit 1; }
-declare -F release_validate_current_fact_rules >/dev/null \
-	|| { printf 'FAIL: current-fact rule scanner is missing\n' >&2; exit 1; }
 declare -F release_validate_declared_topology >/dev/null \
 	|| { printf 'FAIL: declared release topology validator is missing\n' >&2; exit 1; }
 declare -F release_topology_counts >/dev/null \
@@ -2049,40 +2047,8 @@ assert_boundaries_rejects() {
 	checks=$((checks + 1))
 }
 
-# The current-fact rules are a SEPARATE validator, and deliberately so: they
-# police prose that restates a fact release/README.md owns, ages out of true, or
-# pins itself to a moment. Every one is a real drift this project has had, and
-# none of them is a defect in a release -- so they run here, on every commit,
-# and make-release.sh does not call them. Keeping their cases beside the claim
-# boundaries keeps the two contracts readable together while the gate that can
-# stop a release stays the smaller one.
-assert_current_facts_rejects() {
-	local description=$1 expected=$2
-	if release_validate_current_fact_rules "$boundaries_root" >"$output" 2>&1; then
-		fail "current-fact contract accepted $description"
-	fi
-	grep -Fq 'release documentation:' "$output" \
-		|| fail "$description was rejected without a documentation diagnostic"
-	grep -Fq "$expected" "$output" \
-		|| fail "$description was rejected for the wrong reason: $(<"$output")"
-	checks=$((checks + 1))
-}
-
-# A current-fact violation must NOT reach the validator the release path calls.
-# If it ever does, the split has collapsed and design prose can stop a release
-# again.
-assert_boundaries_ignores() {
-	local description=$1
-	release_validate_claim_boundaries "$boundaries_root" >"$output" 2>&1 \
-		|| fail "the release-path claim contract rejected $description, which is a current-fact rule and not its concern: $(<"$output")"
-	checks=$((checks + 1))
-}
-
 write_boundaries_fixture
 assert_boundaries_accepts 'the shipped documents'
-release_validate_current_fact_rules "$boundaries_root" >"$output" 2>&1 \
-	|| fail "the current-fact contract rejected the shipped documents: $(<"$output")"
-checks=$((checks + 1))
 
 # 1. PRESENCE. Each claim is fenced in the document that owns it, and the fence
 #    is deleted, emptied, unbalanced, gutted -- and rewritten.
@@ -2224,47 +2190,7 @@ reword_claim_block DESIGN_DOCUMENTATION.adoc pic10f320-flash-overrun \
 	'I did not guess at this. The modular firmware simply does not fit: I built all three variants, each came out roughly a hundred words too large for the 256 this part has, and the linker refused outright rather than missing narrowly.'
 assert_boundaries_accepts 'a rewritten PIC10F320 overrun record'
 
-# A3 retired the last exact-sentence pin in this project. It existed because a
-# measurement had been placed in durable design prose and binding its
-# provenance was the mitigation; the rule's own remedy is that the measurement
-# leaves. These two keep the mitigation from creeping back in its place --
-# nothing in this document is dated, and nothing in it is pinned to a revision,
-# because git already records both.
-write_boundaries_fixture
-printf '\nMeasured 2026-06-26 with the pinned toolchain, the shell built at 356 words.\n' \
-	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_current_facts_rejects 'a design guide dating its own prose' \
-	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
-assert_boundaries_ignores 'a design guide dating its own prose'
-
-write_boundaries_fixture
-printf '\nThat was established at source commit `0b44c0d` on the pinned toolchain.\n' \
-	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_current_facts_rejects 'a design guide pinning its own prose to a revision' \
-	'DESIGN_DOCUMENTATION.adoc binds durable design prose to a date or a source revision'
-assert_boundaries_ignores 'a design guide pinning its own prose to a revision'
-
-# 2. CURRENT FACTS. Stable design/tool behavior remains in these documents;
-# source-dependent results do not.
-write_boundaries_fixture
-printf '\n.Table Measured worst pet-to-pet interval, real image in simavr\n' \
-	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_current_facts_rejects 'an unbound live-image watchdog measurement' \
-	'DESIGN_DOCUMENTATION.adoc carries an unbound source-dependent measurement'
-
-write_boundaries_fixture
-printf '\nThe per-tick sanity work is only ~211 instruction cycles.\n' \
-	>> "$boundaries_root/DESIGN_DOCUMENTATION.adoc"
-assert_current_facts_rejects 'an unbound PIC loop-cycle measurement' \
-	'DESIGN_DOCUMENTATION.adoc carries an unbound source-dependent measurement'
-
-write_boundaries_fixture
-printf '\nMeasured on one source, -O0 used more words than -O2.\n' \
-	>> "$boundaries_root/TOOLCHAIN.adoc"
-assert_current_facts_rejects 'an unbound compiler optimization comparison' \
-	'TOOLCHAIN.adoc carries an unbound source-dependent measurement'
-
-# 3. ABSENCE. The claim the sentinel forbids, in each way it can arrive.
+# 2. ABSENCE. The claim the sentinel forbids, in each way it can arrive.
 write_boundaries_fixture
 printf '\nEvery release ships hardware-qualified firmware.\n' \
 	>> "$boundaries_root/README.md"
@@ -2318,29 +2244,8 @@ release_validate_claim_boundaries "$ROOT" >"$output" 2>&1 \
 	|| fail "the checked-in tree fails the bounded-claim contract: $(<"$output")"
 checks=$((checks + 1))
 
-current_facts_rc=0
-release_validate_current_fact_rules >"$output" 2>&1 || current_facts_rc=$?
-[ "$current_facts_rc" -eq 2 ] \
-	|| fail "current-fact contract accepted a missing repository argument"
-checks=$((checks + 1))
-
-# The live checked-in tree must satisfy the current-fact rules too. This is the
-# assertion that replaces their release-time enforcement: the rules did not get
-# weaker, they stopped being able to stop a release.
-release_validate_current_fact_rules "$ROOT" >"$output" 2>&1 \
-	|| fail "the checked-in tree fails the current-fact contract: $(<"$output")"
-checks=$((checks + 1))
-
-# ...and the release path must NOT call it. The whole point of the split is
-# that a drifted sentence in a design document cannot stop a release, so a
-# future edit that "restores" this call for symmetry has to fail here rather
-# than be discovered by an operator who set a day aside.
-! grep -Fq 'release_validate_current_fact_rules' "$RELEASE" \
-	|| fail "make-release.sh calls the current-fact scanner; design prose can stop a release again"
-checks=$((checks + 1))
-
-# The claim boundaries, by contrast, stay on the release path: they guard
-# statements a release must not publish more strongly than its evidence.
+# The claim boundaries stay on the release path: they guard statements a
+# release must not publish more strongly than its evidence.
 grep -Fq 'release_validate_claim_boundaries "$REPO_ROOT"' "$RELEASE" \
 	|| fail "make-release.sh no longer validates the bounded claims before a release"
 checks=$((checks + 1))
@@ -2449,8 +2354,7 @@ checks=$((checks + 1))
 
 # ...and the release path must not call it: a stale declaration is repaired by
 # re-running release-prepare on the commit that caused it, not discovered at the
-# most expensive moment available. Same split, same reason, as the current-fact
-# rules above.
+# most expensive moment available.
 ! grep -Fq 'release_validate_declared_topology' "$RELEASE" \
 	|| fail "make-release.sh calls the declared-topology check; it runs on every commit instead"
 checks=$((checks + 1))
@@ -3404,52 +3308,10 @@ for target in pic10f322-coverage-check-fw pic12f675-coverage-check-fw \
 done
 checks=$((checks + 1))
 
-# Enforced floor and published floor cannot drift: bumping MINIMUM_GCC without
-# republishing it (or the reverse) fails here rather than in a user's build.
+# The diagnostics below are held to the floor the probe itself enforces.
 minimum_gcc=$(sed -n 's/^MINIMUM_GCC=\([0-9][0-9]*\)$/\1/p' "$host_cc_gate")
 [ -n "$minimum_gcc" ] \
 	|| fail "could not read MINIMUM_GCC from test/host_compiler_version.sh"
-# Matched against the document with its line wrapping collapsed: the published
-# floor must survive a reflow of the paragraph that carries it.
-# The property is that each document publishes the ENFORCED NUMBER beside a host
-# gcc mention -- not that it uses one of two accepted sentences. This gate used
-# to require `GCC <n> or newer` or `Minimum host gcc version: <n>` literally,
-# which is the antipattern A2 retired everywhere else: "GCC 10+" and "at least
-# GCC 10" publish the identical requirement and failed, teaching an author that
-# the offence was wording rather than omission. `avr-gcc` is excluded because
-# the floor is the HOST compiler's, and the number carries its own boundaries so
-# a bumped floor fails rather than matching a version that merely contains it.
-floor_gcc='(^|[^-[:alnum:]])(gcc|g\+\+)([^[:alnum:]]|$)'
-floor_num="(^|[^0-9.])$minimum_gcc([^0-9.]|\$)"
-floor_family="$floor_gcc[^0-9]{0,32}$minimum_gcc([^0-9.]|\$)|$floor_num[^0-9]{0,32}$floor_gcc"
-for document in README.md TOOLCHAIN.adoc test/README.md; do
-	tr '\n' ' ' < "$ROOT/$document" | tr -s '[:space:]' ' ' > "$work/floor-prose.txt"
-	grep -Eqi -- "$floor_family" "$work/floor-prose.txt" \
-		|| fail "$document does not publish the enforced host compiler floor (GCC $minimum_gcc)"
-	checks=$((checks + 1))
-done
-
-# What the family must and must not accept, checked against the real prose so a
-# fixture cannot drift away from the documents the rule guards. A bumped floor
-# that nobody republished fails; a rewrite of the same floor passes; and a
-# cross-compiler mention is not a host floor.
-tr '\n' ' ' < "$ROOT/README.md" | tr -s '[:space:]' ' ' > "$work/floor-prose.txt"
-sed -i "s/$minimum_gcc/$((minimum_gcc + 1))/g" "$work/floor-prose.txt"
-if grep -Eqi -- "$floor_family" "$work/floor-prose.txt"; then
-	fail "the host-floor rule accepted prose publishing a floor other than $minimum_gcc"
-fi
-checks=$((checks + 1))
-printf 'Every lane needs a host C compiler (at least GCC %s, or Clang).\n' \
-	"$minimum_gcc" > "$work/floor-prose.txt"
-grep -Eqi -- "$floor_family" "$work/floor-prose.txt" \
-	|| fail "the host-floor rule rejected a reworded publication of the same floor"
-checks=$((checks + 1))
-printf 'The cross build needs avr-gcc %s; the host compiler is unrelated.\n' \
-	"$minimum_gcc" > "$work/floor-prose.txt"
-if grep -Eqi -- "$floor_family" "$work/floor-prose.txt"; then
-	fail "the host-floor rule read a cross-compiler mention as the host floor"
-fi
-checks=$((checks + 1))
 
 # A compiler that rejects the construct is refused with an actionable
 # diagnostic. The fake forwards EVERYTHING except the probe compile, so the

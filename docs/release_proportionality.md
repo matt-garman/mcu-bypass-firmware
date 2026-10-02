@@ -307,18 +307,13 @@ the evidence it ships, so these keep their release-time enforcement.
 The six **current-fact rules** were regexes over `DESIGN_DOCUMENTATION.adoc`
 and `TOOLCHAIN.adoc` rejecting restatements of release topology, unbound
 measurements, and dates or commit SHAs in durable design prose. Each is a real
-drift this project has had. None of them is a defect in a release. The three
-topology rules were later retired under `GOVERNANCE.md`'s review of existing
-gates; the measurement and date rules remain.
+drift this project has had. None of them is a defect in a release.
 
-They now live in `release_validate_current_fact_rules`, which runs on every
-commit and which `make-release.sh` does not call. No rule was weakened: the
-same six patterns, the same diagnostics, the same live-tree assertion. What was
-added is the proof that the split holds -- a control asserting a current-fact
-violation is *not* rejected by the contract the release path calls, and a
-structural check that the release script never names the new function. A future
-edit restoring that call for symmetry fails in `make test` rather than being
-discovered by an operator who set a day aside.
+They moved into `release_validate_current_fact_rules`, which ran on every
+commit and which `make-release.sh` did not call. No rule was weakened by the
+move: the same six patterns, the same diagnostics, the same live-tree
+assertion, plus the proof that the split held. All six were later retired under
+`GOVERNANCE.md`'s review of existing gates, and the validator with them.
 
 ## Part 5 - the soak is a prerequisite, not a phase (done)
 
