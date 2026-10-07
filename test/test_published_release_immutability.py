@@ -164,6 +164,9 @@ IMAGE_CONTINUITY = {
                        "phase of one, and GOVERNANCE.md took ownership of the "
                        "documentation rules. Nothing under src/ changed at "
                        "all, so all 21 were republished byte for byte"),
+    "v0.9.16": (21, 0, "a documentation and release-policy release: every "
+                       "firmware source change was a comment, so all 21 "
+                       "images were republished byte for byte"),
 }
 
 
