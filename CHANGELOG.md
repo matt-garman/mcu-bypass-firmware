@@ -52,6 +52,8 @@ lengths.
 
 ## [Unreleased]
 
+## [0.9.17] - 2026-10-14
+
 ### Changed
 
 - **The in-range context check (F2) is unconditional source.** Every modular
@@ -1742,7 +1744,8 @@ to six parts and 18 images.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.16...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.17...HEAD
+[0.9.17]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.13...v0.9.14
