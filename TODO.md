@@ -451,6 +451,91 @@ for compiler-sensitive defects.
 Dependencies: reproducible compiler builds and simulator compatibility. Effort:
 Medium. Risk/impact: Medium-High for long-term maintainability and reliability.
 
+### T3-host-2604 - Port the host tooling to Ubuntu 26.04
+
+On 2026-10-14 the development host moved from Ubuntu 24.04 to 26.04.1, while CI
+and release still run on `ubuntu-24.04`. Measured on 26.04 with the pinned AVR
+toolchain selected through `CC=`, `make test` failed ten gates and the release target lanes
+failed on every part. All of these failures are host-tool drift, not firmware.
+An Ubuntu 24.04 userland on the same host rebuilt every v0.9.16 image
+bit-for-bit and passed `make test`, every release target lane and
+`make release-preflight`. Releases are qualified that way until this item lands.
+In priority order:
+
+1. **GNU Make 4.4 runs command-line Make functions before any guard can reject
+   them.** Since 4.4, `$(shell ...)` passes every exported variable to its child
+   with its value expanded, and command-line assignments are always exported.
+   So a value such as `X='$(shell touch f)'` executes at the first parse-time
+   `$(shell)` probe. Values inherited from the environment are passed back
+   unexpanded and are not affected. On make 4.4.1, five injection-guard gates
+   saw the injected text execute: `test-avr-program-order`, `test-pic-build`,
+   `test-release-images`, `test-release-preflight` and
+   `test-variant-selector-guard`. The guards still refuse, but too late: their
+   "never executes" property holds only on make 4.3, the version the hosted
+   runner ships, and current distributions ship 4.4. The fix belongs before the
+   first `$(shell)`: turn each command-line value into a literal (via
+   `$(value ...)`), or keep it out of the `$(shell)` environment. Either way it
+   must keep the `command line` origin that the release-override checks read.
+   Then make the qualified Make version an explicit strict-tool and
+   release-preflight check rather than an accident of the runner image.
+2. **Gate scripts do not honour AVR tool overrides.** Many gates strip
+   `MAKEFLAGS` before running `make print-CC` (`read_var` in
+   `test/test_static_assert_guards.sh` is one). A `CC=` override therefore
+   reaches the top-level build but not those checks, which quietly fall back to
+   the distribution `avr-gcc`. Today a PATH shim is the only way to swap the AVR
+   toolchain for every gate. Either pass the selected tool paths through
+   explicitly, or make each gate fail when the tool it re-derives differs from
+   the caller's.
+3. **Release provenance can misattribute the AVR toolchain.**
+   `scripts/make-release.sh` records avr-libc with `dpkg-query`, not through
+   the selected `CC`. Any toolchain that is not the apt one is therefore
+   recorded with the wrong library version; read `__AVR_LIBC_VERSION_STRING__`
+   through the selected compiler instead. The binutils row has a related,
+   older problem: it reports whichever `avr-objcopy` comes first on PATH. On
+   this host that is XC8's bundled copy (v0.9.16's MANIFEST shows
+   `AVR_8_bit_GNU_Toolchain_3.6.7`), not binutils-avr.
+4. **uutils coreutils.** `timeout -s KILL` exits 124 here, where GNU exits
+   128+9. The gpsim wrapper and mutation accounting already treat both as
+   infrastructure failures. Only the fixtures in `test/test_gpsim_wrappers.sh`
+   and the nested-timeout self-test in `test/run_mutation_tests.sh` expect 137,
+   so they should accept either. No other coreutils difference failed a gate.
+5. **clang-tidy 21** raises `performance-no-int-to-ptr` and
+   `clang-analyzer-core.FixedAddressDereference` on every avr-libc register
+   access: 46 findings in the first file, after which `analyze-tidy` stops, so
+   the full count is unmeasured. Both checks object to memory-mapped I/O itself.
+   Disable them in `CLANG_TIDY_CHECKS` with that rationale.
+6. **cppcheck 2.19's MISRA addon** raises Rule 17.3 on avr-libc's `cli()`,
+   `sei()`, `sleep_mode()` and `wdt_reset()` and on inline `__asm__`. It also
+   raises Rule 8.7 on externally linked functions that other translation units
+   do use; each run analyses one file at a time. This
+   fails the MISRA lane on all seven parts, with no source change behind it.
+   Resolve each finding with a cross-unit (CTU) run or a recorded deviation in
+   `MISRA_COMPLIANCE.md`. Also re-test the header-located-finding exit-status
+   workaround in the Makefile against 2.19.
+7. **Python 3.14** is outside yasimavr's supported 3.9-3.13 range, and
+   `scripts/fetch_yasimavr.sh` runs plain `python3`, with no way to choose an
+   interpreter. The existing venv broke when the upgrade removed its 3.12
+   interpreter. A venv built with Linuxbrew's Python 3.12 passed the ATtiny202
+   sim, fault and lock-step lanes. Add an interpreter selector;
+   `T25-yasimavr-repin` may widen the range.
+8. **The pinned AVR toolchain is no longer a distribution package.** 26.04
+   ships avr-gcc 14, avr-libc 2.2.1 and binutils 2.43 or later. The noble
+   packages still work when unpacked into a prefix, and they reproduce v0.9.16.
+   Under avr-gcc 14, `set_sleep_mode()` trips `-Werror=sign-conversion` in
+   `src/bypass_mcu_avr_classic.c`, and `avr-size` no longer accepts the
+   Atmel-only `-C` that the size and flash-budget recipes use. Moving the pin
+   changes every AVR image, so it belongs to `T25-cross-compiler` and
+   `T3-toolchain`, not here. This item only needs the pinned toolchain to be
+   installable from a verified source.
+9. **Packages the upgrade removed:** `libglib2.0-dev`, which every PIC fault
+   lane needs (they fail closed under `STRICT_TOOLS=1`), and `python3-venv`. The
+   reproduction list in `TOOLCHAIN.adoc` should name them for 26.04.
+
+Dependencies: none for items 1-7 and 9; item 8's pin move depends on
+`T25-cross-compiler`. Effort: 1-2 days, mostly the Make 4.4 redesign and the
+MISRA records. Risk: High for item 1, an injection guard that holds only on make
+4.3. Low to Medium for the rest, which fail closed today.
+
 ### T3-hil - Build a behavioral and register-introspection HIL rig
 
 Re-host representative simulator stimuli on real parts with a deterministic
@@ -822,6 +907,7 @@ The stable ID in each row matches exactly one open section above.
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
+| T3-host-2604 | Port host tooling to Ubuntu 26.04 (Make 4.4 first) | 3 | 1-2 d | High - Make 4.4 defeats the injection guards |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |
 | T3-downloader-release | Flash-first landing page and self-verifiable bundle | 3 | 8-11 h | Medium - first-run experience |
