@@ -86,6 +86,12 @@ lengths.
   bundled copy. avr-libc is now identified through the selected compiler, and
   the AVR rows name the executables actually resolved. Both rows read
   differently from v0.9.18 on.
+- **`make test STRICT_TOOLS=1` never checked the avr-gcc pin.** Only a release
+  did, so on a host whose default avr-gcc is not 7.3.0 the suite failed well into
+  its run: `test-static-assert-guards` reported the unmutated Classic shell as
+  uncompilable. The new `avr-compiler-valid`, third in each aggregate, refuses
+  that compiler before anything compiles and names the fix. A `CC=` override is
+  reported and not enforced.
 
 ## [0.9.17] - 2026-10-14
 

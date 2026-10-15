@@ -40,7 +40,9 @@ Everything at the `test/` root falls into one of these roles:
   `misra_suppressions.txt` (each deviation maps to a `MISRA_COMPLIANCE.md`
   record), and the fail-closed diagnostic parser `misra_output_gate.py`.
 - **Host prerequisite gates** run before anything else: `python_version.py`,
-  `host_compiler_version.sh` (GCC 10 or newer, or Clang).
+  `host_compiler_version.sh` (GCC 10 or newer, or Clang), and
+  `avr_compiler_version.sh` (under `STRICT_TOOLS=1`, the default avr-gcc is
+  exactly the release pin).
 - **Budget and evidence checkers** invoked by build recipes rather than only by
   tests: `check_flash_budget.sh`, `check_pic_data_budget.sh`,
   `check_pic_context_layout.sh`, `check_stack_usage.sh`,

@@ -3259,7 +3259,8 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # Membership is asserted from Make's own prerequisite sets in
 # test/test_build_rebuild.sh, not left to inspection of these two lists.
 TEST_GATES_EARLY = \
-        python-version-valid host-compiler-valid analyze test-static-assert-guards \
+        python-version-valid host-compiler-valid avr-compiler-valid \
+        analyze test-static-assert-guards \
         test-deliberate-duplication \
         test-host test-model-check test-symbolic test-cbmc \
         test-fuses test-stack-bound test-stack-bound-regression \
@@ -3660,7 +3661,8 @@ CI_XT_SOAK_DURATION_MS = 300000
 # The mandatory host gates use subprocess.run(capture_output=..., text=...),
 # both added in Python 3.7. Keep this first in each aggregate so an unsupported
 # host gets the actionable contract diagnostic before any Python child gate.
-# host-compiler-valid follows it for the same reason, covering the C side.
+# host-compiler-valid follows it for the same reason, covering the C side, and
+# avr-compiler-valid third, covering the AVR cross-compiler.
 python-version-valid:
 	@if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: Python 3.7 or newer is required by the repository host gates; python3 was not found." >&2; \
@@ -3680,6 +3682,18 @@ python-version-valid:
 .PHONY: host-compiler-valid
 host-compiler-valid:
 	@HOSTCC="$(HOSTCC)" test/host_compiler_version.sh "$(HOSTCC)"
+
+# Third in each aggregate. Under STRICT_TOOLS=1 the Makefile's default CC must
+# be the release-pinned avr-gcc, refused here with the corrective action rather
+# than met later as a compile error in whichever gate first builds AVR code
+# (Ubuntu 26.04's avr-gcc 14 fails test-static-assert-guards' control compile).
+# A CC= override is reported and not enforced; test/avr_compiler_version.sh
+# owns the policy. Strictness is passed as Make computes it for $(SKIP), so the
+# two cannot disagree about what STRICT_TOOLS means.
+.PHONY: avr-compiler-valid
+avr-compiler-valid:
+	@test/avr_compiler_version.sh '$(CC)' '$(origin CC)' \
+		'$(if $(strip $(STRICT_TOOLS)),strict,lenient)'
 
 # Default `make test`: FAST workload. Runs static analysis, the host golden
 # model, the exhaustive state-space model check, the symbolic single-step proof,

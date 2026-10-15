@@ -3364,6 +3364,122 @@ host_cc_rc=0
 	|| fail "host compiler gate did not reject a malformed invocation with rc 2"
 checks=$((checks + 1))
 
+# --- pinned AVR compiler -----------------------------------------------------
+# The AVR counterpart, third in each aggregate. Under STRICT_TOOLS=1 the
+# Makefile's default CC must be the release's avr-gcc pin. Without this gate,
+# Ubuntu 26.04's avr-gcc 14 surfaced as test-static-assert-guards calling the
+# unmutated Classic shell uncompilable. The cases differ only in the banner a
+# fake compiler prints, and in the facts the Makefile hands the gate.
+avr_cc_gate="$ROOT/test/avr_compiler_version.sh"
+[ -x "$avr_cc_gate" ] \
+	|| fail "test/avr_compiler_version.sh is missing or not executable"
+read -r _first _second third_gate _rest <<<"$early_gates"
+[ "$third_gate" = avr-compiler-valid ] \
+	|| fail "avr-compiler-valid is not the third aggregate gate (got '$third_gate')"
+checks=$((checks + 1))
+
+# One pin, three spellings: the gate's, the release's refusal, and the version
+# the project-local installer probes for.
+avr_gcc_pin=$(sed -n 's/^AVR_GCC_PIN=\([0-9][0-9.]*\)$/\1/p' "$avr_cc_gate")
+[ -n "$avr_gcc_pin" ] \
+	|| fail "could not read AVR_GCC_PIN from test/avr_compiler_version.sh"
+grep -Fxq "require_pinned_compiler \"avr-gcc\" CC \"\$AVR_CC\" \"\$TC_AVR_GCC\" $avr_gcc_pin $avr_gcc_pin" \
+		"$ROOT/scripts/make-release.sh" \
+	|| fail "AVR_GCC_PIN=$avr_gcc_pin is not the avr-gcc pin scripts/make-release.sh enforces"
+grep -Fxq "VERSION_LINE=\"\${AVR_TOOLCHAIN_VERSION_LINE:-avr-gcc (GCC) $avr_gcc_pin}\"" \
+		"$ROOT/scripts/fetch_avr_toolchain.sh" \
+	|| fail "AVR_GCC_PIN=$avr_gcc_pin is not the version scripts/fetch_avr_toolchain.sh installs"
+checks=$((checks + 1))
+
+fake_avr_bin="$work/fake-avr-bin"
+mkdir -p "$fake_avr_bin"
+cat > "$fake_avr_bin/avr-gcc" <<'FAKE_AVR_GCC'
+#!/usr/bin/env bash
+if [ "${1-}" = --version ]; then
+	[ -z "$FAKE_AVR_BANNER" ] || printf '%s\n' "$FAKE_AVR_BANNER" 'Copyright (C) the fake'
+fi
+exit 0
+FAKE_AVR_GCC
+chmod +x "$fake_avr_bin/avr-gcc"
+# avr_gate BANNER ORIGIN MODE: drive the gate directly; sets avr_rc.
+avr_gate() {
+	avr_rc=0
+	FAKE_AVR_BANNER=$1 "$avr_cc_gate" "$fake_avr_bin/avr-gcc" "$2" "$3" \
+		>"$output" 2>&1 || avr_rc=$?
+}
+avr_gate 'avr-gcc (GCC) 7.3.0' file strict
+[ "$avr_rc" -eq 0 ] && [ ! -s "$output" ] \
+	|| fail "the pinned avr-gcc was not accepted silently (rc=$avr_rc): $(cat "$output")"
+avr_gate 'avr-gcc (Ubuntu 7.3.0-16ubuntu3) 7.3.0' default strict
+[ "$avr_rc" -eq 0 ] \
+	|| fail "a distribution-packaged avr-gcc 7.3.0 banner was refused (rc=$avr_rc)"
+avr_gate 'avr-gcc (GCC) 14.3.0' file strict
+[ "$avr_rc" -eq 1 ] \
+	|| fail "a drifted default avr-gcc was not refused under strict (rc=$avr_rc)"
+for diagnostic in "release-pinned avr-gcc $avr_gcc_pin" 'avr-gcc (GCC) 14.3.0' \
+		"$fake_avr_bin/avr-gcc" scripts/fetch_avr_toolchain.sh \
+		'third_party/avr-toolchain/usr/bin:$PATH' 'CC= on the'; do
+	grep -Fq -- "$diagnostic" "$output" \
+		|| fail "drifted-avr-gcc diagnostic omitted: $diagnostic"
+done
+avr_gate 'avr-gcc (GCC) 17.3.0' file strict
+[ "$avr_rc" -eq 1 ] \
+	|| fail "a banner merely containing the pin was accepted (rc=$avr_rc)"
+avr_gate 'avr-gcc (GCC) 14.3.0' environment strict
+[ "$avr_rc" -eq 1 ] \
+	|| fail "an environment-supplied CC was exempted from the pin (rc=$avr_rc)"
+avr_gate '' file strict
+[ "$avr_rc" -eq 1 ] && grep -Fq 'printed no version banner' "$output" \
+	|| fail "a compiler with no banner was not refused with its own diagnostic (rc=$avr_rc)"
+checks=$((checks + 1))
+
+# What the gate leaves alone: a lenient run, and an explicit selection, which
+# is reported rather than enforced.
+avr_gate 'avr-gcc (GCC) 14.3.0' file lenient
+[ "$avr_rc" -eq 0 ] && [ ! -s "$output" ] \
+	|| fail "a lenient run enforced the avr-gcc pin or spoke (rc=$avr_rc): $(cat "$output")"
+for origin in 'command line' 'environment override'; do
+	avr_gate 'avr-gcc (GCC) 14.3.0' "$origin" strict
+	[ "$avr_rc" -eq 0 ] && grep -Fq "($origin); the avr-gcc $avr_gcc_pin pin is not enforced" "$output" \
+		|| fail "an explicit CC ($origin) was not reported and exempted (rc=$avr_rc): $(cat "$output")"
+done
+checks=$((checks + 1))
+
+# Absent compiler, and malformed invocations.
+avr_rc=0
+"$avr_cc_gate" "$work/definitely-not-avr-gcc" file strict >"$output" 2>&1 || avr_rc=$?
+[ "$avr_rc" -eq 1 ] && grep -Fq 'was not found' "$output" \
+	|| fail "a missing default avr-gcc was not refused with its own diagnostic (rc=$avr_rc)"
+for malformed in 'one two' 'avr-gcc file bogus' 'avr-gcc bogus strict'; do
+	avr_rc=0
+	# shellcheck disable=SC2086 # word-split into the malformed argument list
+	"$avr_cc_gate" $malformed >"$output" 2>&1 || avr_rc=$?
+	[ "$avr_rc" -eq 2 ] \
+		|| fail "avr compiler gate did not reject '$malformed' with rc 2 (rc=$avr_rc)"
+done
+checks=$((checks + 1))
+
+# The Makefile hands the gate the facts: CC's origin and Make's own reading of
+# STRICT_TOOLS. A fake avr-gcc 14 first on PATH stands in for a 26.04 host.
+avr_gate_make() {
+	avr_rc=0
+	(
+		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL STRICT_TOOLS CC
+		PATH="$fake_avr_bin:$PATH" FAKE_AVR_BANNER='avr-gcc (GCC) 14.3.0' \
+			"$REAL_MAKE" --no-print-directory -s -C "$ROOT" avr-compiler-valid "$@"
+	) >"$output" 2>&1 || avr_rc=$?
+}
+avr_gate_make STRICT_TOOLS=1
+[ "$avr_rc" -ne 0 ] && grep -Fq 'avr-gcc (GCC) 14.3.0' "$output" \
+	|| fail "the avr-compiler-valid recipe, strict, accepted a drifted default avr-gcc (rc=$avr_rc)"
+avr_gate_make
+[ "$avr_rc" -eq 0 ] && [ ! -s "$output" ] \
+	|| fail "the avr-compiler-valid recipe, lenient, enforced the pin (rc=$avr_rc): $(cat "$output")"
+avr_gate_make STRICT_TOOLS=1 CC=avr-gcc
+[ "$avr_rc" -eq 0 ] && grep -Fq '(command line)' "$output" \
+	|| fail "the avr-compiler-valid recipe did not exempt a command-line CC (rc=$avr_rc): $(cat "$output")"
+checks=$((checks + 1))
+
 # Independent missing capabilities are aggregated exactly as the real preflight
 # aggregates its report. One run proves every diagnostic without paying for 74
 # real Makefile parses per missing input.

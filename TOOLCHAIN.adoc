@@ -395,6 +395,9 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
   Note this is a floor on the HOST compiler only.  It says nothing about the
   image-defining avr-gcc/XC8 pins below, which are exact-version contracts.
+  The avr-gcc pin has its own gate, run third: under STRICT_TOOLS=1,
+  `make avr-compiler-valid` (test/avr_compiler_version.sh) refuses a default
+  avr-gcc that is not exactly 7.3.0; see "Hosts newer than Ubuntu 24.04".
 
 == Static analysis
 
@@ -507,7 +510,10 @@ are in place:
                   scripts/fetch_avr_toolchain.sh
                   export PATH="$PWD/third_party/avr-toolchain/usr/bin:$PATH"
                 Installed this way, it rebuilt all 21 v0.9.16 images
-                bit-for-bit.
+                bit-for-bit. Under STRICT_TOOLS=1, `make test` refuses up
+                front (avr-compiler-valid, test/avr_compiler_version.sh) when
+                the default avr-gcc is not exactly the pin, and prints these
+                two lines; a CC= override is reported and not enforced.
   yasimavr:     26.04's python3 is 3.14, outside the 3.9-3.13 lock. Name a
                 supported interpreter with YASIMAVR_PYTHON (see "Simulator").
   Packages:     the upgrade from 24.04 removed libglib2.0-dev (every PIC fault
