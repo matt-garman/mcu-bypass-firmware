@@ -166,9 +166,9 @@ license or hand-written assembly, neither of which this project will take.
                 gate, and release preflight checks it before PyYAML or validation.
                 This host-Python range has no upper cap and is distinct from the
                 patched yasimavr build/runtime requirement, which supports only
-                standard 64-bit CPython 3.9 through 3.13 (see below); a host
-                whose python3 is newer names a supported interpreter with
-                YASIMAVR_PYTHON.
+                standard 64-bit CPython 3.9 through 3.14 (see below); a host
+                whose python3 is outside that range names a supported
+                interpreter with YASIMAVR_PYTHON.
                 The PIC12F675 needs python3 for a second reason: `make
                 pic12f675-simcal` runs the repository's calibration-word
                 injector to derive its simulator images, so every 12F675
@@ -339,7 +339,7 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 test/test_fetch_yasimavr.sh).
   install:      sudo apt install python3 python3-venv python3-dev g++ curl
                 scripts/fetch_yasimavr.sh
-                (where python3 is outside 3.9-3.13, e.g. Ubuntu 26.04's 3.14:
+                (where python3 is outside 3.9-3.14:
                 YASIMAVR_PYTHON=/path/to/python3.12 scripts/fetch_yasimavr.sh)
   patches:      two upstream yasimavr bugs (reported upstream) block our
                 fuse-locked-WDT firmware and are carried as the vendored patches:
@@ -494,7 +494,7 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
 Measured on Ubuntu 26.04.1 on 2026-10-14. The versions recorded above are the
 Ubuntu 24.04 ones that CI, release CI and release qualification still run. A
-newer host passes `make test` and every release target lane once three things
+newer host passes `make test` and every release target lane once two things
 are in place:
 
   Pinned AVR toolchain:
@@ -514,8 +514,8 @@ are in place:
                 front (avr-compiler-valid, test/avr_compiler_version.sh) when
                 the default avr-gcc is not exactly the pin, and prints these
                 two lines; a CC= override is reported and not enforced.
-  yasimavr:     26.04's python3 is 3.14, outside the 3.9-3.13 lock. Name a
-                supported interpreter with YASIMAVR_PYTHON (see "Simulator").
+  yasimavr:     builds on 26.04's own python3 (3.14) since the lock moved to
+                PyYAML 6.0.3, the first release with 3.14 wheels.
   Packages:     the upgrade from 24.04 removed libglib2.0-dev (every PIC fault
                 lane needs it) and python3-venv; reinstall both.
 

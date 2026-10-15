@@ -57,8 +57,10 @@ lengths.
 - **Ubuntu 26.04 hosts pass every gate natively.** `scripts/fetch_avr_toolchain.sh`
   installs the pinned avr-gcc 7.3.0 toolchain from SHA-256-pinned Ubuntu 24.04
   packages, re-verifying the installed tree on every run, and
-  `scripts/fetch_yasimavr.sh` takes `YASIMAVR_PYTHON` for hosts whose `python3`
-  is newer than 3.13. cppcheck 2.19, clang-tidy 21 and uutils coreutils are
+  `scripts/fetch_yasimavr.sh` builds the patched yasimavr on 26.04's own CPython
+  3.14: its lock moves to PyYAML 6.0.3, the first release with 3.14 wheels, and
+  `YASIMAVR_PYTHON` selects another interpreter. cppcheck 2.19, clang-tidy 21
+  and uutils coreutils are
   accommodated (MISRA record D-6 for the analyzer artifacts). Releases are still
   qualified on Ubuntu 24.04; see `TOOLCHAIN.adoc`, "Hosts newer than Ubuntu 24.04".
 - **The AVR firmware also builds under avr-gcc 14.** Each AVR shell's

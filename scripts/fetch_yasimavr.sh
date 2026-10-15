@@ -71,13 +71,12 @@
 #   Env overrides: YASIMAVR_VER, YASIMAVR_SDIST_SHA256, PIP_INDEX_URL, and
 #   YASIMAVR_PYTHON (default: python3), the interpreter that builds and then
 #   runs the venv. A host whose python3 is outside the supported range below
-#   (Ubuntu 26.04 ships 3.14) names a supported one here, e.g.
-#   YASIMAVR_PYTHON=/home/linuxbrew/.linuxbrew/bin/python3.12.
+#   names a supported one here, e.g. YASIMAVR_PYTHON=/usr/bin/python3.12.
 #
 # PREREQUISITES (hard -- the script fails loud, it does not silently skip; the
 # Makefile harness targets are the ones that skip cleanly when the venv is
 # absent, exactly as `make attiny202` skips without the DFP):
-#   * CPython 3.9-3.13 on glibc Linux x86_64/aarch64, with the venv module,
+#   * CPython 3.9-3.14 on glibc Linux x86_64/aarch64, with the venv module,
 #     as python3 or as YASIMAVR_PYTHON
 #                                              (apt: python3 python3-venv)
 #   * the CPython development headers        (apt: python3-dev)  -- to compile
@@ -252,7 +251,7 @@ try:
     libc_parts = tuple(int(part) for part in libc_version.split(".")[:2])
 except ValueError:
     libc_parts = ()
-ok = ((3, 9) <= sys.version_info[:2] < (3, 14)
+ok = ((3, 9) <= sys.version_info[:2] < (3, 15)
       and platform.python_implementation() == "CPython"
       and struct.calcsize("P") == 8
       and sys.abiflags == ""
@@ -262,7 +261,7 @@ ok = ((3, 9) <= sys.version_info[:2] < (3, 14)
       and platform.machine() in ("x86_64", "aarch64")
       and libc_name == "glibc" and libc_parts >= (2, 17))
 raise SystemExit(0 if ok else 1)' \
-    || die "the lock supports standard 64-bit CPython 3.9-3.13 on glibc 2.17+ Linux x86_64/aarch64 only (${PYTHON} is not one; select another with YASIMAVR_PYTHON=)."
+    || die "the lock supports standard 64-bit CPython 3.9-3.14 on glibc 2.17+ Linux x86_64/aarch64 only (${PYTHON} is not one; select another with YASIMAVR_PYTHON=)."
 if have c++; then CXX=c++
 elif have g++; then CXX=g++
 else die "no C++ compiler (install 'g++')."
