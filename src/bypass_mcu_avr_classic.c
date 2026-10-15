@@ -288,9 +288,12 @@ static void hw_tick_timer_start(void) {
     // running so the tick ISR still wakes us. (Deeper modes would stop
     // Timer0)
     // NOTE: set_sleep_mode() is an avr-libc macro whose ~mask expansion trips
-    // -Wconversion; suppress locally since we cannot cast inside the macro.
+    // -Wconversion (avr-gcc 14 files it under -Wsign-conversion, which the
+    // first pragma no longer covers); suppress both locally since we cannot
+    // cast inside the macro.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
     set_sleep_mode(SLEEP_MODE_IDLE);
 #pragma GCC diagnostic pop
 }

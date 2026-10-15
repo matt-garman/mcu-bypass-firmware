@@ -79,10 +79,12 @@ int main(void) {
 
     // idle sleep between ticks (core halts, TCB0 + its ISR keep running).
     // NOTE: set_sleep_mode() is an avr-libc macro whose mask expansion trips
-    // -Wconversion; suppress locally since we cannot cast inside the macro
-    // (same treatment as the classic-AVR shell).
+    // -Wconversion (avr-gcc 14: -Wsign-conversion); suppress both locally
+    // since we cannot cast inside the macro (same treatment as the
+    // classic-AVR shell).
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
     set_sleep_mode(SLEEP_MODE_IDLE);
 #pragma GCC diagnostic pop
     sei();

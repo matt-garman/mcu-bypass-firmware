@@ -79,7 +79,7 @@ measured=0
 for elf in "${elfs[@]}"; do
 	[ -f "$elf" ] && [ ! -L "$elf" ] && [ -s "$elf" ] \
 		|| die "firmware ELF is missing, empty, or not a regular file: $elf"
-	if ! size_output=$(LC_ALL=C "${size_command[@]}" --mcu="$mcu" -C "$elf" 2>&1); then
+	if ! size_output=$(LC_ALL=C "${size_command[@]}" --format=avr --mcu="$mcu" "$elf" 2>&1); then
 		printf '%s\n' "$size_output" >&2
 		die "size command failed for $elf"
 	fi

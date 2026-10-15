@@ -1509,8 +1509,10 @@ variant against `XT_FLASH_BYTES` and holds static `Data:` use to
 `XT_STATIC_RAM_LIMIT` of the device's `XT_SRAM_BYTES`, leaving the remainder for
 the runtime stack and interrupt context. They do not come from `avr-size`'s
 device-aware percentages: binutils 2.26 does not recognise `avrxmega3` parts, so
-`avr-size -C --mcu=attiny202` reports "Device: Unknown" while still reporting
-the exact `Program:` and `Data:` byte counts the gate consumes.
+`avr-size --format=avr --mcu=attiny202` reports "Device: Unknown" there while
+still reporting the exact `Program:` and `Data:` byte counts the gate consumes.
+(Binutils 2.43 and later recognise the part and append percentages; the gate
+reads only the byte counts.)
 
 The AVR-XT shell keeps the same static objects as the AVR Classic shells and for
 the same reason: `ctx_`, `ctx_check_`, and the `timer_isr_called_` ISR-to-main

@@ -133,15 +133,18 @@ through the instruction-accurate simulation suite, and compare behavior with the
 pinned avr-gcc 7.3 build. Preserve device, frequency, ABI, and linker flags so
 the lane varies the compiler rather than the firmware contract.
 
-Ubuntu 26.04 already ships a candidate: avr-gcc 14 with avr-libc 2.2.1 and
-binutils 2.43 or later. Measured on 2026-10-14, two things stand in its way.
-Under that compiler and avr-libc, `set_sleep_mode()` trips
-`-Werror=sign-conversion` in `src/bypass_mcu_avr_classic.c` (the macro body is
-unchanged from avr-libc 2.0.0, so the newer compiler is the likely cause), which
-makes the lane a firmware change. And that avr-size has no Atmel `-C`, which the
-size and flash-budget recipes use; its help lists `--format=avr` with `--mcu`
-instead. The pinned 7.3.0 toolchain stays installable from a verified source
-through `scripts/fetch_avr_toolchain.sh`.
+Ubuntu 26.04 ships the candidate: avr-gcc 14 (banner 14.3.0) with avr-libc
+2.2.1 and binutils 2.45. Its two blockers are cleared. Each AVR shell's
+`set_sleep_mode()` suppression now also names `-Wsign-conversion`, which is
+where avr-gcc 14 files the warning that 7.3.0 filed under `-Wconversion`. And
+the size recipes call `avr-size --format=avr`, which binutils 2.26 and 2.45
+both accept, in place of the Atmel-only `-C`. Measured with the distro
+compiler on 2026-10-15: `make test STRICT_TOOLS=1` and the ATtiny202
+aggregates pass; the Classic images are 20 B smaller and the ATtiny202 images
+28-44 B smaller; and the ATtiny202 tick ISR with its call tree is 86
+instructions, against the 84-instruction ceiling reviewed for 7.3.0. The
+pinned 7.3.0 toolchain stays installable from a verified source through
+`scripts/fetch_avr_toolchain.sh`.
 
 Dependencies: a second AVR compiler and simulator-compatible images. Effort:
 about 2 hours. Risk: Medium; catches compiler-sensitive UB, volatile ordering,

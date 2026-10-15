@@ -55,8 +55,8 @@
 #   requires the complete tick ISR to remain within the reviewed 84-instruction
 #   ceiling that underpins WDT_ISR_STRETCH_PCT. Cyclic control flow fails closed;
 #   an acyclic branch to an earlier shared epilogue remains countable. Every
-#   recognized delay loop must have a decodable 16-bit seed; none may be
-#   discarded:
+#   recognized delay loop must have a decodable 16-bit seed that no branch or
+#   skip can bypass; none may be discarded:
 #       cd4053_simple    (simple x4053): no coil pulse -> zero delay loops
 #       cd4053_with_mute (muted x4053) : two 5 ms mute windows (engage+bypass)
 #       tq2_l2_5v_relay  (TQ2-L2-5V)   : two 12 ms coil pulses (engage+bypass)
@@ -131,6 +131,50 @@ _INSTRUCTION_RE = re.compile(
     r"([a-z][a-z0-9.]*)\s*(.*)$", re.I)
 _TARGET_SYMBOL_RE = re.compile(r"<([^>]+)>")
 _TARGET_ADDR_RE = re.compile(r";\s*0x([0-9a-f]+)", re.I)
+# Assembler-local labels. avr-gcc 14 with binutils 2.43+ keeps them in the ELF
+# symbol table (`.L13`, `.L1\x021`, avr-libc's `L0\x01`, crt's `.Loc.1`) where
+# avr-gcc 7.3.0 kept none, so objdump prints each as a label line. They mark
+# branch targets INSIDE a function, so they never start an ISR-census body and
+# never sit between a delay loop and its seeds. The forms are BFD's own
+# (_bfd_elf_is_local_label_name). Where they land matters only as a branch
+# target, and parse_delay_loops checks every branch target by address.
+_LOCAL_LABEL_RE = re.compile(r"^(?:\.L|\.\.|_\.L_|L[0-9]+[\x01\x02])")
+_SKIP_MNEMONICS = ("cpse", "sbrc", "sbrs", "sbic", "sbis")
+
+
+def _is_local_label(name):
+    return _LOCAL_LABEL_RE.match(name) is not None
+
+
+def _code_lines(objdump_text):
+    """Instruction and function-label lines: no blanks, no local labels."""
+    lines = []
+    for line in objdump_text.splitlines():
+        if not line.strip():
+            continue
+        label = _FUNCTION_RE.match(line)
+        if label and _is_local_label(label.group(2)):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _branch_sources(lines):
+    """Map each resolved control-transfer target address to its sources."""
+    sources = {}
+    for line in lines:
+        insn = _INSTRUCTION_RE.match(line)
+        if not insn:
+            continue
+        mnemonic = insn.group(2).lower()
+        if not (mnemonic in ("rjmp", "jmp", "rcall", "call")
+                or (mnemonic.startswith("br") and mnemonic != "break")):
+            continue
+        target = _TARGET_ADDR_RE.search(insn.group(3))
+        if target:
+            sources.setdefault(int(target.group(1), 16), []).append(
+                int(insn.group(1), 16))
+    return sources
 
 
 class DelayLoopDecodeError(Exception):
@@ -158,9 +202,12 @@ def parse_delay_loops(objdump_text):
     they appear in the disassembly. Pure text function so it is exercised both
     against real images and against synthetic snippets in --selftest. Raises
     DelayLoopDecodeError rather than omitting a recognized loop whose seed
-    registers cannot be decoded.
+    registers cannot be decoded, or whose seed something else can bypass: a
+    branch into the later seed, the sbiw or the brne (other than the loop's
+    own brne onto its sbiw), or a skip instruction just before the seeds.
     """
-    lines = objdump_text.splitlines()
+    lines = _code_lines(objdump_text)
+    sources = _branch_sources(lines)
     counts = []
     for i, line in enumerate(lines):
         sbiw = _SBIW_RE.match(line)
@@ -201,6 +248,29 @@ def parse_delay_loops(objdump_text):
             raise DelayLoopDecodeError(
                 "recognized sbiw/brne loop at 0x%X has undecodable ldi "
                 "seed register(s): %s" % (sbiw_addr, ", ".join(missing)))
+
+        # Both seeds are lines i-2 and i-1. The count is proven only if every
+        # path into the loop runs both: nothing may branch to the later seed,
+        # the sbiw or the brne except the loop's own brne, and the instruction
+        # before the earlier seed must not be able to skip it.
+        brne_addr = int(brne.group(1), 16)
+        later_seed_addr = int(_INSTRUCTION_RE.match(lines[i - 1]).group(1), 16)
+        entries = sorted(
+            source
+            for address in (later_seed_addr, sbiw_addr, brne_addr)
+            for source in sources.get(address, ())
+            if not (address == sbiw_addr and source == brne_addr))
+        if entries:
+            raise DelayLoopDecodeError(
+                "recognized sbiw/brne loop at 0x%X is entered past its seed "
+                "from %s" % (sbiw_addr,
+                             ", ".join("0x%X" % source for source in entries)))
+        before = _INSTRUCTION_RE.match(lines[i - 3]) if i >= 3 else None
+        if before and before.group(2).lower() in _SKIP_MNEMONICS:
+            raise DelayLoopDecodeError(
+                "recognized sbiw/brne loop at 0x%X has a %s at 0x%s that can "
+                "skip its seed" % (sbiw_addr, before.group(2).lower(),
+                                   before.group(1).upper()))
         counts.append((hi << 8) | lo)
     return counts
 
@@ -221,7 +291,7 @@ def parse_isr_instruction_count(objdump_text):
     """
     functions = {}
     current = None
-    for line in objdump_text.splitlines():
+    for line in _code_lines(objdump_text):
         label = _FUNCTION_RE.match(line)
         if label:
             current = label.group(2)
@@ -242,7 +312,11 @@ def parse_isr_instruction_count(objdump_text):
         match = _TARGET_SYMBOL_RE.search(operands)
         if not match:
             return None
-        return match.group(1).split("+", 1)[0]
+        symbol = match.group(1).split("+", 1)[0]
+        # A local label is an address inside some function, not a callee: the
+        # branch logic below resolves it by address, and a call to one has no
+        # function to count, so it fails as unresolved.
+        return None if _is_local_label(symbol) else symbol
 
     def count_function(name, stack):
         if name in stack:
@@ -491,6 +565,60 @@ def _synthetic(loops):
     return "\n".join(out)
 
 
+def _synthetic_gcc14_loop(prefix=(), seed_skip=False):
+    """One delay loop in avr-gcc 14's shape, local label lines included.
+
+    The count is 0x09C3; `prefix` lines are prepended (e.g. a stray branch),
+    and `seed_skip` puts a skip instruction just before the seeds.
+    """
+    out = list(prefix)
+    if seed_skip:
+        out.append(" 39e:\t00 fc\tsbrc\tr0, 0")
+    out += [
+        " 3a0:\t83 ec\tldi\tr24, 0xC3\t; 195",
+        " 3a2:\t99 e0\tldi\tr25, 0x09\t; 9",
+        "",
+        "000003a4 <.L1\x021>:",
+        " 3a4:\t01 97\tsbiw\tr24, 0x01\t; 1",
+        " 3a6:\tf1 f7\tbrne\t.-4      \t; 0x3a4 <.L1\x021>",
+        " 3a8:\t00 c0\trjmp\t.+0      \t; 0x3aa <L0\x01>",
+        "",
+        "000003aa <L0\x01>:",
+        " 3aa:\t00 00\tnop",
+    ]
+    return "\n".join(out)
+
+
+def _synthetic_local_label_isr():
+    """An ISR whose branch and jump land on its own local label (avr-gcc 14)."""
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\t0f 92\tpush\tr0",
+        " 102:\t11 f4\tbrne\t.+4      \t; 0x108 <.L13>",
+        " 104:\t00 00\tnop",
+        " 106:\t00 c0\trjmp\t.+0      \t; 0x108 <.L13>",
+        "",
+        "00000108 <.L13>:",
+        " 108:\t0f 90\tpop\tr0",
+        " 10a:\t18 95\treti",
+    ])
+
+
+def _synthetic_foreign_local_label_isr(mnemonic):
+    """An ISR that jumps or calls into another function's local label."""
+    return "\n".join([
+        "00000100 <__vector_3>:",
+        " 100:\t08 c0\t%s\t.+16     \t; 0x112 <.L5>" % mnemonic,
+        " 102:\t18 95\treti",
+        "",
+        "00000110 <helper>:",
+        " 110:\t00 00\tnop",
+        "",
+        "00000112 <.L5>:",
+        " 112:\t08 95\tret",
+    ])
+
+
 def _synthetic_isr(helper_instructions=80, backward_edge=False):
     """Build one ISR whose call tree has 4+helper_instructions instructions."""
     out = [
@@ -640,6 +768,34 @@ def selftest():
     ck.check("0x344" in stale_seed_error and "r24, r25" in stale_seed_error,
               "unseeded loop cannot borrow the preceding loop's seed pair")
 
+    # avr-gcc 14 keeps assembler-local labels, so objdump prints label lines
+    # between a loop and its seeds. They are not barriers; a branch that
+    # bypasses a seed is, whatever label it names.
+    ck.check(parse_delay_loops(_synthetic_gcc14_loop()) == [0x09C3],
+             "loop seeded across avr-gcc 14 local label lines parses")
+    for target, what in ((0x3A4, "the sbiw"), (0x3A2, "the later seed"),
+                         (0x3A6, "the brne")):
+        stray = " 200:\tcf cf\trjmp\t.+0      \t; 0x%x <.L9>" % target
+        try:
+            parse_delay_loops(_synthetic_gcc14_loop(prefix=[stray]))
+        except DelayLoopDecodeError as exc:
+            entry_error = str(exc)
+        else:
+            entry_error = ""
+        ck.check("entered past its seed from 0x200" in entry_error,
+                 "a branch into %s makes the seed unprovable" % what)
+    ck.check(parse_delay_loops(_synthetic_gcc14_loop(
+                 prefix=[" 200:\tcf cf\trjmp\t.+0      \t; 0x3a0"])) == [0x09C3],
+             "a branch to the earlier seed still runs both seeds")
+    try:
+        parse_delay_loops(_synthetic_gcc14_loop(seed_skip=True))
+    except DelayLoopDecodeError as exc:
+        skip_error = str(exc)
+    else:
+        skip_error = ""
+    ck.check("sbrc at 0x39E" in skip_error,
+             "a skip instruction before the seeds makes the seed unprovable")
+
     # Compiled ISR census: handler + call instruction + callee body is bounded.
     # A backward edge into a shared epilogue is acyclic and remains countable;
     # an actual loop or an unresolved branch target fails closed.
@@ -665,6 +821,13 @@ def selftest():
              "ordinary fallthrough outside the parsed ISR body fails closed")
     ck.check(_isr_census_fails(_synthetic_indirect_isr()) == 1,
              "indirect ISR control flow fails closed instead of being omitted")
+    ck.check(parse_isr_instruction_count(_synthetic_local_label_isr()) == 6,
+             "a local label inside the ISR does not split its body")
+    for mnemonic in ("rjmp", "rcall"):
+        ck.check(_isr_census_fails(
+                     _synthetic_foreign_local_label_isr(mnemonic)) == 1,
+                 "an ISR %s into another function's local label fails closed"
+                 % mnemonic)
     full_cycle_bound = (ISR_INSTRUCTION_LIMIT * ISR_MAX_CYCLES_PER_INSTRUCTION
                         + ISR_FIXED_CYCLE_ALLOWANCE)
     ck.check(full_cycle_bound == 352,

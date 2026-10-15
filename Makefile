@@ -1324,7 +1324,7 @@ attiny13a: classic-variant-request-valid $(ATTINY13A_HEXES) attiny13a-size
 attiny13a-size: classic-variant-request-valid $(ATTINY13A_ELFS)
 	@for e in $(ATTINY13A_ELFS); do \
 		echo "== $$e =="; \
-		$(SIZE) --mcu=$(ATTINY13A_MCU) -C "$$e" || exit 1; \
+		$(SIZE) --format=avr --mcu=$(ATTINY13A_MCU) "$$e" || exit 1; \
 	done
 
 # Per-tinyx5-chip build + size targets: attiny85/attiny85-size, attiny45/...
@@ -1335,7 +1335,7 @@ attiny$(1): classic-variant-request-valid $$(ATTINY$(1)_HEXES) attiny$(1)-size
 attiny$(1)-size: classic-variant-request-valid $$(ATTINY$(1)_ELFS)
 	@for e in $$(ATTINY$(1)_ELFS); do \
 		echo "== $$$$e =="; \
-		$$(SIZE) --mcu=$$(mmcu_$(1)) -C "$$$$e" || exit 1; \
+		$$(SIZE) --format=avr --mcu=$$(mmcu_$(1)) "$$$$e" || exit 1; \
 	done
 endef
 $(foreach n,$(TINYX5),$(eval $(call MCU_X5_BUILD_TARGETS,$(n))))
@@ -2332,7 +2332,7 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 		*avr:103*) : ;; \
 		*) echo "FAIL: $(XT_SMOKE_ELF) is not avrxmega3 (ELF flags: $$flags)"; exit 1 ;; \
 	esac; \
-	used=`$(SIZE) --mcu=$(XT_MCU) -C $(XT_SMOKE_ELF) 2>/dev/null | awk '/^Program:/ {print $$2; exit}'`; \
+	used=`$(SIZE) --format=avr --mcu=$(XT_MCU) $(XT_SMOKE_ELF) 2>/dev/null | awk '/^Program:/ {print $$2; exit}'`; \
 	if [ -z "$$used" ]; then echo "FAIL: could not read Program size from $(XT_SMOKE_ELF)"; exit 1; fi; \
 	pct=`awk -v u="$$used" -v t=$(XT_FLASH_BYTES) 'BEGIN {printf "%.1f", u*100/t}'`; \
 	if [ "$$used" -gt "$(XT_FLASH_BYTES)" ]; then \
@@ -2459,7 +2459,7 @@ attiny202: $(XT_CORE_SRC) $(XT_HEADERS) | $(XT_BUILD_DIR)
 			*) echo "FAIL: $$v is not avrxmega3 (ELF flags: $$flags)"; \
 				rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue ;; \
 		esac; \
-		if ! size_out=`$(SIZE) --mcu=$(XT_MCU) -C "$$elf_tmp" 2>&1`; then \
+		if ! size_out=`$(SIZE) --format=avr --mcu=$(XT_MCU) "$$elf_tmp" 2>&1`; then \
 			printf '%s\n' "$$size_out"; \
 			echo "FAIL: could not measure Program size for ATtiny202 variant $$v"; \
 			rm -f "$$elf_tmp" "$$hex_tmp" "$$log"; fail=1; continue; \

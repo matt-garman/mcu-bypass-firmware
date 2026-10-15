@@ -175,8 +175,8 @@ version=$("$STAGE/usr/bin/avr-gcc" --version 2>/dev/null | head -n 1) \
 printf 'int main(void) { for (;;) { } }\n' > "$TMP/probe.c"
 "$STAGE/usr/bin/avr-gcc" -mmcu=attiny13a -Os -o "$TMP/probe.elf" "$TMP/probe.c" \
     || die "the extracted toolchain cannot compile and link for the ATtiny13A"
-"$STAGE/usr/bin/avr-size" --mcu=attiny13a -C "$TMP/probe.elf" | grep -q '^Program:' \
-    || die "the extracted avr-size cannot report AVR memory usage (-C)"
+"$STAGE/usr/bin/avr-size" --format=avr --mcu=attiny13a "$TMP/probe.elf" | grep -q '^Program:' \
+    || die "the extracted avr-size cannot report AVR memory usage (--format=avr)"
 
 stamp_value > "$STAGE/$STAMP_NAME" || die "could not write the stamp"
 if [ -d "$DEST" ]; then

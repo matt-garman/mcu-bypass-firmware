@@ -61,6 +61,14 @@ lengths.
   is newer than 3.13. cppcheck 2.19, clang-tidy 21 and uutils coreutils are
   accommodated (MISRA record D-6 for the analyzer artifacts). Releases are still
   qualified on Ubuntu 24.04; see `TOOLCHAIN.adoc`, "Hosts newer than Ubuntu 24.04".
+- **The AVR firmware also builds under avr-gcc 14.** Each AVR shell's
+  `set_sleep_mode()` suppression names `-Wsign-conversion` as well, where avr-gcc
+  14 files the warning 7.3.0 filed under `-Wconversion`. The size recipes use
+  `avr-size --format=avr`, which old and new binutils both accept, in place of
+  the Atmel-only `-C`. `attiny202-delay-oracle` reads images whose symbol table
+  keeps assembler-local labels, as avr-gcc 14's do, and now also refuses a delay
+  loop that any branch or skip can enter past its seed. Under avr-gcc 7.3.0
+  every image is byte-identical.
 
 ### Fixed
 

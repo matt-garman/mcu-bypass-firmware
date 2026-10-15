@@ -297,10 +297,12 @@ static void hw_tick_timer_start(void) {
 
     // CPU sleeps in IDLE between ticks: core halts but TCB0 keeps running, so
     // the tick ISR still wakes us. (Deeper modes would gate TCB0's clock.)
-    // NOTE: set_sleep_mode()'s mask expansion trips -Wconversion; suppress
-    // locally since we cannot cast inside the macro (same as the classic shell).
+    // NOTE: set_sleep_mode()'s mask expansion trips -Wconversion (avr-gcc 14:
+    // -Wsign-conversion); suppress both locally since we cannot cast inside
+    // the macro (same as the classic shell).
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
     set_sleep_mode(SLEEP_MODE_IDLE);
 #pragma GCC diagnostic pop
 }
