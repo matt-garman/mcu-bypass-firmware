@@ -518,7 +518,9 @@ with its call tree is 86 instructions (it was 84).
                   scripts/fetch_avr_toolchain.sh
                   export PATH="$PWD/third_party/avr-toolchain/usr/bin:$PATH"
                 Take it off PATH again for current work: avr-compiler-valid
-                refuses it as the default compiler and names it.
+                refuses it as the default compiler and names it. Installed
+                there, it is also the second compiler of `make
+                test-cross-compiler`, which needs it on no PATH at all.
   Ubuntu 24.04: has no avr-gcc 14 package, so it cannot build v0.9.18 or later
                 images natively; use an Ubuntu 26.04 userland, for example a
                 container.

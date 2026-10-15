@@ -10,10 +10,11 @@
 #   are byte-defined by it. From v0.9.18 the image-defining compiler is Ubuntu
 #   26.04's own avr-gcc 14.3.0 (TOOLCHAIN.adoc), which produces different
 #   images, so 7.3.0 is no longer on any supported distribution's shelf. This
-#   installs it to reproduce those releases, and as the comparison compiler for
-#   T25-cross-compiler. The packages are the ones Ubuntu 24.04 (noble) ships,
-#   and they run unchanged from a prefix: the compiler locates its assembler,
-#   linker, headers and libraries relative to its own path. Measured on
+#   installs it to reproduce those releases, and as the comparison compiler of
+#   the cross-compiler lane (`make test-cross-compiler`). The packages are the
+#   ones Ubuntu 24.04 (noble) ships, and they run unchanged from a prefix: the
+#   compiler locates its assembler, linker, headers and libraries relative to
+#   its own path. Measured on
 #   2026-10-14, a toolchain installed this way rebuilt all 21 v0.9.16 images
 #   bit-for-bit.
 #

@@ -71,6 +71,15 @@ lengths.
   keeps assembler-local labels, as avr-gcc 14's do, and now also refuses a delay
   loop that any branch or skip can enter past its seed. Under avr-gcc 7.3.0
   every image is byte-identical.
+- **A cross-compiler lane.** `make test-cross-compiler` builds the nine Classic
+  images with a second avr-gcc -- by default the historic 7.3.0 from
+  `scripts/fetch_avr_toolchain.sh` -- under the same flags, and runs the same
+  simavr functional and fault suites on them as on the pinned 14.3.0 build, so a
+  compiler-sensitive defect fails one of the two against the shared golden-model
+  oracle. It refuses a second compiler that reports the pin or is `CC` itself,
+  and afterwards checks that every image names the second compiler in its ELF
+  `.comment`. CI runs it as the `cross-compiler` job; `test-cross-compiler-guard`
+  in `make test` proves the refusals.
 
 ### Changed
 

@@ -181,9 +181,10 @@ its own set of obligations.
 ## Classic AVR target validation layers
 
 The ATtiny13A/ATtiny85 lanes run the real firmware ELF in simavr and need no
-fetched inputs, so every row below except the long-duration soak is an ordinary
-member of `make test`. The soak runs in the mutation lane that needs it and at
-full duration in release qualification.
+fetched inputs, so every row below except the long-duration soak and the
+cross-compiler lane is an ordinary member of `make test`. The soak runs in the
+mutation lane that needs it and at full duration in release qualification; the
+cross-compiler lane needs a second avr-gcc and runs as its own CI job.
 
 | layer | target | what it proves | substrate |
 |---|---|---|---|
@@ -195,6 +196,7 @@ full duration in release qualification.
 | Liveness soak | `test-soak` | A long run on the ATtiny85, where simavr models the WDT system reset, never resets the device and stays responsive. | simavr |
 | Soak watchdog witness | `test-soak-reset-witness` | The soak's `watchdog_failures` counter is release evidence, so a real reset must be able to reach it. The same healthy image is built twice — untouched, and with the tick interrupt disabled mid-run — and the pass/fail pair must come out that way round. The control half is what stops a permanently broken soak from satisfying the failing half on its own. | simavr + host C |
 | Static frame bound | `test-stack-bound` | Every fresh `-fstack-usage` frame in the shared core and drivers fits its reviewed byte budget. This is a per-function frame limit, not a whole call-chain high-water measurement. | avr-gcc + host checker |
+| Cross-compiler | `test-cross-compiler`; `test-cross-compiler-guard` | The nine Classic images built by a second avr-gcc (the historic 7.3.0, `scripts/fetch_avr_toolchain.sh`) under the same flags pass the same register-level functional and fault suites as the pinned 14.3.0 build, so both meet one tick-level golden-model oracle and a compiler-sensitive defect fails one of them. Each image must name the second compiler in its ELF `.comment`. The guard, in `make test`, proves the lane refuses an absent, silent or pinned second compiler, or CC itself, and an image another compiler built. | simavr; host fakes |
 | Flash budget | `test-flash-budget`; `test-flash-budget-regression` | Every Classic AVR variant's measured image size stays inside its configured percentage of the part's flash, and the complete variant matrix is required before any measurement is accepted. The fake-size regression proves missing, malformed, and partial measurements fail rather than passing unmeasured. | avr-size; host fake tool |
 
 ### Simulator fidelity: the classic-AVR footswitch

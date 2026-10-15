@@ -248,6 +248,21 @@ assert_pic_toolchain() {
 # fetched + pinned by repo scripts (scripts/fetch_attiny_dfp.sh, scripts/
 # fetch_yasimavr.sh); XT_DFP / YASIMAVR_VENV honor an exported override (?= in
 # the Makefile). avr-objdump (binutils-avr) backs the coil-pulse width oracle.
+# The cross-compiler job's second avr-gcc, admitted by the lane's own check, so
+# the preflight and the gate cannot disagree about what counts as "a second
+# compiler": installed, and neither the pin nor CC itself.
+assert_cross_compiler_toolchain() {
+	local alt cc rc=0
+	alt="${ALT_AVR_BIN:-$(make -s --no-print-directory print-ALT_AVR_BIN)}"
+	cc=$(make -s --no-print-directory print-CC) || die "could not read CC from the Makefile"
+	"$REPO_ROOT/test/cross_compiler_lane.sh" admit "$alt" "$cc" || rc=$?
+	case "$rc" in
+		0) ;;
+		3) die "the cross-compiler job's second avr-gcc is not installed (ALT_AVR_BIN=$alt): run scripts/fetch_avr_toolchain.sh" ;;
+		*) die "the cross-compiler job's second avr-gcc was refused (ALT_AVR_BIN=$alt; see above)" ;;
+	esac
+}
+
 assert_attiny202_toolchain() {
 	local xt_dfp venv objdump py
 	xt_dfp="${XT_DFP:-$(make -s --no-print-directory print-XT_DFP)}"
@@ -447,6 +462,13 @@ goal_ci_build_classic() {
 	done
 }
 
+# The hosted job provisions the historic avr-gcc 7.3.0 in its own steps; here
+# the preflight asserts it (assert_cross_compiler_toolchain), as it does the
+# ATtiny202 inputs, and the goal is the same one the hosted job runs.
+goal_ci_cross_compiler() {
+	run_step "cross-compiler job: make $1" make "$1"
+}
+
 # The DFP half. Sequenced before the target half, matching the hosted job, so a
 # broken image is found before anything that needs the simulator.
 goal_ci_attiny202_build() {
@@ -560,6 +582,7 @@ run_step "preflight: validate GitHub workflow files" \
 	env STRICT_TOOLS=1 "$REPO_ROOT/test/test_workflow_syntax.sh"
 
 run_step "preflight: assert host/AVR toolchain present" assert_host_toolchain
+run_step "preflight: assert the cross-compiler lane's second avr-gcc" assert_cross_compiler_toolchain
 if [ "$SKIP_PIC" -eq 0 ]; then
 	run_step "preflight: assert PIC toolchain present (all three parts)" assert_pic_toolchain
 fi

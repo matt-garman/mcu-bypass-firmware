@@ -126,30 +126,6 @@ Dependencies: a reproducible CI environment for the pinned KLEE/LLVM pair.
 Effort: about 2 hours. Risk: Medium; the proof runs locally but is not watched by
 hosted CI.
 
-### T25-cross-compiler - Add a narrow alternate-AVR-compiler lane
-
-Build the Classic AVR firmware with a second avr-gcc, run all variants through
-the instruction-accurate simulation suite, and compare behavior with the pinned
-build. Preserve device, frequency, ABI, and linker flags so the lane varies the
-compiler rather than the firmware contract.
-
-From v0.9.18 the pin is Ubuntu 26.04's avr-gcc 14.3.0 (avr-libc 2.2.1,
-binutils 2.45), and the second compiler is the historic avr-gcc 7.3.0 that
-built every earlier release, installable from a verified source through
-`scripts/fetch_avr_toolchain.sh`. The tree builds and passes under both
-(8f58ec9: each AVR shell's `set_sleep_mode()` suppression names
-`-Wsign-conversion`, where avr-gcc 14 files the warning 7.3.0 filed under
-`-Wconversion`, and the size recipes call `avr-size --format=avr`). Measured
-on 2026-10-15, the 14.3.0 Classic images are 20 B smaller and the ATtiny202
-images 28-44 B smaller, the Classic tick ISR takes 144 cycles (142 under
-7.3.0), and the ATtiny202 tick ISR with its call tree is 86 instructions
-(84). The lane should refuse to run when the second compiler is the pin, so
-it can never compare a compiler with itself.
-
-Dependencies: a second AVR compiler and simulator-compatible images. Effort:
-about 2 hours. Risk: Medium; catches compiler-sensitive UB, volatile ordering,
-or ISR code-generation changes.
-
 ### T25-gcc-analyzer - Add avr-gcc's -fanalyzer beside clang --analyze
 
 `analyze-deep` uses clang's static analyzer as the stand-in for `gcc
@@ -782,7 +758,7 @@ The shipping images are built at one pinned optimization level, so a sweep
 would qualify builds nobody ships. The defect classes it would catch --
 optimization-sensitive undefined behavior, volatile ordering, ISR code
 generation -- are reached more directly by varying the compiler under the
-shipping flags, which `T25-cross-compiler` does.
+shipping flags, which the cross-compiler lane (`make test-cross-compiler`) does.
 
 Reconsider if the shipped optimization level changes, or if the
 cross-compiler lane finds an optimization-sensitive defect.
@@ -852,7 +828,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-golden-cross | Independent-model/direct-core cross-validation | 2.5 | 1-2 h | Medium |
 | T25-klee-path | Bounded full-path KLEE proof | 2.5 | 2-4 h | High assurance value |
 | T25-klee-ci | Execute KLEE in CI | 2.5 | 2 h | Medium |
-| T25-cross-compiler | Narrow alternate-AVR-compiler lane | 2.5 | 2 h | Medium |
 | T25-gcc-analyzer | avr-gcc -fanalyzer beside clang --analyze | 2.5 | 1-2 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |

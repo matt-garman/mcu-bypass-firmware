@@ -181,6 +181,14 @@ cat > "$work/yasimavr-venv/bin/python" <<'EOF'
 exit 0
 EOF
 chmod 750 "$fakebin"/* "$work/xc8" "$work/yasimavr-venv/bin/python"
+# The cross-compiler lane's second toolchain: a 7.3.0 banner, so the admission
+# check the preflight shares with the lane accepts it against the 14.3.0 pin.
+mkdir -p "$work/alt-avr"
+printf '#!/usr/bin/env bash\n[ "${1-}" = --version ] && echo "avr-gcc (GCC) 7.3.0"\nexit 0\n' \
+	> "$work/alt-avr/avr-gcc"
+printf '#!/bin/sh\nexit 0\n' > "$work/alt-avr/avr-objcopy"
+printf '#!/bin/sh\nexit 0\n' > "$work/alt-avr/avr-size"
+chmod 750 "$work/alt-avr"/*
 
 run_ci() {
 	: > "$log"
@@ -192,6 +200,7 @@ run_ci() {
 		PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$work/gpsim-inc}" \
 		SIMAVR_INC="$work/simavr-inc" \
 		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
+		ALT_AVR_BIN="$work/alt-avr" \
 		"$CI_LOCAL" --no-clean "$@" 2>&1
 }
 
@@ -205,6 +214,7 @@ run_ci_clean() {
 		PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$work/gpsim-inc}" \
 		SIMAVR_INC="$work/simavr-inc" \
 		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
+		ALT_AVR_BIN="$work/alt-avr" \
 		"$CI_LOCAL" "$@" 2>&1
 }
 
@@ -250,6 +260,8 @@ for part in $("$REAL_MAKE" -s --no-print-directory -C "$ROOT" print-CI_CLASSIC_P
 	build_calls+=("STRICT_TOOLS=1${tab}ci-build-classic${tab}CI_CLASSIC_PART=$part")
 done
 [ "${#build_calls[@]}" -gt 0 ] || fail "CI_CLASSIC_PARTS is empty"
+# The cross-compiler job's one goal, sequenced after the build matrix.
+build_calls+=($'STRICT_TOOLS=1\tci-cross-compiler')
 checks=$((checks + 1))
 strict_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=0'
 pic_partial_stress=$'STRICT_TOOLS=1\ttest-long\tMUTATION_ALLOW_SKIP=PIC'
@@ -342,8 +354,9 @@ if ! output=$(run_ci --pr --skip-pic --skip-attiny202); then
 	fail "PR with both skips routing failed: $output"
 fi
 mapfile -t calls < "$log"
-# The build matrix still runs in PR mode (it has no --skip), so the expected
-# tail is one command per classic part, then the verify goal.
+# The build matrix and the cross-compiler job still run in PR mode (neither has
+# a --skip), so the expected tail is one command per classic part and the
+# cross-compiler goal, then the verify goal.
 pr_expected=("${build_calls[@]}" $'STRICT_TOOLS=1\tci-verify')
 [ "${#calls[@]}" -eq "${#pr_expected[@]}" ] \
 	|| fail "PR with both skips executed ${#calls[@]} Make commands, expected ${#pr_expected[@]}"

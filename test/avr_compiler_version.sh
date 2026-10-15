@@ -16,7 +16,7 @@
 # Policy. The Makefile passes three facts and this script decides:
 #   - lenient (STRICT_TOOLS empty): nothing is enforced; exit 0 silently.
 #   - CC from the command line (or `make -e`): the operator chose the compiler,
-#     e.g. for T25-cross-compiler work. It is not enforced here, and the gate
+#     e.g. for the cross-compiler lane. It is not enforced here, and the gate
 #     says so in one line. A release still refuses it.
 #   - otherwise CC is the Makefile's own default and must report exactly the
 #     pin, matched as a whole token by the release's own matcher.

@@ -1058,7 +1058,8 @@ FORCE:
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
-        test-analyze-variant-guard test-analyzer-gate test-variant-selector-guard \
+        test-analyze-variant-guard test-analyzer-gate test-cross-compiler-guard \
+        test-variant-selector-guard \
         test-fuse-injection-contract test-static-assert-guards \
         test-attiny202-guard-mutations test-pic-guard-mutations \
         test-deliberate-duplication \
@@ -3146,7 +3147,7 @@ clean:
 	@# -reorganization forms so an existing worktree carrying either is cleaned too.
 	rm -rf $(KLEE_OUT_DIR) test/formal/klee-out-* test/formal/klee-last \
 		test/klee-out-* test/klee-last test/avr/__pycache__
-	rm -rf $(AVR_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(XT_BUILD_DIR) $(PIC12F675_BUILD_DIR)
+	rm -rf $(AVR_BUILD_DIR) $(ALT_AVR_BUILD_DIR) $(PIC10F322_BUILD_DIR) $(XT_BUILD_DIR) $(PIC12F675_BUILD_DIR)
 	@# Retired build directory (pre-v0.9.8 spelling of $(PIC10F322_BUILD_DIR)),
 	@# for the same reason AVR_TEST_BINARIES_RETIRED exists: without it a
 	@# worktree that predates the rename keeps a stale build_pic/ through every
@@ -3290,7 +3291,8 @@ TEST_GATES_LATE = \
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
-        test-analyze-variant-guard test-analyzer-gate test-variant-selector-guard \
+        test-analyze-variant-guard test-analyzer-gate test-cross-compiler-guard \
+        test-variant-selector-guard \
         test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools \
         coverage-check coverage-check-core
@@ -3352,7 +3354,7 @@ RELEASE_ARTIFACT_GATES = \
 # same work differently: it rebuilds from the tag, re-runs test-long with the
 # flashing helper pointed at the rebuilt images, and does NOT soak (soaks belong
 # to scripts/make-release.sh).
-CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny202-target ci-build-classic
+CI_GOALS = ci-verify ci-stress ci-pic ci-mutation ci-attiny202-build ci-attiny202-target ci-build-classic ci-cross-compiler
 RELEASE_GOALS = release-rebuild release-test-long release-attiny202
 WORKFLOW_GOALS = $(CI_GOALS) $(RELEASE_GOALS)
 
@@ -3380,7 +3382,7 @@ DECLARED_GOALS = $(WORKFLOW_GOALS) $(RELEASE_PATH_GOALS)
 # half before the half that needs the simulator. The rest is the order
 # scripts/ci-local.sh has always run them in, preserved deliberately so that
 # moving the list here changed where it lives and not what it says.
-CI_LOCAL_SEQUENCE = ci-pic ci-build-classic ci-attiny202-build ci-attiny202-target
+CI_LOCAL_SEQUENCE = ci-pic ci-build-classic ci-cross-compiler ci-attiny202-build ci-attiny202-target
 
 # The goals a local push covers through ONE `make test-long` rather than
 # invoking directly: that target already combines the fast gates, the FULL_*
@@ -3431,6 +3433,9 @@ ci-verify:
 
 ci-stress:
 	$(MAKE) stress STRICT_TOOLS=1
+
+ci-cross-compiler:
+	$(MAKE) test-cross-compiler STRICT_TOOLS=1
 
 # Five Make processes, not one: each PIC aggregate gets its own graph, and
 # PIC12F675's two goals deliberately share the last one so GNU Make qualifies
@@ -4041,6 +4046,11 @@ test-analyzer-gate:
 	fi; \
 	./test/test_analyzer_gate.sh '$(CLANG)'
 
+# Host-only proof that the cross-compiler lane admits only a genuinely second
+# compiler: fake toolchains that are absent, silent, the pin, or CC itself.
+test-cross-compiler-guard:
+	./test/test_cross_compiler_guard.sh
+
 # Fake-cppcheck proof that all 30 reviewed target/TU/selector rows execute once
 # in each analyzer mode with the exact platform, standard, and target policy.
 test-analysis-matrix:
@@ -4601,6 +4611,41 @@ _test-fault-inject-run: $(foreach v,$(VARIANTS),$(foreach n,$(TINYX5),test-fault
 .PHONY: test-sim-attiny13a _test-sim-run test-sim-tinyx5 _test-sim-tinyx5-run \
         test-fault-inject _test-fault-inject-run \
         $(foreach n,$(TINYX5),test-sim-attiny$(n))
+
+# Cross-compiler lane. The nine Classic images built with
+# a SECOND avr-gcc into their own build directory, under the same device, clock,
+# ABI and link flags, then run through the simavr functional, lock-step, timing
+# and fault-injection suites `make test` runs on the pinned build. Both builds
+# must meet the same tick-level golden-model oracle, so a compiler-sensitive
+# defect -- undefined behaviour, volatile ordering, ISR code generation -- shows
+# up as one of them failing it. test/cross_compiler_lane.sh admits the second
+# compiler: installed (else $(SKIP)), and neither the pin nor CC itself, so the
+# lane can never compare a compiler with itself. The default is the historic
+# avr-gcc 7.3.0 that built every release up to v0.9.17
+# (scripts/fetch_avr_toolchain.sh). Not part of `make test`, because it needs
+# that second toolchain; CI runs it as its own job (ci-cross-compiler).
+# Afterwards every image the lane ran must name the second compiler in its
+# ELF .comment, so the command-line CC= is a checked fact.
+ALT_AVR_BIN ?= third_party/avr-toolchain/usr/bin
+override ALT_AVR_BUILD_DIR := build_avr_alt
+override ALT_AVR_ELFS := \
+	$(foreach v,$(VARIANTS),$(ALT_AVR_BUILD_DIR)/$(call fw_image,$(v),$(ATTINY13A_MCU)).elf) \
+	$(foreach n,$(TINYX5),$(foreach v,$(VARIANTS),$(ALT_AVR_BUILD_DIR)/$(call fw_image,$(v),$(mmcu_$(n))).elf))
+.PHONY: test-cross-compiler
+test-cross-compiler:
+	@rc=0; ./test/cross_compiler_lane.sh admit '$(ALT_AVR_BIN)' '$(CC)' || rc=$$?; \
+	case $$rc in \
+		0) ;; \
+		3) $(SKIP) ;; \
+		*) exit 1 ;; \
+	esac; \
+	$(MAKE) --no-print-directory AVR_BUILD_DIR=$(ALT_AVR_BUILD_DIR) \
+		CC='$(ALT_AVR_BIN)/avr-gcc' OBJCOPY='$(ALT_AVR_BIN)/avr-objcopy' \
+		SIZE='$(ALT_AVR_BIN)/avr-size' \
+		test-sim-attiny13a test-sim-tinyx5 test-fault-inject \
+		|| exit 1; \
+	./test/cross_compiler_lane.sh verify '$(ALT_AVR_BIN)' '$(READELF)' $(ALT_AVR_ELFS) || exit 1; \
+	echo "=== cross-compiler lane: the Classic images built by $(ALT_AVR_BIN)/avr-gcc pass the simavr suites ==="
 
 # Mutation testing: inject deliberate faults into the PRODUCTION sources
 # (bypass_mcu_avr_classic.c + the variant driver / bypass_config.h), rebuild, and confirm a
@@ -8246,6 +8291,8 @@ help:
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-analyzer-gate  analyze-deep fails on a planted analyzer finding and accepts register access (included in test)"
+	@echo "  test-cross-compiler  the Classic images built by a second avr-gcc (ALT_AVR_BIN; default the historic 7.3.0) pass the simavr suites"
+	@echo "  test-cross-compiler-guard  the cross-compiler lane refuses an absent, silent or pinned second compiler (included in test)"
 	@echo "  test-analysis-matrix  exact 30-row cppcheck/MISRA target/TU/selector contract (included in test)"
 	@echo "  test-misra-output-contract  authored source/header MISRA diagnostics fail every lane (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector, every per-variant map is guard-registered (included in test)"
