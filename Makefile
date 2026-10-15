@@ -3262,7 +3262,7 @@ $(foreach n,$(TINYX5),$(eval $(call MCU_X5_FLASH_TARGETS,$(n))))
 # test/test_build_rebuild.sh, not left to inspection of these two lists.
 TEST_GATES_EARLY = \
         python-version-valid host-compiler-valid avr-compiler-valid \
-        analyze test-static-assert-guards \
+        avr-binutils-valid analyze test-static-assert-guards \
         test-deliberate-duplication \
         test-host test-model-check test-symbolic test-cbmc \
         test-fuses test-stack-bound test-stack-bound-regression \
@@ -3667,8 +3667,9 @@ CI_XT_SOAK_DURATION_MS = 300000
 # The mandatory host gates use subprocess.run(capture_output=..., text=...),
 # both added in Python 3.7. Keep this first in each aggregate so an unsupported
 # host gets the actionable contract diagnostic before any Python child gate.
-# host-compiler-valid follows it for the same reason, covering the C side, and
-# avr-compiler-valid third, covering the AVR cross-compiler.
+# host-compiler-valid follows it for the same reason, covering the C side,
+# avr-compiler-valid third, covering the AVR cross-compiler, and
+# avr-binutils-valid fourth, covering the binutils that serve it.
 python-version-valid:
 	@if ! command -v python3 >/dev/null 2>&1; then \
 		echo "FAIL: Python 3.7 or newer is required by the repository host gates; python3 was not found." >&2; \
@@ -3700,6 +3701,19 @@ host-compiler-valid:
 avr-compiler-valid:
 	@test/avr_compiler_version.sh '$(CC)' '$(origin CC)' \
 		'$(if $(strip $(STRICT_TOOLS)),strict,lenient)'
+
+# Fourth in each aggregate. Under STRICT_TOOLS=1 a default OBJCOPY or OBJDUMP
+# must be CC's own program, the one `$(CC) -print-prog-name=objcopy` names. Both
+# defaults are bare names, so PATH picks them: with XC8's bin directory first,
+# Microchip's binutils 2.26 pair wrote the .hex files and fed the ATtiny202
+# delay oracle beside an Ubuntu avr-gcc. An OBJCOPY= or OBJDUMP= override is
+# reported and not enforced. test/avr_binutils_owner.sh owns the policy, and
+# scripts/make-release.sh holds a release to it.
+.PHONY: avr-binutils-valid
+avr-binutils-valid:
+	@test/avr_binutils_owner.sh '$(if $(strip $(STRICT_TOOLS)),strict,lenient)' '$(CC)' \
+		OBJCOPY '$(OBJCOPY)' '$(origin OBJCOPY)' \
+		OBJDUMP '$(OBJDUMP)' '$(origin OBJDUMP)'
 
 # Default `make test`: FAST workload. Runs static analysis, the host golden
 # model, the exhaustive state-space model check, the symbolic single-step proof,

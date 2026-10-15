@@ -15,7 +15,8 @@ name: CI
 # cppcheck 2.19, simavr 1.6, Python 3.14). What IS pinned here: every
 # third-party action by commit SHA; the image-defining AVR compiler, avr-gcc
 # 14.3.0, which `make test STRICT_TOOLS=1` refuses to run without
-# (avr-compiler-valid); and the image-defining PIC toolchain -- XC8 V3.10 +
+# (avr-compiler-valid), or with binutils other than its own
+# (avr-binutils-valid); and the image-defining PIC toolchain -- XC8 V3.10 +
 # PIC10-12Fxxx_DFP 1.9.189, SHA-verified by the installer and integrity-checked
 # on every cache restore (see the `pic` job). The release pipeline enforces
 # more; see TOOLCHAIN.adoc "What the release enforces".

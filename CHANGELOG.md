@@ -125,6 +125,16 @@ lengths.
   uncompilable. The new `avr-compiler-valid`, third in each aggregate, refuses
   that compiler before anything compiles and names the fix. A `CC=` override is
   reported and not enforced.
+- **XC8's bundled binutils could stand in for avr-gcc's.** The `OBJCOPY` and
+  `OBJDUMP` defaults are bare names, so with XC8's `bin` directory ahead of
+  `/usr/bin` on `PATH`, Microchip's binutils 2.26 wrote the `.hex` files and
+  fed the ATtiny202 delay oracle; the v0.9.10 to v0.9.16 manifests record its
+  `avr-objcopy`. The published images are unaffected: release CI, where XC8 is
+  not on `PATH`, rebuilds each one and compares it byte-for-byte. Under
+  `STRICT_TOOLS=1` the new `avr-binutils-valid`, fourth in each aggregate, and
+  release preflight refuse a default that is not the program avr-gcc names as
+  its own, and name the `PATH` order that fixes it. An `OBJCOPY=` or `OBJDUMP=`
+  override is reported and not enforced.
 
 ## [0.9.17] - 2026-10-14
 

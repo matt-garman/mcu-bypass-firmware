@@ -58,6 +58,15 @@ tool, re-run `make clean && make test` before relying on its output.
   Nothing earlier on PATH may shadow these packages: the gate names the
   historic prefix below if it wins, and a CC= override is reported, not
   enforced.
+  The binutils are held to the compiler as well. Under STRICT_TOOLS=1 a
+  default OBJCOPY or OBJDUMP must be the program `avr-gcc
+  -print-prog-name=objcopy` (or objdump) names -- /usr/lib/avr/bin/objcopy,
+  which /usr/bin/avr-objcopy links to -- and `make test` refuses another up
+  front (avr-binutils-valid, test/avr_binutils_owner.sh), as
+  scripts/make-release.sh does. XC8's bin directory carries Microchip's own
+  avr-objcopy and avr-objdump (binutils 2.26), so it must not come ahead of
+  /usr/bin on PATH. An OBJCOPY= or OBJDUMP= override is reported, not
+  enforced.
 
   v0.9.17 and earlier were built with avr-gcc 7.3.0 (avr-libc 2.0.0, binutils
   2.26). scripts/fetch_avr_toolchain.sh installs that historic toolchain from
@@ -117,6 +126,10 @@ license or hand-written assembly, neither of which this project will take.
                 install dir: /opt/microchip/xc8/v3.10
                 driver:      /opt/microchip/xc8/v3.10/bin/xc8-cc
                 override the path with PIC_CC=... on the make command line.
+                The Makefile reaches XC8 by that absolute path, so XC8 needs
+                no PATH entry. Its bin/ also holds Microchip's avr-objcopy and
+                avr-objdump, which avr-binutils-valid refuses ahead of
+                /usr/bin (see the AVR toolchain section above).
 
   Device pack:  PIC10-12Fxxx_DFP  v1.9.189  (Microchip device family pack)
                 Supplies the device-support + register headers for ALL THREE
@@ -405,7 +418,9 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   image-defining avr-gcc/XC8 pins below, which are exact-version contracts.
   The avr-gcc pin has its own gate, run third: under STRICT_TOOLS=1,
   `make avr-compiler-valid` (test/avr_compiler_version.sh) refuses a default
-  avr-gcc that is not exactly 14.3.0.
+  avr-gcc that is not exactly 14.3.0, and the fourth,
+  `make avr-binutils-valid` (test/avr_binutils_owner.sh), a default
+  avr-objcopy or avr-objdump that is not that compiler's own.
 
 == Static analysis
 
@@ -609,6 +624,13 @@ and 14.3.0.1 do not satisfy the 14.3.0 pin, and XC8 V3.100 and V13.10 do not
 satisfy the V3.10 pin -- as is a banner carrying no version token at all, or
 more than one. Until v0.9.10 these three checks were shell substring patterns,
 which accepted the first three of those four drifted versions.
+* *The compiler's own binutils.* A default OBJCOPY or OBJDUMP must be the
+  program the pinned avr-gcc names with `-print-prog-name`, and preflight
+  refuses another. XC8's bundled 2.26 pair, ahead of /usr/bin on PATH, wrote
+  the `.hex` files of v0.9.10 to v0.9.16; the byte-for-byte rebuild above, on a
+  runner without XC8 on PATH, is why the published images are unaffected. An
+  explicit OBJCOPY= or OBJDUMP= is recorded in the MANIFEST like any selected
+  tool, not refused.
 * *Production release identity.* The Makefile pins the complete product identity
   and basename convention as literal `override` text
   (`RELEASE_IDENTITY_PINNED` and the image/soak sets beside it), and both a

@@ -1451,6 +1451,23 @@ require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 14.3.0 14.3.0
 require_pinned_compiler "PIC10F322/PIC12F675 XC8" PIC_CC "$PIC_CC" "$TC_XC8_322" 3.10 V3.10
 require_pinned_compiler "PIC10F320 XC8" PIC10F320_CC "$PIC10F320_CC" "$TC_XC8_320" 3.10 V3.10
 
+# The default avr-objcopy and avr-objdump are bare names, so PATH chooses them,
+# and an earlier PATH entry can supply another toolchain's: XC8's bin directory
+# carries Microchip's binutils 2.26 pair, and the manifests of v0.9.10 to
+# v0.9.16 record its avr-objcopy. A default that is not the pinned compiler's
+# own program is refused here, by the contract avr-binutils-valid holds
+# `make test STRICT_TOOLS=1` to. An explicit OBJCOPY=/OBJDUMP= is the
+# operator's choice and is recorded like any selected tool. The value alone
+# cannot say which it was, so the Makefile reports each origin.
+AVR_OBJCOPY_ORIGIN=$(make -s --no-print-directory origin-OBJCOPY) \
+	|| die "could not read the origin of OBJCOPY from the Makefile"
+AVR_OBJDUMP_ORIGIN=$(make -s --no-print-directory origin-OBJDUMP) \
+	|| die "could not read the origin of OBJDUMP from the Makefile"
+"$REPO_ROOT/test/avr_binutils_owner.sh" strict "$AVR_CC" \
+	OBJCOPY "$AVR_OBJCOPY" "$AVR_OBJCOPY_ORIGIN" \
+	OBJDUMP "$AVR_OBJDUMP" "$AVR_OBJDUMP_ORIGIN" >&2 \
+	|| die "the default AVR binutils are not avr-gcc's own (above); refusing to start a release whose .hex files or ATtiny202 delay evidence another toolchain would produce."
+
 if [ "$PREFLIGHT" -eq 1 ]; then
 	ok "preflight passed: this host can start a release."
 	exit 0

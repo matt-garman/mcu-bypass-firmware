@@ -226,6 +226,17 @@ write_avr_gcc_fake() {
 			printf '\t%s\n' ':'   # a compiler that answers --version with nothing
 		fi
 		printf '%s\n' 'fi'
+		# The compiler's own binutils, as the release's binutils check asks
+		# for them. TEST_AVR_OWN_DIR moves them away from the avr-objcopy and
+		# avr-objdump on PATH, which link to the default pair.
+		cat <<'FAKE_AVR_OWN_BINUTILS'
+case "${1:-}" in
+	-print-prog-name=objcopy|-print-prog-name=objdump)
+		printf '%s/%s\n' "${TEST_AVR_OWN_DIR:-${FAKE_TOOLCHAIN:?}/avr-own}" "${1#*=}"
+		exit 0
+		;;
+esac
+FAKE_AVR_OWN_BINUTILS
 		# release_avr_libc_version_line's two queries: the version string its
 		# <avr/version.h> expands to, and the header -H reports it included.
 		printf '%s\n' 'if [ "$*" = "-x c -E -P -" ]; then cat >/dev/null; printf '"'"'\n"2.0.0"\n'"'"'; exit 0; fi'
@@ -378,9 +389,20 @@ case "${1:-}:${2:-}" in
 esac
 EOF
 
-for tool in avr-nm avr-objdump pic-cxx-322 pic-cxx-320; do
+for tool in avr-nm pic-cxx-322 pic-cxx-320; do
 	cp "$fakebin/fake-tool" "$fakebin/$tool"
 done
+# The fake compiler's own objcopy and objdump, laid out as Ubuntu's: the
+# prefixed names on PATH link to them. avr-foreign holds a pair for a compiler
+# whose own binutils are not the ones on PATH. All three differ in their bytes
+# from fake-tool and each other, since the check accepts a byte-identical copy.
+mkdir -p "$toolchain/avr-own" "$toolchain/avr-foreign"
+for prog in objcopy objdump; do
+	{ cat "$fakebin/fake-tool"; printf '# the compiler'"'"'s own\n'; } > "$toolchain/avr-own/$prog"
+	ln -s "$toolchain/avr-own/$prog" "$fakebin/avr-$prog"
+	{ cat "$fakebin/fake-tool"; printf '# another toolchain\n'; } > "$toolchain/avr-foreign/$prog"
+done
+chmod 750 "$toolchain/avr-own"/* "$toolchain/avr-foreign"/*
 cp "$toolchain/xc8-322" "$fakebin/xc8-322-path"
 chmod 750 "$fakebin"/* "$toolchain/xc8-322" "$toolchain/xc8-320" \
 	"$toolchain/yasimavr/bin/python"
@@ -414,9 +436,20 @@ case "$3" in
 		;;
 esac
 printf '%s\n' "$goal" >> "${MAKE_LOG:?}"
+# TEST_AVR_BINUTILS_DEFAULT names the binutils selectors (OBJCOPY, OBJDUMP) to
+# leave at the Makefile's default, where PATH chooses them.
+avr_binutils=()
+case " ${TEST_AVR_BINUTILS_DEFAULT:-} " in
+	*' OBJCOPY '*) ;;
+	*) avr_binutils+=(OBJCOPY=fake-tool) ;;
+esac
+case " ${TEST_AVR_BINUTILS_DEFAULT:-} " in
+	*' OBJDUMP '*) ;;
+	*) avr_binutils+=(OBJDUMP="${TEST_OBJDUMP:-fake-tool}") ;;
+esac
 make_output=$("${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" \
-	CC="${TEST_CC:-fake-avr-gcc}" OBJCOPY=fake-tool SIZE=fake-tool HOSTCC=fake-tool \
-	OBJDUMP="${TEST_OBJDUMP:-fake-tool}" READELF=fake-tool \
+	CC="${TEST_CC:-fake-avr-gcc}" "${avr_binutils[@]}" SIZE=fake-tool HOSTCC=fake-tool \
+	READELF=fake-tool \
 	IHEX_VALIDATOR="${TEST_IHEX_VALIDATOR:-${FAKE_BIN:?}/fake-tool}" AWK="${FAKE_BIN:?}/fake-awk" \
 	CLANG=fake-tool CLANG_TIDY=fake-tool CPPCHECK=fake-tool CBMC=fake-tool \
 	GCOV=fake-tool GPSIM=fake-tool \
@@ -616,8 +649,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 98 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 98"
+[ "$query_count" -eq 100 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 100"
 assert_no_release_scratch
 checks=$((checks + 1))
 
@@ -3497,6 +3530,173 @@ avr_gate_make STRICT_TOOLS=1 CC=avr-gcc
 	|| fail "the avr-compiler-valid recipe did not exempt a command-line CC (rc=$avr_rc): $(cat "$output")"
 checks=$((checks + 1))
 
+# --- the AVR binutils are the compiler's own ------------------------------------
+# Fourth in each aggregate. The OBJCOPY and OBJDUMP defaults are bare names, so
+# PATH picks them, and with XC8's bin directory first it supplied Microchip's
+# binutils 2.26 pair beside an Ubuntu avr-gcc. Under STRICT_TOOLS=1 a default
+# must be the program the compiler names with -print-prog-name. The cases differ
+# only in which file each name resolves to and the facts the Makefile hands
+# the gate.
+binutils_gate="$ROOT/test/avr_binutils_owner.sh"
+[ -x "$binutils_gate" ] \
+	|| fail "test/avr_binutils_owner.sh is missing or not executable"
+read -r _first _second _third fourth_gate _rest <<<"$early_gates"
+[ "$fourth_gate" = avr-binutils-valid ] \
+	|| fail "avr-binutils-valid is not the fourth aggregate gate (got '$fourth_gate')"
+checks=$((checks + 1))
+
+# A fake toolchain laid out as Ubuntu's: the compiler's own programs in avr/bin,
+# reached through lib/.. as GCC prints them, with the prefixed names in bin
+# linking to them. xc8/bin holds a pair with other bytes beside an xc8-cc, and
+# copy/bin the compiler's own bytes in other files.
+bu="$work/binutils"
+mkdir -p "$bu/usr/bin" "$bu/usr/lib" "$bu/usr/avr/bin" "$bu/xc8/bin" "$bu/copy/bin"
+cat > "$bu/usr/bin/avr-gcc" <<'FAKE_BINUTILS_AVR_GCC'
+#!/usr/bin/env bash
+# -print-prog-name prints the bare name when the driver has no such program.
+case "${1-}" in
+	-print-prog-name=*)
+		prog=${1#*=}
+		if [ -n "${FAKE_OWN_DIR-}" ]; then
+			printf '%s/%s\n' "$FAKE_OWN_DIR" "$prog"
+		else
+			printf '%s\n' "$prog"
+		fi
+		;;
+esac
+exit 0
+FAKE_BINUTILS_AVR_GCC
+for prog in objcopy objdump; do
+	printf '#!/bin/sh\n[ "${1-}" = --version ] && echo "GNU %s (GNU Binutils) 2.45.50"\nexit 0\n' \
+		"$prog" > "$bu/usr/avr/bin/$prog"
+	ln -s "../avr/bin/$prog" "$bu/usr/bin/avr-$prog"
+	printf '#!/bin/sh\n[ "${1-}" = --version ] && echo "GNU %s (AVR_8_bit_GNU_Toolchain_3.6.7_635) 2.26.20160125"\nexit 0\n' \
+		"$prog" > "$bu/xc8/bin/avr-$prog"
+	cp "$bu/usr/avr/bin/$prog" "$bu/copy/bin/avr-$prog"
+done
+printf '#!/bin/sh\nexit 0\n' > "$bu/xc8/bin/xc8-cc"
+chmod +x "$bu/usr/bin/avr-gcc" "$bu/usr/avr/bin"/* "$bu/xc8/bin"/* "$bu/copy/bin"/*
+bu_own_dir="$bu/usr/lib/../avr/bin"
+# The diagnostics name resolved programs by their real paths.
+bu_real=$(realpath -e "$bu") || fail "could not resolve $bu"
+# bu_gate FIRST_ON_PATH ARGS...: drive the gate with FIRST_ON_PATH ahead of the
+# fake compiler's bin; sets bu_rc. FAKE_OWN_DIR is where the compiler says its
+# own programs are.
+bu_gate() {
+	local first=$1
+	shift
+	bu_rc=0
+	PATH="$first:$bu/usr/bin:$PATH" FAKE_OWN_DIR="${FAKE_OWN_DIR-$bu_own_dir}" \
+		"$binutils_gate" "$@" >"$output" 2>&1 || bu_rc=$?
+}
+# Accepted: the linked prefixed names, origin file and default alike, silently;
+# and the compiler's own bytes in another file.
+bu_gate "$bu/usr/bin" strict avr-gcc OBJCOPY avr-objcopy file OBJDUMP avr-objdump default
+[ "$bu_rc" -eq 0 ] && [ ! -s "$output" ] \
+	|| fail "the compiler's own binutils were not accepted silently (rc=$bu_rc): $(cat "$output")"
+bu_gate "$bu/copy/bin" strict avr-gcc OBJCOPY avr-objcopy file OBJDUMP avr-objdump file
+[ "$bu_rc" -eq 0 ] \
+	|| fail "a byte-identical copy of the compiler's own binutils was refused (rc=$bu_rc): $(cat "$output")"
+checks=$((checks + 1))
+
+# Refused: XC8's pair first on PATH. Both names are reported, each with the
+# program that won, the compiler's own, and the PATH order that repairs it. An
+# environment-supplied OBJDUMP is held to it too.
+bu_gate "$bu/xc8/bin" strict avr-gcc OBJCOPY avr-objcopy file OBJDUMP avr-objdump environment
+[ "$bu_rc" -eq 1 ] \
+	|| fail "XC8's binutils first on PATH were not refused (rc=$bu_rc): $(cat "$output")"
+for diagnostic in "FAIL: OBJCOPY=avr-objcopy is not avr-gcc's own objcopy" \
+		"FAIL: OBJDUMP=avr-objdump is not avr-gcc's own objdump" \
+		"OBJCOPY resolves to $bu_real/xc8/bin/avr-objcopy:" \
+		'GNU objcopy (AVR_8_bit_GNU_Toolchain_3.6.7_635) 2.26.20160125' \
+		"avr-gcc's own objcopy is $bu_real/usr/avr/bin/objcopy (-print-prog-name=objcopy):" \
+		'GNU objcopy (GNU Binutils) 2.45.50' \
+		"Put $bu/usr/bin ahead of $bu/xc8/bin on PATH" \
+		"OBJCOPY=$bu/usr/bin/avr-objcopy on the command line." \
+		"OBJDUMP=$bu/usr/bin/avr-objdump on the command line." \
+		"$bu/xc8/bin is XC8's"; do
+	grep -Fq -- "$diagnostic" "$output" \
+		|| fail "the foreign-binutils diagnostic omitted: $diagnostic ($(cat "$output"))"
+done
+checks=$((checks + 1))
+
+# Refused, with the fix that applies: a path to another program (no PATH
+# advice, and no XC8 note where no xc8-cc sits beside it), and every way the
+# compiler's own program or the selected one can be missing.
+mkdir -p "$bu/other"
+cp "$bu/xc8/bin/avr-objcopy" "$bu/other/avr-objcopy"
+bu_gate "$bu/usr/bin" strict avr-gcc OBJCOPY "$bu/other/avr-objcopy" file
+[ "$bu_rc" -eq 1 ] && grep -Fq "Select OBJCOPY=$bu_real/usr/avr/bin/objcopy on the command line." "$output" \
+		&& ! grep -Fq 'on PATH' "$output" && ! grep -Fq "XC8's" "$output" \
+	|| fail "a foreign objcopy by path was not refused with the path fix alone (rc=$bu_rc): $(cat "$output")"
+FAKE_OWN_DIR='' bu_gate "$bu/usr/bin" strict avr-gcc OBJCOPY avr-objcopy file
+[ "$bu_rc" -eq 1 ] && grep -Fq "names no objcopy of its own (-print-prog-name=objcopy printed 'objcopy')" "$output" \
+	|| fail "a compiler with no objcopy of its own was not refused (rc=$bu_rc): $(cat "$output")"
+FAKE_OWN_DIR="$bu/nowhere" bu_gate "$bu/usr/bin" strict avr-gcc OBJDUMP avr-objdump file
+[ "$bu_rc" -eq 1 ] && grep -Fq "names $bu/nowhere/objdump as its objdump, and that is not an executable file" "$output" \
+	|| fail "a compiler naming a missing objdump was not refused (rc=$bu_rc): $(cat "$output")"
+bu_gate "$bu/usr/bin" strict avr-gcc OBJCOPY no-such-avr-objcopy file
+[ "$bu_rc" -eq 1 ] && grep -Fq 'OBJCOPY=no-such-avr-objcopy is not avr-gcc'"'"'s own objcopy; it was not found.' "$output" \
+	|| fail "a missing objcopy was not refused (rc=$bu_rc): $(cat "$output")"
+bu_gate "$bu/usr/bin" strict avr-gcc OBJCOPY '' file
+[ "$bu_rc" -eq 1 ] && grep -Fq 'it is empty.' "$output" \
+	|| fail "an empty OBJCOPY was not refused (rc=$bu_rc): $(cat "$output")"
+bu_gate "$bu/usr/bin" strict "$work/no-such-avr-gcc" OBJCOPY avr-objcopy file
+[ "$bu_rc" -eq 1 ] && grep -Fq "CC=$work/no-such-avr-gcc was not found" "$output" \
+	|| fail "a missing compiler was not refused by the binutils gate (rc=$bu_rc): $(cat "$output")"
+checks=$((checks + 1))
+
+# Left alone: a lenient run, and an explicit selection, which is reported.
+bu_gate "$bu/xc8/bin" lenient avr-gcc OBJCOPY avr-objcopy file OBJDUMP avr-objdump file
+[ "$bu_rc" -eq 0 ] && [ ! -s "$output" ] \
+	|| fail "a lenient run enforced the binutils contract or spoke (rc=$bu_rc): $(cat "$output")"
+for origin in 'command line' 'environment override'; do
+	bu_gate "$bu/xc8/bin" strict avr-gcc OBJCOPY avr-objcopy "$origin"
+	[ "$bu_rc" -eq 0 ] && grep -Fq "OBJCOPY=avr-objcopy was selected explicitly ($origin)" "$output" \
+		|| fail "an explicit OBJCOPY ($origin) was not reported and exempted (rc=$bu_rc): $(cat "$output")"
+done
+checks=$((checks + 1))
+
+# Malformed invocations, refused the same way in both modes.
+bu_malformed() {
+	bu_rc=0
+	"$binutils_gate" "$@" >"$output" 2>&1 || bu_rc=$?
+	[ "$bu_rc" -eq 2 ] \
+		|| fail "the binutils gate did not reject the malformed call ($*) with rc 2 (rc=$bu_rc)"
+}
+bu_malformed
+bu_malformed strict avr-gcc OBJCOPY avr-objcopy
+bu_malformed strict avr-gcc OBJCOPY avr-objcopy file OBJDUMP
+bu_malformed bogus avr-gcc OBJCOPY avr-objcopy file
+bu_malformed strict '' OBJCOPY avr-objcopy file
+bu_malformed strict avr-gcc NM avr-nm file
+bu_malformed lenient avr-gcc NM avr-nm file
+bu_malformed lenient avr-gcc OBJCOPY avr-objcopy bogus
+checks=$((checks + 1))
+
+# The recipe hands the gate each origin and Make's own reading of STRICT_TOOLS.
+# XC8's pair first on PATH stands in for this repository's development host.
+bu_gate_make() {
+	bu_rc=0
+	(
+		unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKELEVEL STRICT_TOOLS CC OBJCOPY OBJDUMP
+		PATH="$bu/xc8/bin:$bu/usr/bin:$PATH" FAKE_OWN_DIR="$bu_own_dir" \
+			"$REAL_MAKE" --no-print-directory -s -C "$ROOT" avr-binutils-valid "$@"
+	) >"$output" 2>&1 || bu_rc=$?
+}
+bu_gate_make STRICT_TOOLS=1
+[ "$bu_rc" -ne 0 ] && grep -Fq 'FAIL: OBJCOPY=avr-objcopy' "$output" \
+		&& grep -Fq 'FAIL: OBJDUMP=avr-objdump' "$output" \
+	|| fail "the avr-binutils-valid recipe, strict, accepted XC8's binutils (rc=$bu_rc): $(cat "$output")"
+bu_gate_make
+[ "$bu_rc" -eq 0 ] && [ ! -s "$output" ] \
+	|| fail "the avr-binutils-valid recipe, lenient, enforced the contract (rc=$bu_rc): $(cat "$output")"
+bu_gate_make STRICT_TOOLS=1 OBJCOPY=avr-objcopy OBJDUMP=avr-objdump
+[ "$bu_rc" -eq 0 ] && grep -Fq 'OBJCOPY=avr-objcopy was selected explicitly (command line)' "$output" \
+		&& grep -Fq 'OBJDUMP=avr-objdump was selected explicitly (command line)' "$output" \
+	|| fail "the avr-binutils-valid recipe did not exempt command-line binutils (rc=$bu_rc): $(cat "$output")"
+checks=$((checks + 1))
+
 # Independent missing capabilities are aggregated exactly as the real preflight
 # aggregates its report. One run proves every diagnostic without paying for 74
 # real Makefile parses per missing input.
@@ -3739,6 +3939,37 @@ checks=$((checks + 1))
 # without it, a rejection could be some unrelated capability failure.
 assert_pin_accepts CC 'avr-gcc (Ubuntu 14.3.0-1ubuntu1) 14.3.0' \
 	'a pinned avr-gcc carrying a distributor packaging blob'
+
+# The release holds the default AVR binutils to the compiler's own, by the
+# origins the Makefile reports. Every other case passes OBJCOPY and OBJDUMP on
+# the fake make's command line, so they are explicit and exempt, which the
+# happy path above proves: fake-tool is not the compiler's own. These leave
+# one or both at the Makefile's default, where PATH's avr-objcopy and
+# avr-objdump link to the fake compiler's own pair, unless TEST_AVR_OWN_DIR
+# says its own pair is another.
+TEST_AVR_BINUTILS_DEFAULT='OBJCOPY OBJDUMP' run_preflight >"$output" 2>&1 \
+	|| fail "preflight refused default AVR binutils that are the compiler's own: $(<"$output")"
+grep -Fq 'preflight passed: this host can start a release.' "$output" \
+	|| fail "default own AVR binutils did not reach the preflight success line: $(<"$output")"
+! grep -Fq 'selected explicitly' "$output" \
+	|| fail "default AVR binutils were reported as an explicit selection: $(<"$output")"
+assert_no_release_scratch
+checks=$((checks + 1))
+for selector in OBJCOPY OBJDUMP; do
+	prog=$(printf '%s' "$selector" | tr '[:upper:]' '[:lower:]')
+	if TEST_AVR_BINUTILS_DEFAULT=$selector TEST_AVR_OWN_DIR="$toolchain/avr-foreign" \
+			run_preflight >"$output" 2>&1; then
+		fail "preflight accepted a default $selector that is not the compiler's own"
+	fi
+	grep -Fq "FAIL: $selector=avr-$prog is not fake-avr-gcc's own $prog" "$output" \
+		|| fail "a foreign default $selector was refused without its diagnostic: $(<"$output")"
+	grep -Fq "the default AVR binutils are not avr-gcc's own" "$output" \
+		|| fail "a foreign default $selector did not stop the release by name: $(<"$output")"
+	! grep -Fq 'preflight passed' "$output" \
+		|| fail "a foreign default $selector printed the preflight success line"
+	assert_no_release_scratch
+	checks=$((checks + 1))
+done
 
 if TEST_GIT_STATUS_FAIL=1 run_preflight >"$output" 2>&1; then
 	fail "preflight accepted a failed git status as a clean tree"
