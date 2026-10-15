@@ -694,13 +694,11 @@ AVR_PROGRAMMER=$(mkv AVR_PROGRAMMER)         # usbtiny
 # --- ATtiny202 (AVR-XT) ------------------------------------------------------
 # Read through its own variables for the same reason the PIC pair below does:
 # the AVR-XT shares avr-gcc with the classic parts but nothing else -- its own
-# device pack, its own clock, its own fuse model (seven named AVR8X memories
+# device support, its own clock, its own fuse model (seven named AVR8X memories
 # rather than lfuse/hfuse), and a simulator that is neither simavr nor gpsim.
 XT_BUILD_DIR=$(mkv XT_BUILD_DIR)   # build_avr_xt
 XT_TAG=$(mkv XT_TAG)               # attiny202
 XT_MCU=$(mkv XT_MCU)               # attiny202
-XT_DFP=$(mkv XT_DFP)               # third_party/attiny_dfp
-XT_DFP=$(path_from_repo "$XT_DFP")
 XT_F_CPU=$(mkv XT_F_CPU)           # 2000000UL
 XT_FLASH_BYTES=$(mkv XT_FLASH_BYTES)
 XT_VARIANTS=$(mkv XT_VARIANTS_SUPPORTED)     # same three names as VARIANTS
@@ -838,7 +836,7 @@ export PIC10F320_CC PIC10F320_DFP PIC10F320_XC8_INCLUDE PIC10F320_DFP_INCLUDE PI
 export PIC12F675_DFP_INCLUDE PIC12F675_DEVICE_INI
 export PIC12F675_PYTHON
 export PIC10F320_HOST_CC PIC_SOAK_CXX PIC10F320_SOAK_CXX
-export PIC_SOAK_GPSIM_INC PIC10F320_SOAK_GPSIM_INC XT_DFP
+export PIC_SOAK_GPSIM_INC PIC10F320_SOAK_GPSIM_INC
 export YASIMAVR_VENV="$(dirname "$(dirname "$YASIMAVR_PY_ABS")")"
 
 # The canonical release product set. This script ENUMERATES the
@@ -1288,18 +1286,32 @@ if have pkg-config && pkg-config --exists glib-2.0 2>/dev/null; then
 else
 	MISSING+=("glib-2.0  (apt: libglib2.0-dev, PIC soaks)")
 fi
-# ATtiny202 (AVR-XT). Both inputs are fetched on demand and NOT committed, and
-# every attiny202-* target skips cleanly without them -- so a release that did
-# not assert them here would quietly ship three unqualified images. avr-nm and
-# avr-objdump are the harness's own tools: the drivers resolve ctx_ with the
-# former and read coil-pulse widths back out of the image with the latter.
-req_file "$XT_DFP/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" \
-	"ATtiny_DFP (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
-req_file "$XT_DFP/gcc/dev/$XT_MCU/avrxmega3/short-calls/crt$XT_MCU.o" \
-	"ATtiny_DFP C runtime (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
-req_file "$XT_DFP/gcc/dev/$XT_MCU/avrxmega3/short-calls/lib$XT_MCU.a" \
-	"ATtiny_DFP device library (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
-req_file "$XT_IO_HEADER" "ATtiny_DFP I/O header (scripts/fetch_attiny_dfp.sh; XT_DFP=)"
+# ATtiny202 (AVR-XT). The device support is the selected compiler's own: gcc's
+# spec file, and avr-libc's C runtime, device library and I/O header. The
+# yasimavr venv is fetched on demand and NOT committed. Every attiny202-* target
+# skips cleanly without any of them -- so a release that did not assert them
+# here would quietly ship three unqualified images. avr-nm and avr-objdump are
+# the harness's own tools: the drivers resolve ctx_ with the former and read
+# coil-pulse widths back out of the image with the latter.
+# xt_device_file ARGS...: the file $AVR_CC's -print-file-name names, or nothing
+# when it names none (GCC prints the bare name of a file it does not have).
+xt_device_file() {
+	local found
+	found=$("$AVR_CC" "$@" 2>/dev/null) || found=
+	case "$found" in
+		/*) printf '%s\n' "$found" ;;
+	esac
+}
+XT_SPEC_FILE=$(xt_device_file -print-file-name="device-specs/specs-$XT_MCU")
+XT_CRT_FILE=$(xt_device_file -mmcu="$XT_MCU" -print-file-name="crt$XT_MCU.o")
+XT_LIB_FILE=$(xt_device_file -mmcu="$XT_MCU" -print-file-name="lib$XT_MCU.a")
+req_file "${XT_SPEC_FILE:-device-specs/specs-$XT_MCU}" \
+	"avr-gcc's ATtiny202 device specs (apt: gcc-avr, avr-gcc 14.3.0; CC=$AVR_CC)"
+req_file "${XT_CRT_FILE:-crt$XT_MCU.o}" \
+	"avr-libc's ATtiny202 C runtime (apt: avr-libc 2.2.1; CC=$AVR_CC)"
+req_file "${XT_LIB_FILE:-lib$XT_MCU.a}" \
+	"avr-libc's ATtiny202 device library (apt: avr-libc 2.2.1; CC=$AVR_CC)"
+req_file "$XT_IO_HEADER" "avr-libc's ATtiny202 I/O header (apt: avr-libc 2.2.1; CC=$AVR_CC)"
 req_exec "$YASIMAVR_PY_ABS" "executable patched yasimavr interpreter (scripts/fetch_yasimavr.sh; YASIMAVR_VENV=)"
 YASIMAVR_IMPORT='from yasimavr.device_library.descriptors import DeviceDescriptor; from yasimavr.device_library.builders._builders_arch_xt import XT_DeviceBuilder; from yasimavr.device_library.builders import dev_tiny_0series; from yasimavr.lib import core'
 if [ -f "$YASIMAVR_PY_ABS" ] && [ -x "$YASIMAVR_PY_ABS" ] \
@@ -1546,11 +1558,11 @@ section "1. clean build (all variants x release-supported MCUs)"
 make clean >/dev/null
 make attiny13a attiny85 attiny45 >"$EVID/build-avr-classic.log" 2>&1 || { cat "$EVID/build-avr-classic.log" >&2; die "AVR build failed."; }
 seal_evidence_result "$EVID/build-avr-classic.log"
-# ATtiny202: STRICT_TOOLS=1 so an absent ATtiny_DFP is a hard failure here rather
+# ATtiny202: STRICT_TOOLS=1 so absent device support is a hard failure here rather
 # than a clean skip that would leave build_avr_xt/ empty and be caught much later
 # as three missing images. The build enforces both flash and static-RAM limits;
 # the later attiny202-test qualification adds the shell frame gate.
-make attiny202 STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
+make attiny202 STRICT_TOOLS=1 \
 	XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
 	>"$EVID/build-avr-xt.log" 2>&1 \
 	|| { cat "$EVID/build-avr-xt.log" >&2; die "ATtiny202 build failed."; }
@@ -1724,7 +1736,7 @@ make test-long STRICT_TOOLS=1 MUTATION_ALLOW_SKIP=0 PIC12F675_FLASH_IMAGES=build
 	PIC_SOAK_CXX="$PIC_SOAK_CXX" PIC10F320_SOAK_CXX="$PIC10F320_SOAK_CXX" \
 	PIC_SOAK_GPSIM_INC="$PIC_SOAK_GPSIM_INC" \
 	PIC10F320_SOAK_GPSIM_INC="$PIC10F320_SOAK_GPSIM_INC" \
-	XT_DFP="$XT_DFP" YASIMAVR_VENV="$YASIMAVR_VENV" \
+	YASIMAVR_VENV="$YASIMAVR_VENV" \
 	XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
 	PIC12F675_DATA_LIMIT="$RELEASE_PIC12F675_DATA_LIMIT" \
 	>"$EVID/test-long.log" 2>&1 \
@@ -1735,7 +1747,7 @@ validated_avr_elf_hashes=$(hash_avr_elf_set "${AVR_ELFS[@]}")
 # ATtiny202 pre-hardware gates: fuses, smoke, build + 2 KB budget, cppcheck +
 # MISRA, and the coil-pulse width oracle read back out of the built image.
 log "running make attiny202-test (fuses + build/budget + analysis + delay oracle)..."
-make attiny202-test STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
+make attiny202-test STRICT_TOOLS=1 \
 	XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
 	XT_STACK_MAX_FRAME="$RELEASE_XT_STACK_MAX_FRAME" \
 	>"$EVID/attiny202-test.log" 2>&1 \
@@ -1748,7 +1760,7 @@ ok "attiny202-test passed."
 # trace, critical-SFR/state fault injection, and firmware/model ctx_ lock-step.
 # STRICT_TOOLS=1 converts each driver's clean skip into a hard failure.
 log "running make attiny202-test-target (sim + fault + lock-step on the real image)..."
-make attiny202-test-target STRICT_TOOLS=1 XT_DFP="$XT_DFP" \
+make attiny202-test-target STRICT_TOOLS=1 \
 	YASIMAVR_VENV="$YASIMAVR_VENV" \
 	XT_STATIC_RAM_LIMIT="$RELEASE_XT_STATIC_RAM_LIMIT" \
 	>"$EVID/attiny202-test-target.log" 2>&1 \

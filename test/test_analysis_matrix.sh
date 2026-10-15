@@ -25,10 +25,10 @@ checks=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 mkdir -p "$work/avr-libc/avr" "$work/avr-gcc" \
-	"$work/xt/include/avr" "$work/xc8" \
+	"$work/xt/avr" "$work/xc8" \
 	"$work/dfp322/proc" "$work/dfp320/proc" "$work/dfp675/proc"
 : > "$work/avr-libc/avr/io.h"
-: > "$work/xt/include/avr/iotn202.h"
+: > "$work/xt/avr/iotn202.h"
 : > "$work/xc8/xc.h"
 : > "$work/dfp322/proc/pic10f322.h"
 : > "$work/dfp320/proc/pic10f320.h"
@@ -76,7 +76,7 @@ run_matrix() {
 for mode in plain misra; do
 	if [ "$mode" = plain ]; then suffix=cppcheck; else suffix=misra; fi
 	run_matrix "$mode" "analyze-$suffix" "VARIANTS=cd4053_simple"
-	run_matrix "$mode" "attiny202-analyze-$suffix" "XT_DFP=$work/xt"
+	run_matrix "$mode" "attiny202-analyze-$suffix" "XT_IO_HEADER=$work/xt/avr/iotn202.h"
 	run_matrix "$mode" "pic10f322-analyze-$suffix" \
 		"PIC_XC8_INCLUDE=$work/xc8" "PIC10F322_DFP_INCLUDE=$work/dfp322"
 	run_matrix "$mode" "pic10f320-analyze-$suffix" \
@@ -207,7 +207,6 @@ required_config = {
         "-DF_CPU=2000000UL",
         "-UBYPASS_MCU_PIC10F322", "-UBYPASS_MCU_AVR_CLASSIC", "-Isrc",
         "-I" + str(work / "avr-libc"), "-I" + str(work / "avr-gcc"),
-        "-I" + str(work / "xt/include"),
     },
     "pic10f322": {
         "-D__XC8", "-D_10F322", "-D_XTAL_FREQ=2000000UL",

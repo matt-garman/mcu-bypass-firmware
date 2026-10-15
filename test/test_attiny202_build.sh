@@ -17,8 +17,8 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 # partial or malformed avr-gcc, avr-size or objcopy output cannot become an
 # image. Exactly one valid Program and Data record is required, the 2048-byte
 # flash and 16-of-128-byte static-RAM limits hold per variant, and each variant
-# is pinned to its selector and driver. An absent ATtiny_DFP skips or fails as
-# STRICT_TOOLS says.
+# is pinned to its selector and driver. A compiler without the part's device
+# support skips or fails as STRICT_TOOLS says.
 #
 # THE DEFECT. Before 93fd739 (2026-07-13) stale ELF and HEX files were not
 # removed before the tool checks, and new ones were not staged under temporary
@@ -28,17 +28,20 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-$HOME}/test-attiny202-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
-dfp="$work/dfp"
+# The device support the fake compiler reports through -print-file-name: its
+# spec file, and avr-libc's <avr/io.h> beside the part's I/O header.
+device="$work/device"
 build="$work/build"
 cc_log="$work/cc.log"
-mkdir -p "$tools" "$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
-: > "$dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
-: > "$dfp/include/avr/iotn202.h"
+mkdir -p "$tools" "$device/device-specs" "$device/avr"
+: > "$device/device-specs/specs-attiny202"
+: > "$device/avr/io.h"
+: > "$device/avr/iotn202.h"
 : > "$cc_log"
 export FAKE_CC_LOG="$cc_log"
 checks=0
 unset FAKE_CC_MODE FAKE_READELF_MODE FAKE_SIZE_MODE FAKE_OBJCOPY_MODE
-unset TEST_VARIANTS TEST_DFP XT_FLASH_BYTES XT_STATIC_RAM_LIMIT XT_SRAM_BYTES
+unset TEST_VARIANTS TEST_DEVICE XT_FLASH_BYTES XT_STATIC_RAM_LIMIT XT_SRAM_BYTES
 # Parent Make command-line assignments propagate through these variables and
 # must not override the isolated negative fixtures passed to each nested build.
 unset MAKEFLAGS MAKEOVERRIDES MFLAGS GNUMAKEFLAGS
@@ -50,6 +53,18 @@ cat > "$tools/cc" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${1:-}" = --version ]; then printf 'fake avr-gcc 1\n'; exit 0; fi
+# As GCC does: the path of a file the toolchain has, else the bare name.
+case "${1:-}" in
+	-print-file-name=*)
+		name=${1#*=}
+		if [ -e "${FAKE_DEVICE:?}/$name" ]; then
+			printf '%s\n' "$FAKE_DEVICE/$name"
+		else
+			printf '%s\n' "$name"
+		fi
+		exit 0
+		;;
+esac
 out=
 args=$*
 while [ "$#" -gt 0 ]; do
@@ -118,8 +133,8 @@ EOF
 chmod 750 "$tools"/*
 
 run_build() {
-	make --no-print-directory -C "$ROOT" attiny202 \
-		XT_BUILD_DIR="$build" XT_DFP="${TEST_DFP-$dfp}" VARIANTS="${TEST_VARIANTS-cd4053_simple}" \
+	FAKE_DEVICE="${TEST_DEVICE-$device}" make --no-print-directory -C "$ROOT" attiny202 \
+		XT_BUILD_DIR="$build" VARIANTS="${TEST_VARIANTS-cd4053_simple}" \
 		CC="$tools/cc" READELF="$tools/readelf" SIZE="$tools/size" \
 		OBJCOPY="$tools/objcopy" "$@"
 }
@@ -361,25 +376,26 @@ for assignment in 'XT_FLASH_BYTES="' 'TEST_VARIANTS="'; do
 	checks=$((checks + 1))
 done
 
-# Absent DFP skips cleanly by default, but is a HARD FAILURE under STRICT_TOOLS=1
-# (the policy scripts/ci-local.sh runs with). Pin STRICT_TOOLS on the make command
-# line for both so the ambient CI environment cannot flip either expectation.
+# A compiler without the part's device support skips cleanly by default, but is
+# a HARD FAILURE under STRICT_TOOLS=1 (the policy scripts/ci-local.sh runs
+# with). Pin STRICT_TOOLS on the make command line for both so the ambient CI
+# environment cannot flip either expectation.
 seed_stale
-run_build_output=$(export TEST_DFP="$work/missing-dfp"; run_build STRICT_TOOLS= 2>&1) \
-	|| { printf 'FAIL: absent DFP did not skip cleanly: %s\n' "$run_build_output" >&2; exit 1; }
-[[ "$run_build_output" == *"skipping ATtiny202 build"* ]] \
-	|| { printf 'FAIL: absent DFP skip missing its reason: %s\n' "$run_build_output" >&2; exit 1; }
-assert_no_artifacts "absent DFP skip"
+run_build_output=$(export TEST_DEVICE="$work/no-device"; run_build STRICT_TOOLS= 2>&1) \
+	|| { printf 'FAIL: absent device support did not skip cleanly: %s\n' "$run_build_output" >&2; exit 1; }
+[[ "$run_build_output" == *"no ATtiny202 device support in CC=$tools/cc"*"skipping ATtiny202 build"* ]] \
+	|| { printf 'FAIL: absent device support skip missing its reason: %s\n' "$run_build_output" >&2; exit 1; }
+assert_no_artifacts "absent device support skip"
 checks=$((checks + 1))
 
 seed_stale
-if output=$(export TEST_DFP="$work/missing-dfp"; run_build STRICT_TOOLS=1 2>&1); then
-	printf 'FAIL: absent DFP under STRICT_TOOLS=1 did not fail: %s\n' "$output" >&2
+if output=$(export TEST_DEVICE="$work/no-device"; run_build STRICT_TOOLS=1 2>&1); then
+	printf 'FAIL: absent device support under STRICT_TOOLS=1 did not fail: %s\n' "$output" >&2
 	exit 1
 fi
 [[ "$output" == *"STRICT_TOOLS=1"* ]] \
-	|| { printf 'FAIL: STRICT_TOOLS=1 absent DFP failed for the wrong reason: %s\n' "$output" >&2; exit 1; }
-assert_no_artifacts "absent DFP strict"
+	|| { printf 'FAIL: STRICT_TOOLS=1 absent device support failed for the wrong reason: %s\n' "$output" >&2; exit 1; }
+assert_no_artifacts "absent device support strict"
 checks=$((checks + 1))
 
 seed_stale

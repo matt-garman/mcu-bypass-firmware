@@ -16,7 +16,6 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 # Offline regression for the external inputs this tree downloads and caches.
 #   - XC8 and the PIC DFP must match reviewed hashes before any privileged
 #     install, and the install must produce all three device headers.
-#   - The restored ATtiny_DFP cache is re-hashed on every use.
 #   - yasimavr's build dependencies are wheel- and hash-locked and installed
 #     without dependency resolution.
 #   - The cache manifest's stages fail by name, and hostile filenames survive
@@ -34,7 +33,6 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PIC_INSTALL="$ROOT/scripts/install_pic_toolchain.sh"
 PIC_VERIFY="$ROOT/scripts/verify_pic_toolchain_cache.sh"
-ATTINY_FETCH="$ROOT/scripts/fetch_attiny_dfp.sh"
 YASIMAVR_FETCH="$ROOT/scripts/fetch_yasimavr.sh"
 YASIMAVR_LOCK="$ROOT/scripts/yasimavr-build-requirements.txt"
 work=$(mktemp -d "${TMPDIR:-/tmp}/test-supply-chain.XXXXXX")
@@ -459,134 +457,6 @@ grep -Fq '628803b96f468a5981d6bc1d0a5e6c7fa809e4d87e3cca961805e2a857f5846e' \
 	"$PIC_INSTALL" || fail "reviewed XC8 digest is missing"
 grep -Fq 'add68db8b76705557a99647bde5b149d17caf259d968f5946058356275eed75b' \
 	"$PIC_INSTALL" || fail "official PIC DFP digest is missing"
-checks=$((checks + 1))
-
-# A matching ATtiny_DFP stamp is insufficient: every extracted file must still
-# match its reviewed content hash before the cache is accepted.
-attiny_dest="$work/attiny-dfp"
-attiny_files=(
-	gcc/dev/attiny202/device-specs/specs-attiny202
-	gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o
-	gcc/dev/attiny202/avrxmega3/short-calls/libattiny202.a
-	include/avr/iotn202.h
-)
-attiny_hashes=
-for index in "${!attiny_files[@]}"; do
-	path=${attiny_files[$index]}
-	mkdir -p "$attiny_dest/$(dirname "$path")"
-	printf 'fixture %s\n' "$index" > "$attiny_dest/$path"
-	digest=$(sha256sum "$attiny_dest/$path" | cut -d' ' -f1)
-	attiny_hashes+="$digest  $path"$'\n'
-done
-pack_sha=0000000000000000000000000000000000000000000000000000000000000000
-printf 'fixture-version %s\n' "$pack_sha" > "$attiny_dest/.attiny_dfp.stamp"
-output=$(ATTINY_DFP_VER=fixture-version ATTINY_DFP_SHA256="$pack_sha" \
-	ATTINY_DFP_FILE_HASHES="$attiny_hashes" \
-	"$ATTINY_FETCH" "$attiny_dest" 2>&1) \
-	|| fail "valid synthetic ATtiny_DFP cache was rejected: $output"
-[[ "$output" == *"verified stamp + file hashes"* ]] \
-	|| fail "valid ATtiny_DFP cache did not take the verified cache path"
-checks=$((checks + 1))
-
-attiny_fakebin="$work/attiny-fakebin"
-mkdir "$attiny_fakebin"
-cat > "$attiny_fakebin/curl" <<'EOF'
-#!/bin/sh
-printf 'download attempted\n' >> "$ATTINY_DOWNLOAD_LOG"
-exit 19
-EOF
-chmod +x "$attiny_fakebin/curl"
-printf 'corrupted cache bytes\n' > "$attiny_dest/${attiny_files[0]}"
-download_log="$work/attiny-download.log"
-expect_fail "corrupt ATtiny_DFP cache" "download failed" \
-	env PATH="$attiny_fakebin:$PATH" ATTINY_DOWNLOAD_LOG="$download_log" \
-		ATTINY_DFP_VER=fixture-version ATTINY_DFP_SHA256="$pack_sha" \
-		ATTINY_DFP_FILE_HASHES="$attiny_hashes" \
-		"$ATTINY_FETCH" "$attiny_dest"
-[ "$(<"$download_log")" = 'download attempted' ] \
-	|| fail "corrupt ATtiny_DFP cache was accepted without refetching"
-checks=$((checks + 1))
-
-printf 'fixture 0\n' > "$attiny_dest/${attiny_files[0]}"
-mkdir -p "$attiny_dest/include/avr"
-printf 'unexpected compiler input\n' > "$attiny_dest/include/avr/io.h"
-rm -f "$download_log"
-expect_fail "extra ATtiny_DFP cache file" "download failed" \
-	env PATH="$attiny_fakebin:$PATH" ATTINY_DOWNLOAD_LOG="$download_log" \
-		ATTINY_DFP_VER=fixture-version ATTINY_DFP_SHA256="$pack_sha" \
-		ATTINY_DFP_FILE_HASHES="$attiny_hashes" \
-		"$ATTINY_FETCH" "$attiny_dest"
-[ "$(<"$download_log")" = 'download attempted' ] \
-	|| fail "extra ATtiny_DFP compiler input was accepted from cache"
-checks=$((checks + 1))
-
-rm -rf "$attiny_dest/include"
-external_include="$work/external-attiny-include"
-mkdir -p "$external_include/avr"
-printf 'fixture 3\n' > "$external_include/avr/iotn202.h"
-printf 'unexpected compiler input\n' > "$external_include/avr/io.h"
-ln -s "$external_include" "$attiny_dest/include"
-rm -f "$download_log"
-expect_fail "symlinked ATtiny_DFP cache directory" "download failed" \
-	env PATH="$attiny_fakebin:$PATH" ATTINY_DOWNLOAD_LOG="$download_log" \
-		ATTINY_DFP_VER=fixture-version ATTINY_DFP_SHA256="$pack_sha" \
-		ATTINY_DFP_FILE_HASHES="$attiny_hashes" \
-		"$ATTINY_FETCH" "$attiny_dest"
-[ "$(<"$download_log")" = 'download attempted' ] \
-	|| fail "symlinked ATtiny_DFP compiler-input directory was accepted"
-checks=$((checks + 1))
-
-rm "$attiny_dest/include"
-mkdir -p "$attiny_dest/include/avr"
-printf 'fixture 3\n' > "$attiny_dest/include/avr/iotn202.h"
-stamp_target="$work/stamp-target"
-printf 'must not be overwritten\n' > "$stamp_target"
-rm "$attiny_dest/.attiny_dfp.stamp"
-ln -s "$stamp_target" "$attiny_dest/.attiny_dfp.stamp"
-expect_fail "symlinked ATtiny_DFP stamp" "refusing to replace symlinked stamp" \
-	env ATTINY_DFP_VER=fixture-version ATTINY_DFP_SHA256="$pack_sha" \
-		ATTINY_DFP_FILE_HASHES="$attiny_hashes" \
-		"$ATTINY_FETCH" "$attiny_dest"
-[ "$(<"$stamp_target")" = 'must not be overwritten' ] \
-	|| fail "symlinked ATtiny_DFP stamp target was overwritten"
-checks=$((checks + 1))
-
-attiny_success_bin="$work/attiny-success-bin"
-mkdir "$attiny_success_bin"
-cat > "$attiny_success_bin/curl" <<'EOF'
-#!/bin/sh
-set -eu
-output=
-while [ "$#" -gt 0 ]; do
-	if [ "$1" = -o ]; then shift; output=$1; fi
-	shift
-done
-[ -n "$output" ] || exit 2
-printf '%s' "$ATTINY_PACK_PAYLOAD" > "$output"
-EOF
-cat > "$attiny_success_bin/unzip" <<'EOF'
-#!/bin/sh
-# The synthetic cache already contains the exact extracted fixture bytes.
-exit 0
-EOF
-chmod +x "$attiny_success_bin/curl" "$attiny_success_bin/unzip"
-rm "$attiny_dest/.attiny_dfp.stamp"
-hardlink_target="$work/hardlink-stamp-target"
-printf 'must remain old stamp bytes\n' > "$hardlink_target"
-ln "$hardlink_target" "$attiny_dest/.attiny_dfp.stamp"
-pack_payload='trusted synthetic atpack'
-fresh_pack_sha=$(sha_of "$pack_payload")
-env PATH="$attiny_success_bin:$PATH" ATTINY_PACK_PAYLOAD="$pack_payload" \
-	ATTINY_DFP_VER=fresh-version ATTINY_DFP_SHA256="$fresh_pack_sha" \
-	ATTINY_DFP_FILE_HASHES="$attiny_hashes" \
-	"$ATTINY_FETCH" "$attiny_dest" >/dev/null 2>&1 \
-	|| fail "synthetic ATtiny_DFP refetch with a hard-linked stamp failed"
-[ "$(<"$hardlink_target")" = 'must remain old stamp bytes' ] \
-	|| fail "atomic stamp update overwrote an external hard-link target"
-[ "$(<"$attiny_dest/.attiny_dfp.stamp")" = "fresh-version $fresh_pack_sha" ] \
-	|| fail "atomic stamp update did not install the new stamp"
-[ ! "$hardlink_target" -ef "$attiny_dest/.attiny_dfp.stamp" ] \
-	|| fail "new ATtiny_DFP stamp still shares the old hard-linked inode"
 checks=$((checks + 1))
 
 # The simulator build has one hash lock in every cache key, no get-pip bootstrap,

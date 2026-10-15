@@ -94,6 +94,15 @@ lengths.
   142). `avr-compiler-valid` and `scripts/make-release.sh` hold the new pin, and
   name the historic 7.3.0 prefix if it shadows the pin on `PATH`. cppcheck 2.19,
   the release analyzer from here on, applies MISRA record D-6.
+- **The ATtiny202 builds from Ubuntu's own device support.** avr-gcc 14.3.0
+  and avr-libc 2.2.1 carry the part's spec file, I/O header, C runtime and
+  device library, so the build no longer injects Microchip's ATtiny_DFP
+  device files, and `scripts/fetch_attiny_dfp.sh`, `XT_DFP` and the workflows'
+  DFP fetch and cache steps are gone. The ATtiny202 HEX images are
+  byte-identical with and without the DFP. A compiler without the part skips
+  each ATtiny202 lane by name, or fails it under `STRICT_TOOLS=1`, and release
+  preflight names the missing file. Rebuilding v0.9.17 or an earlier release
+  uses that release's own `scripts/fetch_attiny_dfp.sh`.
 
 ### Fixed
 

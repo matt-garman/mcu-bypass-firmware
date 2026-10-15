@@ -55,8 +55,8 @@ fail() {
 }
 
 mkdir -p "$fakebin" "$work/dfp/pic/include/proc" "$work/gpsim-inc" \
-	"$work/xt-dfp/gcc/dev/attiny202/device-specs" \
-	"$work/xt-dfp/include/avr" "$work/yasimavr-venv/bin"
+	"$work/xt-device/device-specs" \
+	"$work/xt-device/avr" "$work/yasimavr-venv/bin"
 # All three device headers: assert_pic_toolchain checks the 322 and the 320
 # through their own PIC_*/PIC10F320_* pairs and the 12F675 through the 322's
 # pair, so a fake DFP missing any one of them would fail the assert before any
@@ -65,8 +65,9 @@ printf '/* fixture */\n' > "$work/dfp/pic/include/proc/pic10f322.h"
 printf '/* fixture */\n' > "$work/dfp/pic/include/proc/pic10f320.h"
 printf '/* fixture */\n' > "$work/dfp/pic/include/proc/pic12f675.h"
 printf '/* fixture */\n' > "$work/gpsim-inc/sim_context.h"
-: > "$work/xt-dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
-: > "$work/xt-dfp/include/avr/iotn202.h"
+: > "$work/xt-device/device-specs/specs-attiny202"
+: > "$work/xt-device/avr/io.h"
+: > "$work/xt-device/avr/iotn202.h"
 
 cat > "$fakebin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -167,6 +168,19 @@ done
 # claims -fanalyzer support) would skip those two checks entirely.
 cat > "$fakebin/avr-gcc" <<'EOF'
 #!/usr/bin/env bash
+# The ATtiny202 device support, as GCC reports a file it has: the spec file,
+# and avr-libc's <avr/io.h>, from which the Makefile finds iotn202.h.
+case "${1-}" in
+	-print-file-name=*)
+		name=${1#*=}
+		if [ -e "${FAKE_XT_DEVICE:-/nonexistent}/$name" ]; then
+			printf '%s\n' "$FAKE_XT_DEVICE/$name"
+		else
+			printf '%s\n' "$name"
+		fi
+		exit 0
+		;;
+esac
 exit 1
 EOF
 # simavr headers are probed by path, not by PATH lookup.
@@ -193,13 +207,13 @@ chmod 750 "$work/alt-avr"/*
 run_ci() {
 	: > "$log"
 		env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
-		REAL_MAKE="$REAL_MAKE" \
+		FAKE_XT_DEVICE="$work/xt-device" REAL_MAKE="$REAL_MAKE" \
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
 		PIC10F320_CC="$work/xc8" PIC10F320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
 		PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$work/gpsim-inc}" \
 		SIMAVR_INC="$work/simavr-inc" \
-		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
+		YASIMAVR_VENV="$work/yasimavr-venv" \
 		ALT_AVR_BIN="$work/alt-avr" \
 		"$CI_LOCAL" --no-clean "$@" 2>&1
 }
@@ -207,13 +221,13 @@ run_ci() {
 run_ci_clean() {
 	: > "$log"
 		env PATH="$fakebin:$PATH" FAKE_REPO_ROOT="$ROOT" FAKE_MAKE_LOG="$log" \
-		REAL_MAKE="$REAL_MAKE" \
+		FAKE_XT_DEVICE="$work/xt-device" REAL_MAKE="$REAL_MAKE" \
 		PIC_CC="$work/xc8" PIC_DFP="$work/dfp" \
 		PIC10F320_CC="$work/xc8" PIC10F320_DFP="$work/dfp" \
 		PIC_SOAK_GPSIM_INC="$work/gpsim-inc" \
 		PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$work/gpsim-inc}" \
 		SIMAVR_INC="$work/simavr-inc" \
-		XT_DFP="$work/xt-dfp" YASIMAVR_VENV="$work/yasimavr-venv" \
+		YASIMAVR_VENV="$work/yasimavr-venv" \
 		ALT_AVR_BIN="$work/alt-avr" \
 		"$CI_LOCAL" "$@" 2>&1
 }

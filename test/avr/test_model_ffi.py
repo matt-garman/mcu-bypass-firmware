@@ -7,8 +7,8 @@
 #
 # WHY IT IS SEPARATE FROM THE LOCK-STEP RUN
 # -----------------------------------------
-# `make attiny202-lockstep` needs the vendored ATtiny_DFP and the patched
-# yasimavr venv, and SKIPS CLEANLY without them. That is the right behaviour for
+# `make attiny202-lockstep` needs an avr-gcc with ATtiny202 support and the
+# patched yasimavr venv, and SKIPS CLEANLY without them. That is the right behaviour for
 # a simulator gate, but it means the bridge itself -- the only path by which the
 # AVR-XT harness reaches the shipping debounce core -- would have no coverage at
 # all on a host that lacks those tools. This test needs neither: just HOSTCC and

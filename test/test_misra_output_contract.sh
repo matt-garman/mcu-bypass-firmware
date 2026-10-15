@@ -65,7 +65,7 @@ printf '%s\n' \
 	> "$authored_c"
 expect_gate_fail "$authored_c" 0 "unwaived authored-firmware diagnostic"
 
-for path in /usr/include/stdint.h third_party/attiny_dfp/include/avr/io.h \
+for path in /usr/include/stdint.h /usr/lib/avr/include/avr/io.h \
 	test/bypass_config_host.h ../outside.h; do
 	external="$work/external-$checks.out"
 	printf 'MCU_BYPASS_CPPCHECK|%s|1|1|style|misra-c2012-14.4|adopted or non-firmware file\n' \
@@ -170,10 +170,10 @@ mutated_runner=$(define_body run_misra_matrix_sh "$mutated_makefile")
 	|| fail "negative rule fixture still contains the output gate"
 checks=$((checks + 1))
 
-# Supply the header-presence guards without requiring any real device pack.
-mkdir -p "$work/xt/include/avr" "$work/xc8" \
+# Supply the header-presence guards without requiring any real device header.
+mkdir -p "$work/xt/avr" "$work/xc8" \
 	"$work/dfp322/proc" "$work/dfp320/proc" "$work/dfp675/proc"
-: > "$work/xt/include/avr/iotn202.h"
+: > "$work/xt/avr/iotn202.h"
 : > "$work/xc8/xc.h"
 : > "$work/dfp322/proc/pic10f322.h"
 : > "$work/dfp320/proc/pic10f320.h"
@@ -225,7 +225,7 @@ lane_args() {
 			LANE_ARGS=("VARIANTS=cd4053_simple")
 			;;
 		attiny202-analyze-misra)
-			LANE_ARGS=("XT_DFP=$work/xt")
+			LANE_ARGS=("XT_IO_HEADER=$work/xt/avr/iotn202.h")
 			;;
 		pic10f322-analyze-misra)
 			LANE_ARGS=("PIC_XC8_INCLUDE=$work/xc8" "PIC10F322_DFP_INCLUDE=$work/dfp322")

@@ -33,8 +33,8 @@ name: CI
 # the coverage gates. None of that needs a vendor toolchain: it runs on the host
 # compiler, avr-gcc and simavr, all from apt. The jobs below wrap it, surface
 # the per-MCU build matrix as discrete checks, add the lanes `make test` cannot
-# reach without a vendor toolchain (XC8 + gpsim for all three PICs,
-# ATtiny_DFP + patched yasimavr for the ATtiny202), and run the slower exhaustive
+# reach without a vendor toolchain (XC8 + gpsim for all three PICs, patched
+# yasimavr for the ATtiny202), and run the slower exhaustive
 # suite plus one fully provisioned mutation gate off the PR hot path.
 
 on:
@@ -72,7 +72,7 @@ jobs:
   #               (both shells, host compiler, no XC8)
   #             + ATtiny202 host-side oracles (fail-closed build regression,
   #               output/delay/fault parsers, golden-model FFI bridge -- no
-  #               ATtiny_DFP and no yasimavr; the attiny202 job runs those)
+  #               ATtiny202 image and no yasimavr; the attiny202 job runs those)
   #             + simavr functional + fault-injection across all variants,
   #               ATtiny13a and tinyx5
   #             + golden-model and verified-core coverage gates.
@@ -280,24 +280,12 @@ jobs:
             gcc-avr avr-libc binutils-avr simavr libsimavr-dev libelf-dev \
             python3-venv python3-dev curl patch
 
-      # The ATtiny202 mutation lane needs the same two out-of-apt inputs the
-      # attiny202 job fetches, and for the same fail-closed reason: every
-      # attiny202-* target exits 0 when one is missing, so without them the whole
-      # lane reports as skipped -- which MUTATION_ALLOW_SKIP=0 then (correctly)
-      # fails on. Both are version-pinned, cached, and shared with that job's
-      # cache keys, so this costs a restore rather than a rebuild in the common
-      # case.
-      - name: Restore cached ATtiny_DFP (mutation lane)
-        id: cache-dfp-mut
-        if: >-
-          github.event_name == 'push' ||
-          github.event_name == 'schedule' ||
-          github.event_name == 'workflow_dispatch'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: third_party/attiny_dfp
-          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
-
+      # The ATtiny202 mutation lane needs the same out-of-apt input the attiny202
+      # job builds, and for the same fail-closed reason: every attiny202-* target
+      # exits 0 when it is missing, so without it the whole lane reports as
+      # skipped -- which MUTATION_ALLOW_SKIP=0 then (correctly) fails on. It is
+      # version-pinned, cached, and shares that job's cache key, so this costs a
+      # restore rather than a rebuild in the common case.
       - name: Restore cached patched yasimavr venv (mutation lane)
         id: cache-yasimavr-mut
         if: >-
@@ -314,9 +302,7 @@ jobs:
           github.event_name == 'push' ||
           github.event_name == 'schedule' ||
           github.event_name == 'workflow_dispatch'
-        run: |
-          scripts/fetch_attiny_dfp.sh
-          scripts/fetch_yasimavr.sh
+        run: scripts/fetch_yasimavr.sh
 
       - name: Assert ATtiny202 mutation inputs present (fail loud, do NOT skip)
         if: >-
@@ -324,19 +310,13 @@ jobs:
           github.event_name == 'schedule' ||
           github.event_name == 'workflow_dispatch'
         run: |
-          test -f third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202 \
-            || { echo "::error::ATtiny202 device specs missing; its mutation lane would skip"; exit 1; }
+          spec=$(make -s --no-print-directory print-XT_SPEC_FILE)
+          test -f "$spec" \
+            || { echo "::error::avr-gcc has no ATtiny202 device specs ($spec); its mutation lane would skip"; exit 1; }
           py=third_party/yasimavr/venv/bin/python
           test -x "$py" || { echo "::error::yasimavr venv missing ($py)"; exit 1; }
           "$py" -c "import yasimavr" \
             || { echo "::error::yasimavr import broken; the ATtiny202 mutation lane would skip"; exit 1; }
-
-      - name: Save ATtiny_DFP cache (mutation lane)
-        if: steps.cache-dfp-mut.outcome == 'success' && steps.cache-dfp-mut.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: third_party/attiny_dfp
-          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Save yasimavr venv cache (mutation lane)
         if: steps.cache-yasimavr-mut.outcome == 'success' && steps.cache-yasimavr-mut.outputs.cache-hit != 'true'
@@ -402,17 +382,17 @@ jobs:
   # Like every CI lane, this is a gate on the branch, NOT
   # release qualification: the 24-hour soaks belong to scripts/make-release.sh.
   #
-  # Two out-of-apt inputs, both fetched + version-pinned by repo scripts and
-  # cached: the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh -- a static
-  # atpack, no account/EULA) needed to COMPILE the image, and a PATCHED yasimavr
-  # (scripts/fetch_yasimavr.sh -- pinned sdist + the two vendored bug-fix patches,
-  # compiled into a project-local venv) needed to RUN it. The rest (avr-gcc,
-  # cppcheck, python3-dev, g++) is apt.
+  # One out-of-apt input, fetched + version-pinned by a repo script and cached:
+  # a PATCHED yasimavr (scripts/fetch_yasimavr.sh -- pinned sdist + the two
+  # vendored bug-fix patches, compiled into a project-local venv) needed to RUN
+  # the image. Everything that COMPILES it is apt: avr-gcc 14.3.0 and avr-libc
+  # 2.2.1 carry the ATtiny202's device support. cppcheck, python3-dev and g++
+  # are apt too.
   #
   # CRITICAL (same hazard as the pic job): the attiny202-* targets SKIP CLEANLY
-  # when the DFP or the venv is absent -- fatal for a gate. Explicit "Assert ...
-  # present" steps fail loud so a broken fetch can never make the gates go green
-  # on nothing. The target aggregate checks the sim/fault/lock-step PASS counts;
+  # when the device support or the venv is absent -- fatal for a gate. Explicit
+  # "Assert ... present" steps fail loud so a broken install can never make the
+  # gates go green on nothing. The target aggregate checks the sim/fault/lock-step PASS counts;
   # the separate soak step checks its own per-variant count.
   attiny202:
     name: "attiny202 (AVR-XT: pre-hardware/target/soak)"
@@ -436,47 +416,32 @@ jobs:
             make util-linux gcc-avr avr-libc binutils-avr \
             cppcheck python3 python3-venv python3-dev g++ \
             libelf-dev \
-            curl unzip patch
-
-      - name: Restore cached ATtiny_DFP
-        id: cache-dfp
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: third_party/attiny_dfp
-          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
-
-      - name: Fetch ATtiny_DFP device files
-        run: scripts/fetch_attiny_dfp.sh
+            curl patch
 
       - name: Assert ATtiny202 build + analysis inputs present
         run: |
           command -v cppcheck >/dev/null || { echo "::error::cppcheck missing"; exit 1; }
-          test -f third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202 \
-            || { echo "::error::ATtiny202 device specs missing"; exit 1; }
-          test -f third_party/attiny_dfp/include/avr/iotn202.h \
-            || { echo "::error::ATtiny202 DFP header missing"; exit 1; }
+          spec=$(make -s --no-print-directory print-XT_SPEC_FILE)
+          header=$(make -s --no-print-directory print-XT_IO_HEADER)
+          test -f "$spec" \
+            || { echo "::error::avr-gcc has no ATtiny202 device specs ($spec)"; exit 1; }
+          test -f "$header" \
+            || { echo "::error::avr-libc has no ATtiny202 header ($header)"; exit 1; }
           test -f test/misra.json && test -f test/misra_rules.txt \
             && test -f test/misra_suppressions.txt \
             || { echo "::error::MISRA analysis inputs missing"; exit 1; }
 
-      # The DFP half: compile every variant and prove the images exist. Both
-      # need the ATtiny_DFP and nothing else, which is why they run before the
-      # yasimavr venv is built -- a failed fetch or a broken build is found in
-      # seconds instead of after a simulator compile. The image assertion lives
-      # in the goal because every attiny202-* target exits 0 when the DFP is
-      # missing, so a failed fetch would otherwise read as a pass.
+      # The build half: compile every variant and prove the images exist. Both
+      # need the apt toolchain and nothing else, which is why they run before the
+      # yasimavr venv is built -- a broken build is found in seconds instead of
+      # after a simulator compile. The image assertion lives in the goal because
+      # every attiny202-* target exits 0 without device support, so a skipped
+      # build would otherwise read as a pass.
       - name: ATtiny202 build gate (make ci-attiny202-build)
         run: >-
           make ci-attiny202-build
           XT_STATIC_RAM_LIMIT="$CI_XT_STATIC_RAM_LIMIT"
           XT_STACK_MAX_FRAME="$CI_XT_STACK_MAX_FRAME"
-
-      - name: Save ATtiny_DFP cache
-        if: steps.cache-dfp.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: third_party/attiny_dfp
-          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Restore cached patched yasimavr venv
         id: cache-yasimavr

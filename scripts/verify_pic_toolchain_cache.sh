@@ -4,8 +4,8 @@
 #
 # CI restores /opt/microchip WITHOUT re-running the SHA-verified installer, so
 # this read-only check (no network, no sudo) is what rejects a corrupted or
-# incomplete restored cache before any build or test consumes it. It mirrors the
-# self-verifying ATtiny_DFP cache path (scripts/fetch_attiny_dfp.sh).
+# incomplete restored cache before any build or test consumes it, as
+# scripts/fetch_avr_toolchain.sh and scripts/fetch_yasimavr.sh re-verify theirs.
 #
 #   Exit 0  the restored tree matches the recorded manifest exactly.
 #   Exit 1  missing / mismatched / corrupt / incomplete / symlinked cache.

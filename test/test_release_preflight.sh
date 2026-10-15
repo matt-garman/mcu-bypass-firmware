@@ -152,9 +152,8 @@ mkdir -p "$fakebin" "$bootstrap_bin" \
 	"$toolchain/xc8-320-include" \
 	"$toolchain/pic10f322-gpsim" \
 	"$toolchain/pic10f320-gpsim" \
-	"$toolchain/attiny-dfp/gcc/dev/attiny202/device-specs" \
-	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls" \
-	"$toolchain/attiny-dfp/include/avr" \
+	"$toolchain/avr-device/device-specs" \
+	"$toolchain/avr-device/avr" \
 	"$toolchain/yasimavr/bin"
 for fixture in \
 	"$toolchain/simavr/sim_avr.h" \
@@ -170,10 +169,11 @@ for fixture in \
 	"$toolchain/pic10f322.ini" \
 	"$toolchain/pic10f320.ini" \
 	"$toolchain/pic12f675.ini" \
-	"$toolchain/attiny-dfp/gcc/dev/attiny202/device-specs/specs-attiny202" \
-	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o" \
-	"$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/libattiny202.a" \
-	"$toolchain/attiny-dfp/include/avr/iotn202.h"; do
+	"$toolchain/avr-device/device-specs/specs-attiny202" \
+	"$toolchain/avr-device/crtattiny202.o" \
+	"$toolchain/avr-device/libattiny202.a" \
+	"$toolchain/avr-device/avr/io.h" \
+	"$toolchain/avr-device/avr/iotn202.h"; do
 	printf 'synthetic preflight fixture\n' > "$fixture"
 done
 for gpsim_inc in "$toolchain/pic10f322-gpsim" "$toolchain/pic10f320-gpsim"; do
@@ -226,6 +226,24 @@ write_avr_gcc_fake() {
 			printf '\t%s\n' ':'   # a compiler that answers --version with nothing
 		fi
 		printf '%s\n' 'fi'
+		# The ATtiny202 device support, as GCC reports a file it has (with or
+		# without -mmcu): the spec file, avr-libc's C runtime and device
+		# library, and <avr/io.h>, from which the Makefile finds iotn202.h.
+		cat <<'FAKE_AVR_DEVICE_FILES'
+for arg in "$@"; do
+	case "$arg" in
+		-print-file-name=*)
+			name=${arg#*=}
+			if [ -e "${FAKE_TOOLCHAIN:?}/avr-device/$name" ]; then
+				printf '%s\n' "$FAKE_TOOLCHAIN/avr-device/$name"
+			else
+				printf '%s\n' "$name"
+			fi
+			exit 0
+			;;
+	esac
+done
+FAKE_AVR_DEVICE_FILES
 		# The compiler's own binutils, as the release's binutils check asks
 		# for them. TEST_AVR_OWN_DIR moves them away from the avr-objcopy and
 		# avr-objdump on PATH, which link to the default pair.
@@ -467,7 +485,6 @@ make_output=$("${REAL_MAKE:?}" --no-print-directory -s -C "${FAKE_REPO_ROOT:?}" 
 	PIC12F675_DEVICE_INI="${FAKE_TOOLCHAIN:?}/pic12f675.ini" \
 	PIC10F320_HOST_CC=fake-tool \
 	SIMAVR_INC="${FAKE_TOOLCHAIN:?}/simavr" \
-	XT_DFP="${FAKE_TOOLCHAIN:?}/attiny-dfp" \
 	YASIMAVR_VENV="${TEST_YASIMAVR_VENV:-${FAKE_TOOLCHAIN:?}/yasimavr}" \
 	PIC_SOAK_CXX="${TEST_PIC_SOAK_CXX:-pic-cxx-322}" \
 	PIC10F320_SOAK_CXX="${TEST_PIC10F320_SOAK_CXX:-pic-cxx-320}" \
@@ -649,8 +666,8 @@ grep -Fxq 'yaml-import' "$tool_log" \
 [ ! -e "$preflight_output" ] \
 	|| fail "preflight created its prospective release output directory"
 query_count=$(wc -l < "$make_log")
-[ "$query_count" -eq 100 ] \
-	|| fail "preflight made $query_count Makefile queries, expected 100"
+[ "$query_count" -eq 99 ] \
+	|| fail "preflight made $query_count Makefile queries, expected 99"
 assert_no_release_scratch
 checks=$((checks + 1))
 
@@ -930,8 +947,8 @@ expect_configuration_refusal "an inherited GPSIM_TIMEOUT_SECONDS override" \
 
 # GPSIM_TIMEOUT_SECONDS above is a name the Makefile declares, so the script's
 # own inventory refuses it by name. ATTINY_DFP_VER is not declared anywhere in
-# the Makefile -- it selects which ATtiny device pack scripts/fetch_attiny_dfp.sh
-# vendors -- so the refusal has to come from the Makefile's parse-time guard on
+# the Makefile -- it selected which ATtiny device pack the build vendored,
+# through v0.9.17 -- so the refusal has to come from the Makefile's parse-time guard on
 # the environment vocabulary instead, and it names a different diagnostic. Both
 # halves matter: an unreviewed build-input selector in the environment is what
 # the guard is for whether or not Make reads it, and a release workflow that
@@ -3796,37 +3813,50 @@ printf '%s' "$stamp_value" > "$stamp"
 rm -f "$stamp.hidden"
 assert_no_release_scratch
 
-# The ATtiny device spec alone is not a usable DFP; every mandatory build also
-# consumes a REGULAR part avr/io header. A same-name directory must not pass.
-rm "$toolchain/attiny-dfp/include/avr/iotn202.h"
-mkdir "$toolchain/attiny-dfp/include/avr/iotn202.h"
+# The ATtiny202's device support is the compiler's own. A compiler that has no
+# spec file for the part (avr-gcc 7.3.0 predates it) prints the bare name, and
+# the release must name what is missing rather than build nothing.
+mv "$toolchain/avr-device/device-specs/specs-attiny202" "$work/specs-attiny202.hidden"
 if run_preflight >"$output" 2>&1; then
-	fail "preflight accepted a directory as the ATtiny_DFP I/O header"
+	fail "preflight accepted a compiler without the ATtiny202's device specs"
 fi
-grep -Fq 'ATtiny_DFP I/O header' "$output" \
-	|| fail "non-file ATtiny I/O header failed without its specific diagnostic"
-rmdir "$toolchain/attiny-dfp/include/avr/iotn202.h"
-printf 'synthetic preflight fixture\n' > "$toolchain/attiny-dfp/include/avr/iotn202.h"
+grep -Fq "avr-gcc's ATtiny202 device specs" "$output" \
+	|| fail "a compiler without ATtiny202 specs failed without its specific diagnostic: $(<"$output")"
+mv "$work/specs-attiny202.hidden" "$toolchain/avr-device/device-specs/specs-attiny202"
 assert_no_release_scratch
 checks=$((checks + 1))
 
-# A regular path is still not a usable fetched pack artifact when extraction was
-# truncated to zero bytes. The runtime and device library are linker inputs even
-# though the Makefile's local skip probe historically checked only spec/header.
-: > "$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o"
+# The ATtiny device spec alone is not usable device support; every mandatory
+# build also consumes a REGULAR part avr/io header. A same-name directory must
+# not pass.
+rm "$toolchain/avr-device/avr/iotn202.h"
+mkdir "$toolchain/avr-device/avr/iotn202.h"
+if run_preflight >"$output" 2>&1; then
+	fail "preflight accepted a directory as the ATtiny202 I/O header"
+fi
+grep -Fq "avr-libc's ATtiny202 I/O header" "$output" \
+	|| fail "non-file ATtiny I/O header failed without its specific diagnostic"
+rmdir "$toolchain/avr-device/avr/iotn202.h"
+printf 'synthetic preflight fixture\n' > "$toolchain/avr-device/avr/iotn202.h"
+assert_no_release_scratch
+checks=$((checks + 1))
+
+# A regular path is still not a usable toolchain input when it is truncated to
+# zero bytes. The runtime and device library are linker inputs even though the
+# Makefile's local skip probe checks only spec/header.
+: > "$toolchain/avr-device/crtattiny202.o"
 : > "$toolchain/pic10f320-gpsim/stimuli.h"
 if TEST_PIC10F320_DFP_INCLUDE="$work/missing-pic10f320-analysis-include" \
 		run_preflight >"$output" 2>&1; then
 	fail "preflight accepted truncated target toolchain inputs"
 fi
-grep -Fq 'ATtiny_DFP C runtime' "$output" \
+grep -Fq "avr-libc's ATtiny202 C runtime" "$output" \
 	|| fail "empty ATtiny runtime failed without its specific diagnostic"
 grep -Fq 'PIC10F320 analysis header' "$output" \
 	|| fail "missing selected PIC10F320 analysis header lacked its diagnostic"
 grep -Fq 'PIC10F320 gates; PIC10F320_SOAK_GPSIM_INC=' "$output" \
 	|| fail "empty selected PIC10F320 gpsim header lacked its diagnostic"
-printf 'synthetic preflight fixture\n' \
-	> "$toolchain/attiny-dfp/gcc/dev/attiny202/avrxmega3/short-calls/crtattiny202.o"
+printf 'synthetic preflight fixture\n' > "$toolchain/avr-device/crtattiny202.o"
 printf 'synthetic preflight fixture\n' > "$toolchain/pic10f320-gpsim/stimuli.h"
 assert_no_release_scratch
 checks=$((checks + 1))
@@ -4040,7 +4070,8 @@ checks=$((checks + 1))
 # mutation_command_is_available wrapper both satisfy it.
 grep -Eq '(command -v|mutation_command_is_available) "\$PIC_SOAK_CXX"' "$MUTATION" \
 	&& grep -Eq '(command -v|mutation_command_is_available) "\$PIC10F320_SOAK_CXX"' "$MUTATION" \
-	&& grep -Fq '${XT_DFP:-${XT_DFP_ABS:-third_party/attiny_dfp}}' "$MUTATION" \
+	&& grep -Fq 'print-XT_SPEC_FILE' "$MUTATION" \
+	&& grep -Fq 'print-XT_IO_HEADER' "$MUTATION" \
 	&& grep -Fq '${YASIMAVR_VENV:-${XT_YASIMAVR_VENV_ABS:-third_party/yasimavr/venv}}' "$MUTATION" \
 	&& grep -Fq 'PIC10F320_SOAK_GPSIM_INC="${PIC10F320_SOAK_GPSIM_INC:-$PIC_SOAK_GPSIM_INC}"' "$MUTATION" \
 	|| fail "mutation qualification does not consume the selected PIC/AVR-XT tool paths"

@@ -70,7 +70,7 @@
 #                    and gcov, and run inside `make test` / `make test-long`
 #                    regardless. Skipping the PIC job drops the XC8, gpsim and
 #                    libgpsim evidence, not the host oracles.
-#     --skip-attiny202  skip the ATtiny202 (DFP/yasimavr) job -- ONLY if you lack
+#     --skip-attiny202  skip the ATtiny202 (yasimavr) job -- ONLY if you lack
 #                    that toolchain; this no longer mirrors CI, so it warns loudly
 #     -h | --help    this help
 #
@@ -241,13 +241,6 @@ assert_pic_toolchain() {
 	ok "PIC toolchain present, all three parts (XC8 + DFP + gpsim + gpsim-dev + glib + cppcheck + c++)."
 }
 
-# Fail loud if any ATtiny202 (AVR-XT) input is missing. Like the PIC targets,
-# every attiny202-* target SKIPS CLEANLY without the vendored ATtiny_DFP device
-# files or the patched yasimavr venv -- a missing input would otherwise read as a
-# local PASS while CI still runs the real gates. The two out-of-apt inputs are
-# fetched + pinned by repo scripts (scripts/fetch_attiny_dfp.sh, scripts/
-# fetch_yasimavr.sh); XT_DFP / YASIMAVR_VENV honor an exported override (?= in
-# the Makefile). avr-objdump (binutils-avr) backs the coil-pulse width oracle.
 # The cross-compiler job's second avr-gcc, admitted by the lane's own check, so
 # the preflight and the gate cannot disagree about what counts as "a second
 # compiler": installed, and neither the pin nor CC itself.
@@ -263,26 +256,38 @@ assert_cross_compiler_toolchain() {
 	esac
 }
 
+# Fail loud if any ATtiny202 (AVR-XT) input is missing. Like the PIC targets,
+# every attiny202-* target SKIPS CLEANLY without the compiler's ATtiny202 device
+# support or the patched yasimavr venv -- a missing input would otherwise read
+# as a local PASS while CI still runs the real gates. The device support is
+# apt's (avr-gcc 14.3.0 + avr-libc 2.2.1), read through the same XT_SPEC_FILE
+# and XT_IO_HEADER the guards test. The venv, the one out-of-apt input, is
+# fetched + pinned by scripts/fetch_yasimavr.sh; YASIMAVR_VENV honors an
+# exported override (?= in the Makefile). avr-objdump (binutils-avr) backs the
+# coil-pulse width oracle.
 assert_attiny202_toolchain() {
-	local xt_dfp venv objdump py
-	xt_dfp="${XT_DFP:-$(make -s --no-print-directory print-XT_DFP)}"
+	local spec header venv objdump py
+	spec=$(make -s --no-print-directory print-XT_SPEC_FILE) \
+		|| die "could not read XT_SPEC_FILE from the Makefile"
+	header=$(make -s --no-print-directory print-XT_IO_HEADER) \
+		|| die "could not read XT_IO_HEADER from the Makefile"
 	venv="${YASIMAVR_VENV:-$(make -s --no-print-directory print-YASIMAVR_VENV)}"
 	objdump="${OBJDUMP:-$(make -s --no-print-directory print-OBJDUMP)}"
 	py="$venv/bin/python"
-	# need_dfp / need_yasimavr: which of the two FETCH-ON-DEMAND artifacts is
-	# absent, tracked separately from the flat `missing` list so the failure can
-	# name the one command that provisions each (see the hint block below).
-	local missing=() need_dfp=0 need_yasimavr=0
+	# need_yasimavr: whether the FETCH-ON-DEMAND venv is the absent input,
+	# tracked separately from the flat `missing` list so the failure can name
+	# the one command that provisions it (see the hint block below).
+	local missing=() need_yasimavr=0
 	command -v avr-gcc >/dev/null 2>&1 \
 		|| missing+=("avr-gcc  (apt: gcc-avr avr-libc)")
 	command -v "$objdump" >/dev/null 2>&1 \
 		|| missing+=("$objdump  (apt: binutils-avr; delay-width oracle)")
 	command -v cppcheck >/dev/null 2>&1 \
 		|| missing+=("cppcheck  (apt: cppcheck; attiny202-analyze)")
-	[ -f "$xt_dfp/gcc/dev/attiny202/device-specs/specs-attiny202" ] \
-		|| { missing+=("ATtiny_DFP at $xt_dfp  (scripts/fetch_attiny_dfp.sh; export XT_DFP=...)"); need_dfp=1; }
-	[ -f "$xt_dfp/include/avr/iotn202.h" ] \
-		|| { missing+=("ATtiny_DFP header iotn202.h at $xt_dfp  (scripts/fetch_attiny_dfp.sh)"); need_dfp=1; }
+	[ -f "$spec" ] \
+		|| missing+=("avr-gcc's ATtiny202 device specs, $spec  (apt: Ubuntu 26.04's gcc-avr; avr-gcc 7.3.0 predates the part)")
+	[ -f "$header" ] \
+		|| missing+=("avr-libc's ATtiny202 header, $header  (apt: Ubuntu 26.04's avr-libc)")
 	if [ -x "$py" ] && "$py" -c "import yasimavr" >/dev/null 2>&1; then
 		"$py" - >/dev/null 2>&1 <<-'PY' \
 			|| { missing+=("patched yasimavr (WDT model) in $venv  (scripts/fetch_yasimavr.sh)"); need_yasimavr=1; }
@@ -296,26 +301,24 @@ assert_attiny202_toolchain() {
 	if [ "${#missing[@]}" -gt 0 ]; then
 		log "ATtiny202 toolchain incomplete -- the attiny202 targets would silently SKIP, not fail:"
 		for m in "${missing[@]}"; do log "  - $m"; done
-		# The DFP and the yasimavr venv are gitignored, fetch-on-demand artifacts
-		# under third_party/ (only the yasimavr PATCHES are tracked), so a fresh
-		# clone never has them and `make clean` never removes them. Without this
-		# note the list above reads as N independent breakages -- or as a
-		# regression from a recent commit -- when it is really one unprovisioned
-		# checkout. Name the exact command(s) that fix it.
-		if [ "$need_dfp" -eq 1 ] || [ "$need_yasimavr" -eq 1 ]; then
+		# The yasimavr venv is a gitignored, fetch-on-demand artifact under
+		# third_party/ (only its PATCHES are tracked), so a fresh clone never has
+		# it and `make clean` never removes it. Without this note the list above
+		# can read as a regression from a recent commit when it is really an
+		# unprovisioned checkout. Name the exact command that fixes it.
+		if [ "$need_yasimavr" -eq 1 ]; then
 			log ""
-			log "NOTE: those are gitignored, fetch-on-demand artifacts under third_party/."
-			log "      A fresh clone never has them (and 'make clean' never removes them),"
-			log "      so this is most likely an unprovisioned checkout, not a regression."
-			log "      Provision it with:"
-			[ "$need_dfp" -eq 1 ]      && log "        ./scripts/fetch_attiny_dfp.sh"
-			[ "$need_yasimavr" -eq 1 ] && log "        ./scripts/fetch_yasimavr.sh"
-			log "      Each pins its download by version + SHA-256, and is idempotent"
-			log "      (a re-run is a no-op once the artifact is present)."
+			log "NOTE: the yasimavr venv is a gitignored, fetch-on-demand artifact under"
+			log "      third_party/. A fresh clone never has it (and 'make clean' never"
+			log "      removes it), so this is most likely an unprovisioned checkout, not"
+			log "      a regression. Provision it with:"
+			log "        ./scripts/fetch_yasimavr.sh"
+			log "      It pins its download by version + SHA-256, and is idempotent"
+			log "      (a re-run is a no-op once the venv is present)."
 		fi
 		die "provide the above (see TOOLCHAIN.adoc), or --skip-attiny202 (no longer mirrors CI)."
 	fi
-	ok "ATtiny202 toolchain present (avr-gcc + binutils-avr + cppcheck + ATtiny_DFP + patched yasimavr)."
+	ok "ATtiny202 toolchain present (avr-gcc + avr-libc device support + binutils-avr + cppcheck + patched yasimavr)."
 }
 
 # Fail loud if any HOST/AVR tool is missing. Unlike the two chip toolchains,
@@ -469,7 +472,7 @@ goal_ci_cross_compiler() {
 	run_step "cross-compiler job: make $1" make "$1"
 }
 
-# The DFP half. Sequenced before the target half, matching the hosted job, so a
+# The build half. Sequenced before the target half, matching the hosted job, so a
 # broken image is found before anything that needs the simulator.
 goal_ci_attiny202_build() {
 	if [ "$SKIP_ATTINY202" -eq 1 ]; then
@@ -563,10 +566,9 @@ esac
 # run is SERIAL: an assert left in job order does not fire until every job
 # before it has finished. The ATtiny202 assert sat behind the entire PIC job
 # plus the AVR build matrix, so a forgotten provisioning step surfaced many
-# minutes into a run that was doomed from the start -- and the ATtiny202 inputs
-# are exactly the ones easiest to forget, being gitignored, fetch-on-demand
-# artifacts (scripts/fetch_attiny_dfp.sh, scripts/fetch_yasimavr.sh) that a
-# fresh clone never carries.
+# minutes into a run that was doomed from the start -- and the ATtiny202's venv
+# is exactly the input easiest to forget, being a gitignored, fetch-on-demand
+# artifact (scripts/fetch_yasimavr.sh) that a fresh clone never carries.
 #
 # Hoisting both asserts here changes no gate: the same two functions run, with
 # the same strictness, and each remains individually suppressed by its own

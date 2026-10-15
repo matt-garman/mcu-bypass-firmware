@@ -429,10 +429,13 @@ for name, job_id, idx, key in pic_cache_steps:
         f"{name}: job '{job_id}' PIC cache step {idx} is not keyed by the installer pin",
     )
 
+# The ATtiny202 builds from avr-gcc's and avr-libc's own device support since
+# v0.9.18, and scripts/fetch_attiny_dfp.sh is gone. A cache step still keyed on
+# the retired device pack would restore files nothing reads.
 for name, job_id, idx, key in attiny_cache_steps:
     check(
-        "hashFiles('scripts/fetch_attiny_dfp.sh')" in key,
-        f"{name}: job '{job_id}' ATtiny_DFP cache step {idx} is not keyed by its pins",
+        False,
+        f"{name}: job '{job_id}' cache step {idx} still caches the retired ATtiny_DFP",
     )
 
 for name, job_id, idx, key in yasimavr_cache_steps:

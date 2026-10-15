@@ -36,8 +36,9 @@
 # here: a guard proven under flags nobody ships is not proven, and the same
 # print-<VAR> vocabulary is itself held in place by the name-contract gate.
 # The compilers and device packs are the caller's: the recipes pass $(CC),
-# $(XT_DFP), $(PIC_CC), $(PIC_DFP), $(PIC10F320_CC) and $(PIC10F320_DFP) as
-# arguments, and the flags are composed with those packs. read_var strips
+# $(PIC_CC), $(PIC_DFP), $(PIC10F320_CC) and $(PIC10F320_DFP) as arguments, and
+# the PIC flags are composed with those packs. The ATtiny202's device support
+# is CC's own, from avr-gcc 14 and avr-libc 2.2. read_var strips
 # MAKEFLAGS, so a print-CC query would otherwise answer with the default
 # compiler while the recipe's skip check had tested the selected one.
 #
@@ -73,15 +74,15 @@ set -euo pipefail
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 usage() {
-	printf 'usage: %s avr-xt CC XT_DFP\n' "${0##*/}" >&2
+	printf 'usage: %s avr-xt CC\n' "${0##*/}" >&2
 	printf '       %s pic PIC_CC PIC_DFP PIC10F320_CC PIC10F320_DFP\n' "${0##*/}" >&2
-	printf '  avr-xt  the ATtiny202 shell under avr-gcc + the vendored ATtiny_DFP\n' >&2
+	printf '  avr-xt  the ATtiny202 shell under avr-gcc and its avr-libc\n' >&2
 	printf '  pic     the PIC10F322, PIC10F320 and PIC12F675 shells under XC8\n' >&2
 }
 
 LANE=${1:-}
 case "$LANE" in
-	avr-xt) [ "$#" -eq 3 ] || { usage; exit 1; } ;;
+	avr-xt) [ "$#" -eq 2 ] || { usage; exit 1; } ;;
 	pic) [ "$#" -eq 5 ] || { usage; exit 1; } ;;
 	*) printf 'FAIL: unknown lane: %s\n' "$LANE" >&2; usage; exit 1 ;;
 esac
@@ -186,7 +187,7 @@ resolve_config() {
 
 if [ "$LANE" = avr-xt ]; then
 	XT_CC=$2
-	XT_FLAGS=$(read_var print-XT_FW_CFLAGS "XT_DFP=$3")
+	XT_FLAGS=$(read_var print-XT_FW_CFLAGS)
 	[ -n "$XT_FLAGS" ] \
 		|| fail "print-XT_FW_CFLAGS came back empty -- cannot compile anything"
 	[[ "$XT_FLAGS" == *-fshort-enums* ]] \

@@ -24,9 +24,6 @@
 #   and in GitHub CI. Nothing binary is committed; the venv it creates is a
 #   generated artifact (gitignored), rebuilt on demand from the pinned inputs.
 #
-#   This is the yasimavr analogue of scripts/fetch_attiny_dfp.sh (which vendors
-#   the ATtiny_DFP device files for the compiler).
-#
 # A THIRD UPSTREAM BUG, NOT PATCHED HERE AND NO LONGER REACHED
 #   0.1.6's SimLoop::run(nbcycles) forces the cycle counter to
 #   first_cycle + nbcycles when it returns. That is correct when the loop stops

@@ -20,7 +20,7 @@ trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnosti
 # missing, malformed, dynamic, extra or over budget must fail the gate rather
 # than pass unmeasured. The suite also pins the compile matrix and the shipping
 # flags, the routing of attiny202-test through its stack gate, and the
-# skip/strict split for an absent ATtiny_DFP.
+# skip/strict split for a compiler without the ATtiny202's device support.
 #
 # THE DEFECT. Before f9c244e (2026-07-13) the gate neither generated its reports
 # in a private directory nor required one fresh, nonempty report per
@@ -33,21 +33,35 @@ trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 build="$work/build"
 xt_build="$work/xt-build"
-dfp="$work/dfp"
-mkdir -p "$tools" "$build" "$xt_build" \
-	"$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
-: > "$dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
-: > "$dfp/include/avr/iotn202.h"
+# The device support the fake compiler reports through -print-file-name: its
+# spec file, and avr-libc's <avr/io.h> beside the part's I/O header.
+device="$work/device"
+mkdir -p "$tools" "$build" "$xt_build" "$device/device-specs" "$device/avr"
+: > "$device/device-specs/specs-attiny202"
+: > "$device/avr/io.h"
+: > "$device/avr/iotn202.h"
 checks=0
 log="$work/compile.log"
 args_log="$work/compile-args.log"
 unset FAKE_STACK_MODE FAKE_STACK_LOG FAKE_STACK_ARGS_LOG TEST_STACK_MAX
-unset TEST_DFP STRICT_TOOLS
+unset TEST_DEVICE STRICT_TOOLS
 
 cat > "$tools/cc" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${1:-}" = --version ]; then printf 'fake avr-gcc 1\n'; exit 0; fi
+# As GCC does: the path of a file the toolchain has, else the bare name.
+case "${1:-}" in
+	-print-file-name=*)
+		name=${1#*=}
+		if [ -e "${FAKE_DEVICE:-/nonexistent}/$name" ]; then
+			printf '%s\n' "$FAKE_DEVICE/$name"
+		else
+			printf '%s\n' "$name"
+		fi
+		exit 0
+		;;
+esac
 original_args=$*
 out=
 source_file= macro=
@@ -104,8 +118,8 @@ run_xt_gate() {
 	local -a policy=()
 	[ -z "${TEST_STACK_MAX+x}" ] \
 		|| policy+=("XT_STACK_MAX_FRAME=$TEST_STACK_MAX")
-	make --no-print-directory -C "$ROOT" attiny202-test-stack-bound \
-		XT_STACK_BUILD_DIR="$xt_build" XT_DFP="${TEST_DFP-$dfp}" \
+	FAKE_DEVICE="${TEST_DEVICE-$device}" make --no-print-directory -C "$ROOT" attiny202-test-stack-bound \
+		XT_STACK_BUILD_DIR="$xt_build" \
 		CC="$tools/cc" "${policy[@]}" "$@"
 }
 
@@ -216,7 +230,7 @@ expected_xt_matrix=$'src/bypass_mcu_avr_xt.c\tCD4053_SIMPLE\nsrc/bypass_mcu_avr_
 actual_xt_matrix=$(LC_ALL=C sort "$log")
 [[ "$actual_xt_matrix" == "$expected_xt_matrix" ]] \
 	|| { printf 'FAIL: wrong AVR-XT stack compile matrix:\n%s\n' "$actual_xt_matrix" >&2; exit 1; }
-expected_common="-DF_CPU=2000000UL -DBYPASS_MCU_AVR_XT -mmcu=attiny202 -B $dfp/gcc/dev/attiny202 -I $dfp/include -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11"
+expected_common="-DF_CPU=2000000UL -DBYPASS_MCU_AVR_XT -mmcu=attiny202 -Os -fshort-enums -funsigned-char -ffunction-sections -fdata-sections -Werror -Wall -Wextra -Wconversion -std=c11"
 for variant in cd4053_simple cd4053_with_mute tq2_l2_5v_relay; do
 	case "$variant" in
 		cd4053_simple) macro=CD4053_SIMPLE ;;
@@ -233,8 +247,8 @@ assert_xt_clean "successful AVR-XT gate"
 checks=$((checks + 1))
 
 # This target belongs to the full-tool ATtiny202 aggregate only. The ordinary
-# host TEST_GATES inventory exercises this fake regression, not the real DFP
-# compile itself.
+# host TEST_GATES inventory exercises this fake regression, not the real
+# ATtiny202 compile itself.
 ordinary_gates=$(make --no-print-directory -s -C "$ROOT" print-TEST_GATES CC="$tools/cc")
 case " $ordinary_gates " in
 	*" attiny202-test-stack-bound "*)
@@ -251,23 +265,23 @@ esac
 checks=$((checks + 1))
 
 seed_xt_stale
-output=$(export TEST_DFP="$work/missing-dfp" FAKE_STACK_LOG="$log"; \
+output=$(export TEST_DEVICE="$work/no-device" FAKE_STACK_LOG="$log"; \
 	run_xt_gate STRICT_TOOLS= 2>&1) \
-	|| { printf 'FAIL: absent DFP did not skip AVR-XT stack gate cleanly: %s\n' "$output" >&2; exit 1; }
-[[ "$output" == *"skipping ATtiny202 stack bound"* ]] \
-	|| { printf 'FAIL: absent DFP stack skip missing its reason: %s\n' "$output" >&2; exit 1; }
-[ ! -s "$log" ] || { printf 'FAIL: absent DFP stack skip invoked the compiler\n' >&2; exit 1; }
-assert_xt_clean "absent DFP AVR-XT stack skip"
+	|| { printf 'FAIL: absent device support did not skip AVR-XT stack gate cleanly: %s\n' "$output" >&2; exit 1; }
+[[ "$output" == *"no ATtiny202 device support in CC=$tools/cc"*"skipping ATtiny202 stack bound"* ]] \
+	|| { printf 'FAIL: absent device support stack skip missing its reason: %s\n' "$output" >&2; exit 1; }
+[ ! -s "$log" ] || { printf 'FAIL: absent device support stack skip invoked the compiler\n' >&2; exit 1; }
+assert_xt_clean "absent device support AVR-XT stack skip"
 checks=$((checks + 1))
 
 seed_xt_stale
-if output=$(export TEST_DFP="$work/missing-dfp"; run_xt_gate STRICT_TOOLS=1 2>&1); then
-	printf 'FAIL: absent DFP under STRICT_TOOLS=1 did not fail AVR-XT stack gate\n' >&2
+if output=$(export TEST_DEVICE="$work/no-device"; run_xt_gate STRICT_TOOLS=1 2>&1); then
+	printf 'FAIL: absent device support under STRICT_TOOLS=1 did not fail AVR-XT stack gate\n' >&2
 	exit 1
 fi
 [[ "$output" == *"STRICT_TOOLS=1"* ]] \
-	|| { printf 'FAIL: strict absent-DFP stack failure had the wrong reason: %s\n' "$output" >&2; exit 1; }
-assert_xt_clean "absent DFP strict AVR-XT stack gate"
+	|| { printf 'FAIL: strict absent-device-support stack failure had the wrong reason: %s\n' "$output" >&2; exit 1; }
+assert_xt_clean "absent device support strict AVR-XT stack gate"
 checks=$((checks + 1))
 
 expect_xt_failure "malformed AVR-XT report" "invalid stack-usage record" FAKE_STACK_MODE=malformed

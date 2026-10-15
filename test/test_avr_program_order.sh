@@ -24,8 +24,8 @@
 #   NO-BUILD     a failed compile invokes avrdude ZERO times.
 #   NO-HEX       an image that fails Intel HEX validation invokes avrdude ZERO
 #                times -- the objcopy output is rejected, not programmed.
-#   NO-IMAGE     a build that legitimately produces nothing (ATtiny202 with no
-#                device pack, which SKIPs) refuses instead of writing fuses.
+#   NO-IMAGE     a build that legitimately produces nothing (ATtiny202 on a CC
+#                without the part, which SKIPs) refuses instead of writing fuses.
 #   NO-TOOL      a named-but-unusable programmer refuses before any hardware
 #                action, on the same -x rule the HEX validator uses.
 #   SELECTED     VARIANT must be in the VARIANTS matrix rebuilt by this request;
@@ -63,7 +63,7 @@ trap 'rm -rf "$work"' EXIT
 tools="$work/tools"
 classic_build="$work/classic"
 xt_build="$work/xt"
-dfp="$work/dfp"
+device="$work/device"
 log="$work/events.log"
 checks=0
 failures=0
@@ -71,15 +71,17 @@ failures=0
 unset MAKEFLAGS MFLAGS GNUMAKEFLAGS MAKEFILES
 unset FAKE_CC_MODE FAKE_OBJCOPY_MODE FAKE_SIZE_MODE FAKE_IHEX_MODE \
 	FAKE_SIZE_FAIL_MATCH FAKE_SYMLINK_FINAL
-unset AVR_BUILD_DIR AVR_FW FW_BASE XT_BUILD_DIR XT_DFP AVRDUDE
+unset AVR_BUILD_DIR AVR_FW FW_BASE XT_BUILD_DIR AVRDUDE TEST_DEVICE
 # scripts/ci-local.sh exports STRICT_TOOLS=1; the NO-IMAGE case needs the
 # ordinary skip policy, and pins what it needs explicitly.
 unset STRICT_TOOLS
 
-mkdir -p "$tools" "$classic_build" "$xt_build" \
-	"$dfp/gcc/dev/attiny202/device-specs" "$dfp/include/avr"
-: > "$dfp/gcc/dev/attiny202/device-specs/specs-attiny202"
-: > "$dfp/include/avr/iotn202.h"
+# The device support the fake compiler reports through -print-file-name: its
+# spec file, and avr-libc's <avr/io.h> beside the part's I/O header.
+mkdir -p "$tools" "$classic_build" "$xt_build" "$device/device-specs" "$device/avr"
+: > "$device/device-specs/specs-attiny202"
+: > "$device/avr/io.h"
+: > "$device/avr/iotn202.h"
 valid_hex="$work/valid.hex"
 printf ':0100000001FE\n:00000001FF\n' > "$valid_hex"
 
@@ -89,6 +91,18 @@ cat > "$tools/cc" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${1:-}" = --version ]; then printf 'fake avr-gcc 1\n'; exit 0; fi
+# As GCC does: the path of a file the toolchain has, else the bare name.
+case "${1:-}" in
+	-print-file-name=*)
+		name=${1#*=}
+		if [ -e "${FAKE_DEVICE:-/nonexistent}/$name" ]; then
+			printf '%s\n' "$FAKE_DEVICE/$name"
+		else
+			printf '%s\n' "$name"
+		fi
+		exit 0
+		;;
+esac
 out=
 while [ "$#" -gt 0 ]; do
 	if [ "$1" = -o ]; then out=$2; shift 2; else shift; fi
@@ -181,9 +195,9 @@ run_program() {
 	local goal=$1; shift
 	FAKE_EVENT_LOG="$log" FAKE_VALID_HEX="$valid_hex" \
 	REAL_IHEX_VALIDATOR="$ROOT/scripts/validate-ihex.sh" \
+	FAKE_DEVICE="${TEST_DEVICE-$device}" \
 	make --no-print-directory -C "$ROOT" "$goal" \
 		AVR_BUILD_DIR="$classic_build" XT_BUILD_DIR="$xt_build" \
-		XT_DFP="${TEST_DFP-$dfp}" \
 		CC="$tools/cc" READELF="$tools/readelf" SIZE="$tools/size" \
 		OBJCOPY="$tools/objcopy" IHEX_VALIDATOR="$tools/ihex" \
 		AVRDUDE="${TEST_AVRDUDE-$tools/avrdude}" \
@@ -523,13 +537,13 @@ for part in attiny13a attiny85 attiny202; do
 done
 
 # ---- NO-IMAGE: a build that skips must refuse, not write fuses ---------------
-# The ATtiny202 build SKIPs (exit 0, no image) when the device pack is absent,
+# The ATtiny202 build SKIPs (exit 0, no image) when CC lacks the part,
 # which is exactly the shape that used to reach the fuse write with nothing to
 # flash afterwards.
 : > "$log"
 rm -rf "$xt_build"; mkdir -p "$xt_build"
-if TEST_DFP="$work/absent-dfp" run_program attiny202-program >/dev/null 2>&1; then
-	fail "attiny202-program succeeded with no device pack and no image"
+if TEST_DEVICE="$work/no-device" run_program attiny202-program >/dev/null 2>&1; then
+	fail "attiny202-program succeeded with no device support and no image"
 fi
 if [ "$(count_of '^AVRDUDE ')" -ne 0 ]; then
 	fail "attiny202-program invoked the programmer with no image to flash"

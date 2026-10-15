@@ -3,9 +3,9 @@
 
 
 // ATtiny202 (AVR-XT / avrxmega3) hardware "shell" (hardware-specific
-// implementation of mcu-bypass-firmware).  Uses open-source toolchain
-// (gcc-avr / binutils-avr / avr-libc) + the vendored ATtiny_DFP device files
-// from Microchip (see scripts/fetch_attiny_dfp.sh).
+// implementation of mcu-bypass-firmware).  Uses the open-source toolchain
+// (gcc-avr / binutils-avr / avr-libc); avr-gcc 14 and avr-libc 2.2 carry the
+// part's device support.
 //
 // Implements the bypass_hw_iface.h contract for the ATtiny202 and provides this
 // family's main(), tick/watchdog model, and fuse documentation.
@@ -43,8 +43,8 @@
 //            |                               | 33-10) does not guarantee a trip above
 //            |                               | 4V; see DESIGN_DOCUMENTATION.adoc,
 //            |                               | Failsafe Mechanisms.  Encoding verified
-//            |                               | against the pinned ATtiny_DFP
-//            |                               | (iotn202.h LVL_enum, FUSE_LVL_gp=5):
+//            |                               | against avr-libc 2.2.1's iotn202.h
+//            |                               | (LVL_enum, FUSE_LVL_gp=5):
 //            |                               | BODLEVEL0/2/7 = 1.8/2.6/4.2V are the
 //            |                               | only characterised levels; 7 is the
 //            |                               | highest and is not reserved.

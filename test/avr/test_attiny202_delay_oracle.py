@@ -534,9 +534,9 @@ def verify_images(elf_paths):
 
 
 # ----------------------------------------------------------------------------
-# Host-only parser regression (no ELF, no DFP). Runs in `make test` so a
-# codegen/parse drift or a broken width assertion is caught even where the
-# ATtiny_DFP is absent and no image can be built.
+# Host-only parser regression (no ELF). Runs in `make test` so a codegen/parse
+# drift or a broken width assertion is caught even where no ATtiny202 image can
+# be built.
 # ----------------------------------------------------------------------------
 def _synthetic(loops):
     """Build a minimal objdump-style snippet with the given loops.

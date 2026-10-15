@@ -58,8 +58,8 @@ permissions:
 # refuses a release configuration under any environment-origin name in the
 # project's build-input vocabulary that is not a supported release input. An
 # `ATTINY_DFP_VER` pin here failed v0.9.10's `make test-long` for exactly that
-# reason; the ATtiny_DFP version lives in scripts/fetch_attiny_dfp.sh alone, and
-# the cache keys below bind to that file's hash.
+# reason. Pinned inputs live in the scripts that fetch them, and the cache keys
+# below bind to those files' hashes.
 env:
   DEBIAN_FRONTEND: noninteractive
   # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
@@ -171,20 +171,14 @@ jobs:
       - name: Verify XC8 + DFP cache integrity
         run: scripts/verify_pic_toolchain_cache.sh
 
-      # --- toolchain: ATtiny_DFP + patched yasimavr (ATtiny202 lane) --------
-      # The DFP is needed to BUILD the three ATtiny202 images the reproducibility
-      # gate compares; the patched yasimavr venv is needed to RUN the target
-      # gates this workflow re-executes. Both are version-pinned, fetched by repo
-      # scripts, and cached on the same keys ci.yml uses.
+      # --- toolchain: patched yasimavr (ATtiny202 lane) ----------------------
+      # The apt avr-gcc 14.3.0 and avr-libc 2.2.1 BUILD the three ATtiny202
+      # images the reproducibility gate compares, from their own device
+      # support; the patched yasimavr venv is needed to RUN the target gates
+      # this workflow re-executes. It is version-pinned, fetched by a repo
+      # script, and cached on the same key ci.yml uses.
       - name: Install ATtiny202 harness deps (apt)
         run: sudo apt-get install -y python3-venv python3-dev curl patch
-
-      - name: Restore cached ATtiny_DFP
-        id: cache-dfp
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: third_party/attiny_dfp
-          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
 
       - name: Restore cached patched yasimavr venv
         id: cache-yasimavr
@@ -193,17 +187,8 @@ jobs:
           path: third_party/yasimavr/venv
           key: yasimavr-venv-${{ hashFiles('scripts/fetch_yasimavr.sh', 'scripts/yasimavr-build-requirements.txt', 'third_party/yasimavr/patches/**') }}
 
-      - name: Fetch ATtiny202 device pack + patched simulator
-        run: |
-          scripts/fetch_attiny_dfp.sh
-          scripts/fetch_yasimavr.sh
-
-      - name: Save ATtiny_DFP cache
-        if: steps.cache-dfp.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: third_party/attiny_dfp
-          key: attiny-dfp-${{ hashFiles('scripts/fetch_attiny_dfp.sh') }}
+      - name: Build patched yasimavr (pinned sdist + vendored patches)
+        run: scripts/fetch_yasimavr.sh
 
       - name: Save yasimavr venv cache
         if: steps.cache-yasimavr.outputs.cache-hit != 'true'
@@ -214,8 +199,12 @@ jobs:
 
       - name: Assert ATtiny202 toolchain present (fail loud, do NOT skip)
         run: |
-          test -f third_party/attiny_dfp/gcc/dev/attiny202/device-specs/specs-attiny202 \
-            || { echo "::error::ATtiny202 device specs missing"; exit 1; }
+          spec=$(make -s --no-print-directory print-XT_SPEC_FILE)
+          header=$(make -s --no-print-directory print-XT_IO_HEADER)
+          test -f "$spec" \
+            || { echo "::error::avr-gcc has no ATtiny202 device specs ($spec)"; exit 1; }
+          test -f "$header" \
+            || { echo "::error::avr-libc has no ATtiny202 header ($header)"; exit 1; }
           py=third_party/yasimavr/venv/bin/python
           test -x "$py" || { echo "::error::yasimavr venv missing ($py)"; exit 1; }
           "$py" -c "import yasimavr" || { echo "::error::yasimavr import broken"; exit 1; }

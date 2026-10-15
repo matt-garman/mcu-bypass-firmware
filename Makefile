@@ -669,7 +669,7 @@ override ATTINY13A_FLASH_ELFS := $(foreach v,$(ATTINY13A_FLASH_VARIANTS),\
 override ATTINY13A_FLASH_OLD_FILE_ARGS := $(foreach elf,$(ATTINY13A_FLASH_ELFS),--old-file=$(elf))
 
 # Missing-tool policy for the optional gates (PIC/XC8, gpsim, cppcheck, python3,
-# the ATtiny_DFP / yasimavr venv, ...). By default a missing tool prints its
+# the yasimavr venv, ...). By default a missing tool prints its
 # reason and skips that gate cleanly, so host-only development stays convenient.
 # With STRICT_TOOLS=1 the same condition is a HARD FAILURE instead: a green run
 # can then never mean "the gate was silently skipped" -- it means every gate
@@ -799,7 +799,7 @@ AVR_GCC_INCLUDE    := $(shell $(CC) -print-file-name=include)
 AVR_ARCH           := $(shell $(CC) -mmcu=$(ATTINY13A_MCU) -dM -E - < /dev/null | awk '/__AVR_ARCH__/ { print $$3; exit }')
 endif
 ifeq ($(AVR_LIBC_INCLUDE),)
-AVR_LIBC_INCLUDE   := $(patsubst %/avr/, %, $(dir $(AVR_IO_HEADER)))
+AVR_LIBC_INCLUDE   := $(patsubst %/avr/,%,$(dir $(AVR_IO_HEADER)))
 # reject a non-path result ("avr/" when -print-file-name found nothing)
 ifeq ($(wildcard $(AVR_LIBC_INCLUDE)/avr/io.h),)
 AVR_LIBC_INCLUDE   :=
@@ -1170,7 +1170,7 @@ $(foreach n,$(TINYX5),$(eval ATTINY$(n)_HEXES := $(foreach v,$(VARIANTS),$(AVR_F
 
 # Default goal: build every release-supported part, not just the one that got
 # here first. A default-integrated lane whose cross-toolchain is absent (XC8 for
-# any of the three PICs, the ATtiny_DFP for the ATtiny202) prints a named skip
+# any of the three PICs, ATtiny202 support in avr-gcc) prints a named skip
 # and does not fail the build, so a bare `make` stays useful on an AVR-only
 # machine;
 # STRICT_TOOLS=1 turns each skip into an error, as release and CI require.
@@ -2267,32 +2267,27 @@ pic10f322-program-custom: variant-selectors-valid pic10f322
 	$(PIC10F322_PROG_CMD)
 
 # ============================================================================
-# BUILD -- ATtiny202 (AVR-XT / avrxmega3) toolchain/device-pack smoke gate
+# BUILD -- ATtiny202 (AVR-XT / avrxmega3) toolchain smoke gate
 # ============================================================================
 #
-# A THIRD toolchain path -- but, unlike the PIC's closed XC8, the compiler here
-# stays 100% open-source apt packages: the stock gcc-avr / binutils-avr already
-# ship the avrxmega3 (AVR8X) architecture support, so only the per-device
-# DESCRIPTION files (spec, crt, device lib, <avr/io.h> header) are missing. Those
-# are vendored from a pinned, SHA-verified ATtiny_DFP atpack by
-# scripts/fetch_attiny_dfp.sh into XT_DFP -- an EXTERNAL, uncommitted dir
-# (third_party/ is gitignored), exactly mirroring how the PIC build consumes an
-# uncommitted PIC_DFP.
+# The same open-source apt toolchain as the Classic parts. The pinned avr-gcc
+# 14.3.0 and avr-libc 2.2.1 carry the ATtiny202's device support themselves:
+# gcc's device-specs/specs-attiny202, and avr-libc's <avr/iotn202.h>, C runtime
+# and device library. Through v0.9.17 avr-gcc 7.3.0 predated the part, and the
+# build injected Microchip's ATtiny_DFP device files with -B/-I. Under avr-gcc
+# 14.3.0 the images are byte-identical with and without them.
 #
 # `make attiny202-smoke` is a COMPILE/LINK gate independent of the shipping
 # firmware build below. It builds test/avr/attiny202_smoke.c -- which exercises
 # every peripheral group the shell drives (PORTA GPIO + PINnCTRL pull-up,
 # CCP-protected CLKCTRL + WDT, TCB0 tick ISR, SLPCTRL idle, RSTCTRL) -- with the
 # project's exact strict CFLAGS, then asserts the emitted image is avrxmega3 and
-# fits the 2 KB flash budget. It is a standalone developer target because the DFP
-# may be absent; release qualification runs it through `attiny202-test` with
-# STRICT_TOOLS=1. Missing vendored device files therefore skip locally and fail
-# closed for release.
+# fits the 2 KB flash budget. It is a standalone developer target because an
+# older avr-gcc may lack the part; release qualification runs it through
+# `attiny202-test` with STRICT_TOOLS=1. Missing device support therefore skips
+# locally and fails closed for release.
 XT_MCU   ?= attiny202
 XT_DEVLIB ?= tn202
-XT_DFP   ?= third_party/attiny_dfp
-XT_SPEC_DIR = $(XT_DFP)/gcc/dev/$(XT_MCU)
-XT_INC      = $(XT_DFP)/include
 # ATtiny202: 2 KB flash / 128 B SRAM. Budget the smoke against the full 2 KB;
 # the shipping build below enforces the same limit independently. NOTE:
 # avr-size --mcu=attiny202 prints "Device: Unknown" under binutils 2.26 but STILL
@@ -2306,14 +2301,18 @@ override XT_SRAM_BYTES := 128
 # Override only when deliberately reviewing a tighter or experimental policy;
 # the release/default limit remains 16 B.
 XT_STATIC_RAM_LIMIT ?= 16
-# The vendored device files that must exist for the build (the fetch script's
-# output); their absence -> skip cleanly with a fetch hint.
-XT_SPEC_FILE = $(XT_SPEC_DIR)/device-specs/specs-$(XT_MCU)
-XT_IO_HEADER = $(XT_INC)/avr/io$(XT_DEVLIB).h
-# Strict flags: the classic-AVR CFLAGS_COMMON plus the -B/-I device-pack
-# injection (the open-source analogue of the PIC's -mdfp).
-XT_CFLAGS = -mmcu=$(XT_MCU) -B $(XT_SPEC_DIR) -I $(XT_INC) $(CFLAGS_COMMON)
-XT_LDFLAGS = -mmcu=$(XT_MCU) -B $(XT_SPEC_DIR) -Wl,--gc-sections
+# The device support every ATtiny202 lane needs: the compiler's spec file and
+# avr-libc's I/O header. Without them each lane skips cleanly with the fix
+# named, or fails under STRICT_TOOLS=1. XT_SPEC_FILE asks CC itself, and is
+# recursive so it is probed only by a recipe that runs, never at parse time;
+# -print-file-name prints the bare name when CC has no such file.
+XT_SPEC_FILE = $(shell $(CC) -print-file-name=device-specs/specs-$(XT_MCU) 2>/dev/null)
+XT_IO_HEADER = $(AVR_LIBC_INCLUDE)/avr/io$(XT_DEVLIB).h
+XT_NO_DEVICE_SUPPORT = no ATtiny202 device support in CC=$(CC) and its avr-libc
+XT_DEVICE_SUPPORT_HINT = Install Ubuntu 26.04's gcc-avr and avr-libc (avr-gcc 14.3.0, avr-libc 2.2.1); avr-gcc 7.3.0 predates the part.
+# Strict flags: the classic-AVR CFLAGS_COMMON for the ATtiny202.
+XT_CFLAGS = -mmcu=$(XT_MCU) $(CFLAGS_COMMON)
+XT_LDFLAGS = -mmcu=$(XT_MCU) -Wl,--gc-sections
 
 XT_SMOKE_SRC = test/avr/attiny202_smoke.c
 XT_SMOKE_ELF = $(AVR_BUILD_DIR)/attiny202_smoke.elf
@@ -2321,9 +2320,8 @@ XT_SMOKE_ELF = $(AVR_BUILD_DIR)/attiny202_smoke.elf
 .PHONY: attiny202-smoke
 attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 smoke build."; \
-		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
-		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 smoke build."; \
+		echo "  $(XT_DEVICE_SUPPORT_HINT)"; \
 		$(SKIP); \
 	fi; \
 	echo "=== ATtiny202 (avrxmega3) smoke: compile + link + arch + $(XT_FLASH_BYTES) B budget ==="; \
@@ -2349,10 +2347,9 @@ attiny202-smoke: $(XT_SMOKE_SRC) | $(AVR_BUILD_DIR)
 # The real firmware build (the smoke gate above only proves the toolchain). The
 # ATtiny202 shell (src/bypass_mcu_avr_xt.c) implements the same bypass_hw_iface.h
 # contract as the classic-AVR and PIC shells and links the UNCHANGED pure core
-# (bypass_pure.c) + one output driver -- exactly like `attiny13a` / `pic10f322`. Like the
-# PIC build it consumes a vendored DFP and gates every variant on the device's
-# 2 KB flash and reviewed static-RAM budgets. Developer invocations skip cleanly
-# when the DFP is absent;
+# (bypass_pure.c) + one output driver -- exactly like `attiny13a` / `pic10f322`. It
+# gates every variant on the device's 2 KB flash and reviewed static-RAM
+# budgets. Developer invocations skip cleanly when CC lacks the part;
 # CI/release gates use STRICT_TOOLS=1 so missing prerequisites fail closed.
 #
 # simavr/QEMU do not model AVR8X, but yasimavr DOES: the `attiny202-sim` /
@@ -2373,9 +2370,9 @@ override XT_VARIANTS_UNKNOWN := $(CLASSIC_VARIANTS_UNKNOWN)
 XT_CORE_SRC = src/bypass_mcu_avr_xt.c src/bypass_pure.c
 # Headers that, if changed, should rebuild the XT images.
 XT_HEADERS = $(MODULAR_FW_HEADERS) src/bypass_pins_avr_xt.h
-# Firmware compile flags: the smoke gate's strict XT_CFLAGS (-B/-I device-pack
-# injection + CFLAGS_COMMON) plus the runtime -D selectors (F_CPU + the AVR-XT
-# shell selector). XT_LDFLAGS (from the smoke section) carries the link flags.
+# Firmware compile flags: the smoke gate's strict XT_CFLAGS (-mmcu +
+# CFLAGS_COMMON) plus the runtime -D selectors (F_CPU + the AVR-XT shell
+# selector). XT_LDFLAGS (from the smoke section) carries the link flags.
 XT_FW_CFLAGS = -DF_CPU=$(XT_F_CPU) -DBYPASS_MCU_AVR_XT $(XT_CFLAGS)
 
 $(XT_BUILD_DIR):
@@ -2393,9 +2390,8 @@ attiny202: $(XT_CORE_SRC) $(XT_HEADERS) | $(XT_BUILD_DIR)
 		echo "FAIL: could not remove stale ATtiny202 artifacts"; exit 1; \
 	fi
 	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 build."; \
-		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
-		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 build."; \
+		echo "  $(XT_DEVICE_SUPPORT_HINT)"; \
 		$(SKIP); \
 	fi; \
 	if [ ! -f "src/bypass_mcu_avr_xt.c" ]; then \
@@ -2563,8 +2559,8 @@ attiny202-test-stack-bound: $(XT_STACK_SOURCE)
 		echo "FAIL: could not remove stale AVR-XT stack evidence"; exit 1; \
 	fi; \
 	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 stack bound."; \
-		echo "  Fetch them with: scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 stack bound."; \
+		echo "  $(XT_DEVICE_SUPPORT_HINT)"; \
 		$(SKIP); \
 	fi; \
 	if ! awk -v max="$(XT_STACK_MAX_FRAME)" 'BEGIN {exit !(max ~ /^[0-9]+$$/ && max ~ /[1-9]/)}'; then \
@@ -2630,10 +2626,10 @@ XT_FUSE_ENV = ATTINY202_FUSE_WDTCFG=$(XT_FUSE_WDTCFG) \
 #
 # yasimavr is not in apt; it is built from a pinned upstream release plus two
 # vendored bug-fix patches (third_party/yasimavr/patches/) into a project-local,
-# gitignored venv by scripts/fetch_yasimavr.sh -- the yasimavr counterpart of
-# scripts/fetch_attiny_dfp.sh. These targets are STANDALONE (NOT in `make test`)
-# and SKIP CLEANLY (exit 0) when that venv is absent, exactly as `attiny202`
-# skips without the DFP and `pic10f322-test-soak` skips without gpsim-dev. CI builds
+# gitignored venv by scripts/fetch_yasimavr.sh. These targets are STANDALONE
+# (NOT in `make test`) and SKIP CLEANLY (exit 0) when that venv is absent,
+# exactly as `attiny202` skips without device support and `pic10f322-test-soak`
+# skips without gpsim-dev. CI builds
 # the venv explicitly (a fetch step) so a skip there cannot mask a real failure.
 #
 # XT_SIM_VARIANT selects one supported variant; empty
@@ -2688,7 +2684,7 @@ attiny202-sim: test-fuses attiny202
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
 	fi; \
 	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found; skipping ATtiny202 simulation."; $(SKIP); \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 simulation."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
 	$(fw_image_sh); \
@@ -2722,7 +2718,7 @@ attiny202-fault: test-fuses attiny202
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
 	fi; \
 	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found; skipping ATtiny202 fault injection."; $(SKIP); \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 fault injection."; $(SKIP); \
 	fi; \
 	if [ ! -f "src/bypass_mcu_avr_xt.c" ]; then \
 		echo "src/bypass_mcu_avr_xt.c not found; skipping ATtiny202 fault injection."; $(SKIP); \
@@ -2756,7 +2752,7 @@ attiny202-fault: test-fuses attiny202
 # Fail-closed like its three siblings, and for the same reason: this target is a
 # release-qualification input (RELEASE_SOAK_NAMES carries attiny202_relay), so
 # "soaked nothing" must never read as "soak passed". An unsupported
-# XT_SIM_VARIANT, absent DFP device files, a missing image, and an empty variant
+# XT_SIM_VARIANT, absent device support, a missing image, and an empty variant
 # set are each reported rather than skipped past.
 .PHONY: attiny202-soak
 attiny202-soak: test-fuses attiny202
@@ -2768,7 +2764,7 @@ attiny202-soak: test-fuses attiny202
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
 	fi; \
 	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found; skipping ATtiny202 soak."; $(SKIP); \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 soak."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
 	$(fw_image_sh); \
@@ -2839,7 +2835,7 @@ attiny202-lockstep: test-fuses attiny202 $(XT_LOCKSTEP_FFI_LIB)
 			*) echo "FAIL: XT_SIM_VARIANT=$$selected is not in VARIANTS=$(VARIANTS)"; exit 2 ;; esac; \
 	fi; \
 	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found; skipping ATtiny202 lock-step."; $(SKIP); \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 lock-step."; $(SKIP); \
 	fi; \
 	$(yasimavr_skip_if_absent); \
 	$(fw_image_sh); \
@@ -2916,14 +2912,14 @@ attiny202-program: variant-selectors-valid avr-program-request-valid attiny202
 
 # --- ATtiny202 static analysis (cppcheck + MISRA addon) ----------------------
 # Two analyzers over the AVR-XT shell, parallel to analyze-cppcheck/analyze-misra
-# (classic) and pic10f322-analyze-* (PIC). STANDALONE (needs the vendored DFP + apt
-# avr-libc headers; NOT part of `make test`); each skips cleanly when cppcheck/
-# python3 or the DFP device header is absent. The AVR-XT register headers resolve
+# (classic) and pic10f322-analyze-* (PIC). STANDALONE (needs avr-libc's ATtiny202
+# headers; NOT part of `make test`); each skips cleanly when cppcheck/python3 or
+# the device header is absent. The AVR-XT register headers resolve
 # exactly as the real build sees them: <avr/io.h> reaches iotn202.h via the
 # spec's __AVR_DEV_LIB_NAME__=tn202 fallback, and the device-family macros that
 # -mmcu normally predefines (__AVR_XMEGA__ / __AVR_ATtiny202__ / ...) are supplied
 # explicitly here -- mirroring the classic run's -D__AVR_ATtiny13A__ and the PIC
-# run's -D_10F322. avr-libc / avr-gcc / DFP headers are outside the compliance
+# run's -D_10F322. avr-libc / avr-gcc headers are outside the compliance
 # boundary -> suppressed by path.
 XT_ARCH ?= 103
 XT_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_XMEGA__ -D__AVR_MEGA__ \
@@ -2932,7 +2928,7 @@ XT_CPPCHECK_CPPFLAGS = -D__AVR__ -D__AVR_XMEGA__ -D__AVR_MEGA__ \
                        -DBYPASS_MCU_AVR_XT -DF_CPU=$(XT_F_CPU) \
                        -UBYPASS_MCU_PIC10F322 -UBYPASS_MCU_AVR_CLASSIC \
                        -Isrc $(if $(AVR_LIBC_INCLUDE),-I$(AVR_LIBC_INCLUDE)) \
-                       -I$(XT_INC) $(if $(AVR_GCC_INCLUDE),-I$(AVR_GCC_INCLUDE))
+                       $(if $(AVR_GCC_INCLUDE),-I$(AVR_GCC_INCLUDE))
 
 # Plain bug-finding pass (parallel to analyze-cppcheck for the classic build).
 XT_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
@@ -2944,7 +2940,6 @@ XT_CPPCHECK_FLAGS ?= --enable=warning,style,performance,portability \
                      $(BYPASS_CTX_CHECK_UNREAD_SUPP_XT) \
                      $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*') \
                      $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*') \
-                     '--suppress=*:$(XT_INC)/*' \
                      $(XT_CPPCHECK_CPPFLAGS)
 
 # MISRA addon pass (parallel to MISRA_CPPCHECK_FLAGS for the classic build).
@@ -2954,7 +2949,6 @@ XT_MISRA_CPPCHECK_FLAGS ?= --addon=$(MISRA_ADDON) --std=c11 --platform=avr8 \
                      --suppress=unmatchedSuppression \
                      $(if $(AVR_LIBC_INCLUDE),'--suppress=*:$(AVR_LIBC_INCLUDE)/*') \
                      $(if $(AVR_GCC_INCLUDE),'--suppress=*:$(AVR_GCC_INCLUDE)/*') \
-                     '--suppress=*:$(XT_INC)/*' \
                      $(XT_CPPCHECK_CPPFLAGS)
 
 override ANALYSIS_XT_ROWS := \
@@ -2971,7 +2965,7 @@ attiny202-analyze-cppcheck: $(call analysis_matrix_sources,$(ANALYSIS_XT_ROWS)) 
 		echo "cppcheck not installed; skipping ATtiny202 cppcheck analysis"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 cppcheck analysis"; $(SKIP); \
+		echo "$(XT_NO_DEVICE_SUPPORT) ($(XT_IO_HEADER) not found); skipping ATtiny202 cppcheck analysis"; $(SKIP); \
 	fi; \
 	$(call run_cppcheck_matrix_sh,$(ANALYSIS_XT_ROWS),$(XT_CPPCHECK_FLAGS),ATtiny202/avr8)
 
@@ -2980,7 +2974,7 @@ attiny202-analyze-misra: $(call analysis_matrix_sources,$(ANALYSIS_XT_ROWS)) $(X
 		echo "cppcheck and/or python3 not available; skipping ATtiny202 MISRA analysis"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device header not found (XT_DFP=$(XT_DFP)); skipping ATtiny202 MISRA analysis"; $(SKIP); \
+		echo "$(XT_NO_DEVICE_SUPPORT) ($(XT_IO_HEADER) not found); skipping ATtiny202 MISRA analysis"; $(SKIP); \
 	fi; \
 	$(call run_misra_matrix_sh,$(ANALYSIS_XT_ROWS),$(XT_MISRA_CPPCHECK_FLAGS),ATtiny202/avr8)
 
@@ -3000,11 +2994,11 @@ attiny202-analyze-misra: $(call analysis_matrix_sources,$(ANALYSIS_XT_ROWS)) $(X
 # minimum, while keeping the ISR at or below its reviewed 84 instructions. Needs
 # only binutils-avr
 # (already required to build), so it runs in the same standalone pre-hardware
-# aggregate; it skips cleanly (STRICT_TOOLS honored) when the DFP is absent.
+# aggregate; it skips cleanly (STRICT_TOOLS honored) without device support.
 .PHONY: attiny202-delay-oracle
 attiny202-delay-oracle: attiny202
 	@if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping ATtiny202 delay-width oracle."; \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping ATtiny202 delay-width oracle."; \
 		$(SKIP); \
 	fi; \
 	command -v $(OBJDUMP) >/dev/null 2>&1 \
@@ -3022,7 +3016,7 @@ attiny202-delay-oracle: attiny202
 
 # Aggregate: every ATtiny202 pre-hardware check (fuses + smoke + build/budgets +
 # stack + analysis + coil-pulse width oracle + compile-guard mutations). It is
-# not part of `make test` because the vendored DFP may be absent; each sub-target
+# not part of `make test` because an older avr-gcc may lack the part; each sub-target
 # skips cleanly for developers, while release qualification invokes this
 # aggregate with STRICT_TOOLS=1.
 .PHONY: attiny202-test
@@ -3493,22 +3487,21 @@ ci-mutation:
 		XT_STATIC_RAM_LIMIT="$(XT_STATIC_RAM_LIMIT)" \
 		PIC12F675_DATA_LIMIT="$(PIC12F675_DATA_LIMIT)"
 
-# TWO goals, not one, because this lane has two out-of-apt inputs with
-# different jobs: the vendored ATtiny_DFP device files COMPILE the image, and
-# the patched yasimavr venv RUNS it. A caller provisions them in that order and
-# wants to know the image built before spending minutes compiling a simulator,
-# so the split is the fail-fast boundary as well as the toolchain boundary. It
-# is also where a caller may cache the DFP: after the images are proven, before
-# anything that needs the venv.
+# TWO goals, not one, because the lane's two halves need different inputs: the
+# apt toolchain COMPILES the image, and the patched yasimavr venv, the lane's one
+# out-of-apt input, RUNS it. A caller wants to know the image built before
+# spending minutes compiling a simulator, so the split is the fail-fast boundary
+# as well as the toolchain boundary.
 #
 # The assertions the workflow carried as loose shell -- that every declared
 # image was actually built, and that the soak PASSed once per supported variant
 # rather than skipping -- are decisions about what the gate proves, so they live
 # here rather than in a `run:` block no local run executes.
 #
-# ci-attiny202-build needs the DFP and nothing else. Its image check is not
-# redundant with the build: every attiny202-* target exits 0 when the DFP is
-# absent, so without it a failed fetch reads as a pass that produced no images.
+# ci-attiny202-build needs the apt toolchain and nothing else. Its image check
+# is not redundant with the build: every attiny202-* target exits 0 without
+# device support, so without it a skipped build reads as a pass that produced
+# no images.
 ci-attiny202-build:
 	$(call ci_pin,XT_STATIC_RAM_LIMIT)
 	$(call ci_pin,XT_STACK_MAX_FRAME)
@@ -3517,7 +3510,7 @@ ci-attiny202-build:
 		XT_STACK_MAX_FRAME="$(XT_STACK_MAX_FRAME)"
 	@for hex in $(XT_RELEASE_IMAGES); do \
 		test -f "$(XT_BUILD_DIR)/$$hex" \
-			|| { echo "FAIL: missing $(XT_BUILD_DIR)/$$hex (DFP fetch or build failed)" >&2; exit 1; }; \
+			|| { echo "FAIL: missing $(XT_BUILD_DIR)/$$hex (the ATtiny202 build failed or skipped)" >&2; exit 1; }; \
 	done
 
 # ci-attiny202-target needs the patched yasimavr venv. The soak stays a lane of
@@ -3589,7 +3582,7 @@ ci-build-classic:
 # pic10f320-variants, not pic10f320: it builds all three output stages and
 # removes the whole image set if any one fails, so a partial matrix can never
 # reach the reproducibility gate. STRICT_TOOLS=1 on the ATtiny202 build for the
-# same reason: an absent ATtiny_DFP must fail this gate, never skip it into an
+# same reason: absent ATtiny202 support must fail this gate, never skip it into an
 # image set that is short three files.
 release-rebuild:
 	$(call ci_pin,PIC_CC)
@@ -4120,7 +4113,7 @@ test-static-assert-guards:
 # The same proof for the guards test-static-assert-guards cannot reach. Its
 # mutations compile the classic-AVR lane with avr-gcc; 53 of the firmware's 81
 # static_assert guards live in the AVR-XT and three PIC shells, where a pin
-# assert reads the device pack, a clock assert reads that part's -D, and a
+# assert reads that part's device header, a clock assert reads that part's -D, and a
 # watchdog assert compares against that part's own de-rated floor. None of that
 # can be evaluated by another part's toolchain, so these are two targets rather
 # than one: the reasons they skip are different, and a machine with avr-gcc but
@@ -4131,12 +4124,11 @@ test-attiny202-guard-mutations:
 		echo "$(CC) not installed; skipping the ATtiny202 compile-guard mutations"; $(SKIP); \
 	fi; \
 	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
-		echo "ATtiny_DFP device files not found under XT_DFP=$(XT_DFP); skipping the ATtiny202 compile-guard mutations."; \
-		echo "  Fetch them (open-source apt toolchain + pinned atpack):"; \
-		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping the ATtiny202 compile-guard mutations."; \
+		echo "  $(XT_DEVICE_SUPPORT_HINT)"; \
 		$(SKIP); \
 	fi; \
-	./test/test_target_guard_mutations.sh avr-xt '$(CC)' '$(XT_DFP)'
+	./test/test_target_guard_mutations.sh avr-xt '$(CC)'
 
 test-pic-guard-mutations:
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
@@ -4379,7 +4371,7 @@ test-attiny202-output-oracle:
 	PYTHONPATH=test/avr python3 test/avr/test_attiny202_output_oracle.py
 
 # Host-only regression for the coil-pulse WIDTH oracle's parser + width logic.
-# Needs no ELF/DFP (it drives synthetic disassembly), so it guards the width
+# Needs no ELF (it drives synthetic disassembly), so it guards the width
 # checker in `make test` even where the real images cannot be built; the
 # attiny202-delay-oracle target runs the same code against the real images.
 test-attiny202-delay-oracle:
@@ -4392,7 +4384,7 @@ test-attiny202-fault-oracle:
 
 # Host regression for the golden-model ctypes bridge the ATtiny202 lock-step
 # driver reaches the shipping debounce core through. `attiny202-lockstep` needs
-# the DFP and the yasimavr venv and skips cleanly without them, so without this
+# ATtiny202 support and the yasimavr venv and skips cleanly without them, so without this
 # the bridge would be uncovered on a host that lacks those tools. Needs only
 # HOSTCC, hence a hard gate here.
 #
@@ -7932,7 +7924,7 @@ override RELEASE_ALLOWED_OVERRIDE_NAMES := \
 	PIC10F320_XC8_INCLUDE PIC10F320_DFP_INCLUDE PIC10F320_DEVICE_INI \
 	PIC12F675_DFP_INCLUDE PIC12F675_DEVICE_INI PIC10F320_HOST_CC \
 	PIC_SOAK_CXX PIC10F320_SOAK_CXX PIC_SOAK_GPSIM_INC \
-	PIC10F320_SOAK_GPSIM_INC XT_DFP YASIMAVR_VENV YASIMAVR_PY \
+	PIC10F320_SOAK_GPSIM_INC YASIMAVR_VENV YASIMAVR_PY \
 	PIC12F675_PYTHON KLEE KLEE_CLANG KLEE_INC KLEE_LLVMLINK \
 	AVR_NM MUTATION_MAKE MAKE_COMMAND MAKELEVEL \
 	$(if $(filter print-RELEASE_CONTRACT_VALID,$(MAKECMDGOALS)),\
@@ -8219,11 +8211,10 @@ help:
 	@echo "                     (PIC10F320_PROG=, PIC10F320_PROG_TOOL=, PIC10F320_PROG_CMD=)"
 	@echo "  pic10f320-clean    remove build_pic10f320/ (build + coverage artifacts)"
 	@echo "ATtiny202 release-supported target (AVR-XT / avrxmega3):"
-	@echo "  scripts/fetch_attiny_dfp.sh [DIR]  vendor the pinned device files (default XT_DFP=$(XT_DFP))"
-	@echo "  attiny202-smoke  toolchain/device-pack gate: compile/link the peripheral smoke image, assert"
-	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips if XT_DFP absent)"
+	@echo "  attiny202-smoke  toolchain gate: compile/link the peripheral smoke image, assert"
+	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips without device support)"
 	@echo "  attiny202        build all variants; enforce 2 KB flash and $(XT_STATIC_RAM_LIMIT)/$(XT_SRAM_BYTES) B static-RAM limits"
-	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (DFP+avr-libc; standalone)"
+	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (avr-libc headers; standalone)"
 	@echo "  attiny202-delay-oracle  verify disassembled coil-pulse widths + tick-ISR instruction ceiling"
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + stack + analyze + delay)"
 	@echo "  attiny202-test-stack-bound  shipping-flag frame bound for all immutable variants ($(XT_STACK_MAX_FRAME) B)"

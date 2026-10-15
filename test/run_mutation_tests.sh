@@ -472,20 +472,23 @@ AVR_SOAK_MUT_MS="${AVR_SOAK_MUT_MS:-2000}"
 AVR_SOAK_MUT_LIVENESS_MS="${AVR_SOAK_MUT_LIVENESS_MS:-1000}"
 
 # --- AVR-XT (ATtiny202) knobs -------------------------------------------------
-# The two out-of-tree inputs the ATtiny202 lane needs, as ABSOLUTE paths. Both
-# default to a path RELATIVE to the tree in the Makefile (XT_DFP,
-# YASIMAVR_VENV), which is exactly wrong for a mktemp sandbox: `make -C "$work"`
-# would resolve them under $work, find nothing, and every attiny202-* target
-# would SKIP CLEANLY with status 0 -- scored as a survivor for every mutant in
-# the lane. Passing them in absolutely keeps the sandbox self-contained for
-# SOURCES while sharing the read-only toolchain, and the probe below refuses to
-# enable the lane unless both actually resolve.
-xt_dfp_input="${XT_DFP:-${XT_DFP_ABS:-third_party/attiny_dfp}}"
+# The ATtiny202 lane's one out-of-tree input, as an ABSOLUTE path. It defaults
+# to a path RELATIVE to the tree in the Makefile (YASIMAVR_VENV), which is
+# exactly wrong for a mktemp sandbox: `make -C "$work"` would resolve it under
+# $work, find nothing, and every attiny202-* target would SKIP CLEANLY with
+# status 0 -- scored as a survivor for every mutant in the lane. Passing it in
+# absolutely keeps the sandbox self-contained for SOURCES while sharing the
+# read-only toolchain, and the probe below refuses to enable the lane unless it
+# resolves. The device support is the compiler's own: the probe asks Make for
+# the same spec file and I/O header the attiny202-* guards test.
 xt_yasimavr_venv_input="${YASIMAVR_VENV:-${XT_YASIMAVR_VENV_ABS:-third_party/yasimavr/venv}}"
-case "$xt_dfp_input" in
-    /*) xt_dfp_abs=$xt_dfp_input ;;
-    *)  xt_dfp_abs="$PROJ_DIR/$xt_dfp_input" ;;
-esac
+if ! XT_MUTATION_SPEC_FILE=$("$MUTATION_MAKE" -s --no-print-directory \
+        -C "$PROJ_DIR" print-XT_SPEC_FILE) \
+        || ! XT_MUTATION_IO_HEADER=$("$MUTATION_MAKE" -s --no-print-directory \
+        -C "$PROJ_DIR" print-XT_IO_HEADER); then
+    echo "ERROR: could not resolve the ATtiny202 device support from Make" >&2
+    exit 2
+fi
 case "$xt_yasimavr_venv_input" in
     /*) xt_yasimavr_venv_abs=$xt_yasimavr_venv_input ;;
     *)  xt_yasimavr_venv_abs="$PROJ_DIR/$xt_yasimavr_venv_input" ;;
@@ -497,12 +500,11 @@ XT_MUTATION_NM=$(mutation_command_for_sandbox "${AVR_NM:-avr-nm}")
 # selections before Make enters a sandbox and preserve the command-name form for
 # PATH lookup; AVR_NM is intentionally not a Make command-line override.
 export AVR_NM="$XT_MUTATION_NM"
+# mutation_attiny202_tools_are_available SPEC_FILE IO_HEADER VENV
 mutation_attiny202_tools_are_available() {
-    local dfp=$1 venv=$2
-    [ -f "$dfp/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU" ] \
-        && [ -f "$dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/crt$XT_MCU.o" ] \
-        && [ -f "$dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/lib$XT_MCU.a" ] \
-        && [ -f "$dfp/include/avr/iotn202.h" ] \
+    local spec=$1 header=$2 venv=$3
+    [ -f "$spec" ] \
+        && [ -f "$header" ] \
         && [ -x "$venv/bin/python" ] \
         && "$venv/bin/python" -c \
             "from yasimavr.device_library import load_device; assert load_device('attiny202').find_peripheral('WDT') is not None" \
@@ -1584,13 +1586,12 @@ run_mutant() {
             mutation_bounded "$MUTATION_MAKE" -C "$work" PIC10F322_TARGET_VARIANT="$arg" pic10f322-test-target >/dev/null 2>&1; rc=$?
             ;;
         avrxt)
-            # Same shape as `make`, plus the two absolute tool paths the sandbox
+            # Same shape as `make`, plus the absolute tool paths the sandbox
             # cannot supply itself (see the XT knobs at the top). Intentional
             # word splitting on $arg: each entry is optional VAR=value
             # assignments followed by one Make target, never shell metacharacters.
             label="$arg"
             mutation_bounded "$MUTATION_MAKE" -C "$work" $arg \
-                XT_DFP="$xt_dfp_abs" \
                 YASIMAVR_VENV="$xt_yasimavr_venv_abs" \
                 OBJDUMP="$XT_MUTATION_OBJDUMP" \
                 >/dev/null 2>&1; rc=$?
@@ -1824,8 +1825,8 @@ PIC12F675_MUTATIONS=(
 # --- AVR-XT shell mutants (src/bypass_mcu_avr_xt.c) ---------------------------
 # The ATtiny202 counterpart of the classic-AVR shell mutants above and the PIC
 # ones below them. Every entry is killed by driving the REAL avr-gcc-built image
-# in yasimavr, so the whole lane is gated on the ATtiny_DFP and the patched venv
-# both being present AND the unmutated tree passing each kill target (probe
+# in yasimavr, so the whole lane is gated on the compiler's ATtiny202 support and
+# the patched venv both being present AND the unmutated tree passing each kill target (probe
 # below): every attiny202-* target exits 0 when an input is missing, which
 # without the gate would read as a lane full of survivors.
 #
@@ -2693,16 +2694,12 @@ EOF
             exit 1
         fi
     done
-    xt_policy_dfp="$RESULT_DIR/xt-policy-dfp"
+    xt_policy_device="$RESULT_DIR/xt-policy-device"
     xt_policy_venv="$RESULT_DIR/xt-policy-venv"
     xt_policy_bin="$RESULT_DIR/xt-policy-bin"
-    mkdir -p "$xt_policy_dfp/gcc/dev/$XT_MCU/device-specs" \
-        "$xt_policy_dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls" \
-        "$xt_policy_dfp/include/avr" "$xt_policy_venv/bin" "$xt_policy_bin"
-    : > "$xt_policy_dfp/gcc/dev/$XT_MCU/device-specs/specs-$XT_MCU"
-    : > "$xt_policy_dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/crt$XT_MCU.o"
-    : > "$xt_policy_dfp/gcc/dev/$XT_MCU/avrxmega3/short-calls/lib$XT_MCU.a"
-    : > "$xt_policy_dfp/include/avr/iotn202.h"
+    mkdir -p "$xt_policy_device" "$xt_policy_venv/bin" "$xt_policy_bin"
+    : > "$xt_policy_device/specs-$XT_MCU"
+    : > "$xt_policy_device/iotn202.h"
     for tool in python avr-objdump avr-nm; do
         printf '#!/usr/bin/env bash\nexit 0\n' > "$xt_policy_bin/$tool"
         chmod 750 "$xt_policy_bin/$tool"
@@ -2710,12 +2707,28 @@ EOF
     cp "$xt_policy_bin/python" "$xt_policy_venv/bin/python"
     XT_MUTATION_OBJDUMP="$xt_policy_bin/avr-objdump" \
         XT_MUTATION_NM="$xt_policy_bin/avr-nm" \
-        mutation_attiny202_tools_are_available "$xt_policy_dfp" "$xt_policy_venv" \
+        mutation_attiny202_tools_are_available "$xt_policy_device/specs-$XT_MCU" \
+            "$xt_policy_device/iotn202.h" "$xt_policy_venv" \
         || { echo "ERROR: complete ATtiny202 policy fixture was rejected" >&2; exit 1; }
+    for missing in spec header; do
+        xt_policy_spec="$xt_policy_device/specs-$XT_MCU"
+        xt_policy_header="$xt_policy_device/iotn202.h"
+        case "$missing" in
+            spec) xt_policy_spec="$RESULT_DIR/missing-specs-$XT_MCU" ;;
+            header) xt_policy_header="$RESULT_DIR/missing-iotn202.h" ;;
+        esac
+        if XT_MUTATION_OBJDUMP="$xt_policy_bin/avr-objdump" \
+                XT_MUTATION_NM="$xt_policy_bin/avr-nm" \
+                mutation_attiny202_tools_are_available "$xt_policy_spec" \
+                    "$xt_policy_header" "$xt_policy_venv"; then
+            echo "ERROR: ATtiny202 device support without its $missing was accepted" >&2
+            exit 1
+        fi
+    done
     if STRICT_TOOLS=1 XT_MUTATION_OBJDUMP="$RESULT_DIR/missing-objdump" \
             XT_MUTATION_NM="$xt_policy_bin/avr-nm" \
-            mutation_attiny202_tools_are_available "$xt_policy_dfp" \
-                "$xt_policy_venv"; then
+            mutation_attiny202_tools_are_available "$xt_policy_device/specs-$XT_MCU" \
+                "$xt_policy_device/iotn202.h" "$xt_policy_venv"; then
         echo "ERROR: absent ATtiny202 binutils was accepted under strict mode" >&2
         exit 1
     fi
@@ -3243,7 +3256,7 @@ rm -rf "$P675_BASE"
 
 # --- AVR-XT toolchain probe ---------------------------------------------------
 # Same discipline as both PIC probes: enable the ATtiny202 mutants only when the
-# ATtiny_DFP and the patched yasimavr venv both resolve AND every DISTINCT kill
+# compiler's ATtiny202 support and the patched yasimavr venv both resolve AND every DISTINCT kill
 # command passes on the unmutated sandbox. Every attiny202-* target exits 0 on a
 # missing input, so the outer tool checks and the per-command baselines are both
 # required -- either alone leaves a way for the whole lane to read as survivors
@@ -3263,14 +3276,13 @@ if ! validate_avr_xt_sandbox "$XT_BASE"; then
 fi
 echo "AVR-XT mutation sandbox files: PASS"
 
-if mutation_attiny202_tools_are_available "$xt_dfp_abs" \
-        "$xt_yasimavr_venv_abs"; then
+if mutation_attiny202_tools_are_available "$XT_MUTATION_SPEC_FILE" \
+        "$XT_MUTATION_IO_HEADER" "$xt_yasimavr_venv_abs"; then
     XT_BASELINES_OK=1
     while IFS= read -r target; do
         # Intentional word splitting: each field is optional VAR=value
         # assignments followed by one Make target, never shell metacharacters.
         if mutation_bounded "$MUTATION_MAKE" -C "$XT_BASE" $target \
-                XT_DFP="$xt_dfp_abs" \
                 YASIMAVR_VENV="$xt_yasimavr_venv_abs" \
                 OBJDUMP="$XT_MUTATION_OBJDUMP" >/dev/null 2>&1; then
             echo "baseline $target: PASS"
@@ -3281,14 +3293,14 @@ if mutation_attiny202_tools_are_available "$xt_dfp_abs" \
     done < <(printf '%s\n' "${XT_MUTATIONS[@]}" | cut -f3 | sort -u)
     if [ "$XT_BASELINES_OK" -eq 1 ]; then
         XT_OK=1
-        echo "ATtiny_DFP + patched yasimavr present, all baselines PASS -> ATtiny202 mutants ENABLED"
+        echo "ATtiny202 device support + patched yasimavr present, all baselines PASS -> ATtiny202 mutants ENABLED"
     else
         XT_WHY="baseline FAILED"
         MUT_BASELINE_FAILED=1
         echo "an ATtiny202 kill-target baseline failed -> its mutants SKIPPED"
     fi
 else
-    echo "ATtiny_DFP, patched yasimavr, and/or binutils-avr absent -> ATtiny202 mutants SKIPPED"
+    echo "ATtiny202 device support, patched yasimavr, and/or binutils-avr absent -> ATtiny202 mutants SKIPPED"
 fi
 rm -rf "$XT_BASE"
 
@@ -3494,9 +3506,9 @@ if ! mutation_partial_result_is_allowed "$pic_skipped" "$xt_skipped" \
         echo "       probe discards its output. Note it may fail only INSIDE the mktemp" >&2
         echo "       sandbox, which is a copy_tree gap rather than a defect in the tree." >&2
     else
-        echo "       Install the PIC toolchain/libgpsim stack (PIC lanes) and/or run" >&2
-        echo "       scripts/fetch_attiny_dfp.sh + scripts/fetch_yasimavr.sh (ATtiny202" >&2
-        echo "       lane), or authorize only the unavailable substrate with" >&2
+        echo "       Install the PIC toolchain/libgpsim stack (PIC lanes) and/or" >&2
+        echo "       Ubuntu 26.04's gcc-avr + avr-libc and run scripts/fetch_yasimavr.sh" >&2
+        echo "       (ATtiny202 lane), or authorize only the unavailable substrate with" >&2
         echo "       MUTATION_ALLOW_SKIP=PIC or MUTATION_ALLOW_SKIP=ATtiny202." >&2
     fi
     exit 1

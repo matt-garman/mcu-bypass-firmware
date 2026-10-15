@@ -17,9 +17,8 @@ build_avr_xt/
 build_pic10f320/
 build_pic12f675/
 
-# vendored ATtiny_DFP device files for the ATtiny202 (AVR-XT) build -- fetched
-# on demand by scripts/fetch_attiny_dfp.sh (pinned version + SHA), NOT committed,
-# mirroring the external/uncommitted PIC_DFP. Override the location with XT_DFP.
+# fetched-on-demand toolchain inputs (the historic avr-gcc 7.3.0 and the
+# patched yasimavr venv), each pinned by version + SHA and NOT committed.
 # NOTE: ignore the CONTENTS (third_party/*), not the directory itself
 # (third_party/), so the negations below can re-include specific files -- git
 # will not descend into a directory excluded with a trailing slash.

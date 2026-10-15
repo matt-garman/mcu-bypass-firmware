@@ -120,13 +120,13 @@ Two hazards, both found by converting `pic` rather than by inspection:
   by its `name:` (`"PIC10F322 pre-hardware gate..."`) simply stop matching when
   the step is folded away. Locate steps by what they *run*.
 
-One job does not always mean one goal. The `attiny202` job has two out-of-apt
-inputs with different jobs -- the vendored ATtiny_DFP *compiles* the image, the
-patched yasimavr venv *runs* it -- and the workflow provisions them in that
-order, caching the DFP once the images are proven and only then paying for a
-simulator build. Folding all four of its gate steps into one goal would have
-destroyed that boundary: a broken image would be found after the venv build
-rather than before it. So it converts to **two** goals, `ci-attiny202-build`
+One job does not always mean one goal. The `attiny202` job's two halves need
+different inputs -- the apt toolchain *compiles* the image, the patched yasimavr
+venv *runs* it -- and the workflow proves the images before paying for a
+simulator build. (Through v0.9.17 the compile half also fetched and cached
+Microchip's ATtiny_DFP.) Folding all four of its gate steps into one goal would
+have destroyed that boundary: a broken image would be found after the venv
+build rather than before it. So it converts to **two** goals, `ci-attiny202-build`
 and `ci-attiny202-target`, split exactly where the toolchain and the fail-fast
 boundary already sat, and the gate asserts the build half runs first. Part 2's
 rule is one goal per *step*, not per job -- the `pic` job already ran two.

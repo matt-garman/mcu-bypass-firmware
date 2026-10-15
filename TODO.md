@@ -444,21 +444,6 @@ evidence. Risk: High; these four close here or nowhere. They do not block the
 `0.9.x` software release (the part already ships), but they are the gate to the
 `1.x.y` hardware-validated line — the same gate every other part must pass.
 
-### T3-attiny-dfp - Build the ATtiny202 from avr-libc's own device support
-
-avr-gcc 7.3.0 predated the ATtiny202, so its lane builds against Microchip's
-ATtiny_DFP device files (`scripts/fetch_attiny_dfp.sh`, `-B`/`-I` into
-`third_party/attiny_dfp`). The avr-gcc 14.3.0 pin with avr-libc 2.2.1 supports
-the part natively, and measured on 2026-10-15 builds all three ATtiny202
-images byte-identical with and without the DFP. Drop the DFP from the build
-flags, the release preflight and provenance, the supply-chain and CI caches and
-the docs, so the AVR side is built from Ubuntu's own packages alone. Prove the
-images unchanged across the removal.
-
-Dependencies: the 14.3.0 pin. Effort: about 3-4 hours. Risk: Low for the
-images (byte-identical); Medium for the plumbing, which threads through 33
-Makefile lines and the release scripts.
-
 ### T3-toolchain - Broaden compiler and toolchain portability
 
 The v0.9.18 pin is already a modern FSF AVR toolchain (Ubuntu 26.04's avr-gcc
@@ -840,7 +825,6 @@ The stable ID in each row matches exactly one open section above.
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
-| T3-attiny-dfp | ATtiny202 from avr-libc's own device support | 3 | 3-4 h | Medium - distro-native build |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |

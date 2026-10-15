@@ -48,7 +48,7 @@ WHAT IS CHECKED, in three layers.
    toolchain: it measures whatever the tree already built.
 
 An absent build directory is not a failure in the ordinary mode.  `make test`
-runs on runners with no XC8 and no ATtiny_DFP (see .github/workflows/ci.yml), so
+runs on runners with no XC8 and no yasimavr (see .github/workflows/ci.yml), so
 requiring all 21 images would fail exactly where the AVR-only evidence is still
 worth having.  The count of images actually measured is printed, so this mode
 makes no final-candidate claim when it verified nothing.

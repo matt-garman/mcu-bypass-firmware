@@ -68,6 +68,15 @@ tool, re-run `make clean && make test` before relying on its output.
   /usr/bin on PATH. An OBJCOPY= or OBJDUMP= override is reported, not
   enforced.
 
+  ATtiny202:    the part's device support comes with these packages: gcc's
+                device-specs/specs-attiny202, and avr-libc's <avr/iotn202.h>,
+                C runtime and device library. No device pack is needed. Under
+                avr-gcc 14.3.0 the HEX images are byte-identical to builds that
+                inject Microchip's ATtiny_DFP 3.1.260 device files, as v0.9.17
+                and earlier did. Without the device support (avr-gcc 7.3.0
+                predates the part) each ATtiny202 lane skips by name, or fails
+                under STRICT_TOOLS=1.
+
   v0.9.17 and earlier were built with avr-gcc 7.3.0 (avr-libc 2.0.0, binutils
   2.26). scripts/fetch_avr_toolchain.sh installs that historic toolchain from
   SHA-256-pinned Ubuntu 24.04 packages into third_party/avr-toolchain, to
@@ -341,10 +350,9 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 re-run attiny202-test and
                 attiny202-test-target with STRICT_TOOLS=1, soak one combination
                 per output stage for the full release duration, and reproduce
-                the images bit-for-bit from the tag. Both inputs below are
+                the images bit-for-bit from the tag. The yasimavr venv below is
                 therefore REQUIRED to cut a release, not optional.
-  build:        scripts/fetch_yasimavr.sh -- the yasimavr counterpart of
-                scripts/fetch_attiny_dfp.sh.  Builds a PATCHED yasimavr into a
+  build:        scripts/fetch_yasimavr.sh.  Builds a PATCHED yasimavr into a
                 project-local, gitignored venv (third_party/yasimavr/venv) from
                 the pinned sdist (yasimavr==0.1.6, SHA-256 verified) plus the two
                 vendored bug-fix patches in third_party/yasimavr/patches/.
@@ -387,9 +395,9 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 as quiescence.  The pure debounce core keeps its full host +
                 formal coverage regardless.
                 See test/avr/sim_attiny202.py.
-  builds on:    the ATtiny_DFP device files (scripts/fetch_attiny_dfp.sh, pinned
-                atpack) that `make attiny202` needs to COMPILE the image; those
-                are a Microchip download, fetched on demand, not committed.
+  builds on:    the images `make attiny202` COMPILES from avr-gcc 14.3.0's and
+                avr-libc 2.2.1's own ATtiny202 device support (see "AVR
+                toolchain (cross-compile to MCU target)"); no device pack.
 
 == Host toolchain (native test harnesses)
 
@@ -492,22 +500,24 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   ATtiny202 (AVR-XT) build + dynamic harness (`make attiny202`,
   `attiny202-sim` / -fault / -lockstep / -soak; run in normal CI, in release
   qualification, and optionally locally):
-  sudo apt install python3 python3-venv python3-dev g++ curl binutils-avr
-  scripts/fetch_attiny_dfp.sh     # Microchip device files (to build the image)
-  scripts/fetch_yasimavr.sh       # patched yasimavr venv (to run it)
-  # Both are version-pinned, fetched on demand, and NOT committed.  Without them
-  # the attiny202-* targets skip cleanly and `make test` is unaffected (see the
-  # yasimavr entry under "Simulator" above) -- EXCEPT under STRICT_TOOLS=1, which
-  # release qualification uses to turn every such skip into a hard failure.
-  # scripts/make-release.sh asserts both up front and refuses to start without
-  # them, so a release can never ship an ATtiny202 image that no simulator saw.
+  sudo apt install gcc-avr avr-libc python3 python3-venv python3-dev g++ curl binutils-avr
+  scripts/fetch_yasimavr.sh       # patched yasimavr venv (to run the image)
+  # The image builds from avr-gcc's and avr-libc's own ATtiny202 device
+  # support. The venv is version-pinned, fetched on demand, and NOT committed.
+  # Without either the attiny202-* targets skip cleanly and `make test` is
+  # unaffected (see the yasimavr entry under "Simulator" above) -- EXCEPT under
+  # STRICT_TOOLS=1, which release qualification uses to turn every such skip
+  # into a hard failure. scripts/make-release.sh asserts both up front and
+  # refuses to start without them, so a release can never ship an ATtiny202
+  # image that no simulator saw.
   # binutils-avr matters here beyond linking: the harness resolves ctx_ with
   # avr-nm and reads coil-pulse widths back out of the image with avr-objdump.
 
   Before starting the long release pipeline, run `make release-preflight`. It
-  executes the release script's real step 0 — selected compilers/tools, both
-  device packs, simulator headers/import, staging-path writability and executable
-  version probes — and exits before cleaning, building or staging. It also runs
+  executes the release script's real step 0 — selected compilers/tools, the
+  PIC device pack and the ATtiny202 device support, simulator headers/import,
+  staging-path writability and executable version probes — and exits before
+  cleaning, building or staging. It also runs
   short preprocess/link probes for avr-libc, simavr/libelf and both libgpsim C++
   lanes, so installed command names alone are not sufficient. A version is
   optional; `make release-preflight VERSION=vX.Y.Z` also reports local/remote tag
@@ -536,6 +546,10 @@ with its call tree is 86 instructions (it was 84).
                 refuses it as the default compiler and names it. Installed
                 there, it is also the second compiler of `make
                 test-cross-compiler`, which needs it on no PATH at all.
+  ATtiny_DFP:   avr-gcc 7.3.0 predates the ATtiny202, so those releases'
+                ATtiny202 images also need Microchip's device files. Each such
+                release's own tag carries scripts/fetch_attiny_dfp.sh, which
+                vendors them; this tree has no device pack to fetch.
   Ubuntu 24.04: has no avr-gcc 14 package, so it cannot build v0.9.18 or later
                 images natively; use an Ubuntu 26.04 userland, for example a
                 container.
@@ -660,9 +674,8 @@ which accepted the first three of those four drifted versions.
   `scripts/verify_pic_toolchain_cache.sh` re-checks the RESTORED cache against
   that manifest on every CI restore -- the cache bypasses the SHA-verified
   installer -- and rejects a corrupted, incomplete, or symlinked tree before any
-  build or test. The ATtiny_DFP cache is self-verified the same way by
-  `scripts/fetch_attiny_dfp.sh`; the patched yasimavr venv is pinned by sdist
-  version + SHA + patch-set SHA.
+  build or test. The patched yasimavr venv is pinned by sdist version + SHA +
+  patch-set SHA.
 
 Recorded but deliberately NOT pinned:
 

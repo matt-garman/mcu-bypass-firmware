@@ -18,11 +18,11 @@
 #   2026-10-14, a toolchain installed this way rebuilt all 21 v0.9.16 images
 #   bit-for-bit.
 #
-#   Like scripts/fetch_attiny_dfp.sh, nothing binary is committed: the three
-#   packages are fetched on demand, each pinned by SHA-256 and checked before any
-#   byte is extracted, and the extracted tree is pinned by one digest that is
-#   re-verified on every invocation, so a restored or tampered prefix is caught
-#   rather than trusted by its stamp.
+#   Nothing binary is committed: the three packages are fetched on demand,
+#   each pinned by SHA-256 and checked before any byte is extracted, and the
+#   extracted tree is pinned by one digest that is re-verified on every
+#   invocation, so a restored or tampered prefix is caught rather than trusted
+#   by its stamp.
 #
 # USAGE
 #   scripts/fetch_avr_toolchain.sh [DEST_DIR]

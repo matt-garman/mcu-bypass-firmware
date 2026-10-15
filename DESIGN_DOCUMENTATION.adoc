@@ -34,10 +34,10 @@ set.  It is the modern-silicon member of the supported set.
 Trade-offs versus AVR Classic:
 
     * Packaging: the ATtiny202 is surface-mount only (though SOIC-8 to DIP-8 adapters exist)
-    * Vendor "Device Pack": avr-gcc v7.3.0 does not have Microchib's ATtiny_DFP
-      device files, which are required for compilation; it's a free download
-      that is fetched on demand and version pinned (see TOOLCHAIN.adoc).  Note
-      that newer avr-libc (>= 2.2.0) has native ATtiny202 support.
+    * Toolchain: the part needs avr-gcc 14 and avr-libc 2.2, which carry its
+      device support; Ubuntu 26.04 ships both (see TOOLCHAIN.adoc).  Through
+      v0.9.17 the build ran on avr-gcc 7.3.0, which predates the part, and
+      injected Microchip's ATtiny_DFP device files.
     * Simulation: Neither simavr nor QEMU models the AVR8X core, but
       [yasimavr](https://github.com/clesav/yasimavr) exists.  See "Known gaps
       (AVR-XT - hardware-bench only)" in test/README.md for exactly what that
@@ -728,10 +728,10 @@ UDFN-8 only. Of its eight pins, six are I/O: PA4 and PA5 exist in the die's
 PORTA register but are not bonded out on the 8-pin package.
 
 Physical pin numbering below is taken from the `SOIC8` pinout in Microchip's own
-`ATtiny202.atdf` device file, as shipped in the pinned ATtiny_DFP the build uses
-(see `TOOLCHAIN.adoc`) — not from a redrawn diagram. The vendored four-file DFP
-subset does not include the `.atdf`, so re-checking this means reading it out of
-the full atpack.
+`ATtiny202.atdf` device file, as shipped in the ATtiny_DFP 3.1.260 atpack the
+build used through v0.9.17 — not from a redrawn diagram. Neither that build nor
+avr-libc carries the `.atdf`, so re-checking this means reading it out of the
+atpack.
 
 ....
                                         +----+
@@ -1046,7 +1046,7 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** simavr
     * ATtiny202 (AVR-XT)
       ** the same avr-gcc/avr-libc/avrdude toolchain
-      ** ATtiny_DFP device pack (avr-gcc 7.3.0 predates the part)
+      ** device support from avr-gcc 14 and avr-libc 2.2 (no device pack)
       ** yasimavr (simavr and QEMU do not model the AVR8X core)
       ** UPDI programming, not ISP
     * PIC10F322 and PIC10F320

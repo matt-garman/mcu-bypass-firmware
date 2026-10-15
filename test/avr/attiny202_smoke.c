@@ -5,8 +5,8 @@
 //
 // PURPOSE (Phase 0 gate only -- this is NOT the firmware shell):
 //   Prove that the OPEN-SOURCE apt toolchain (gcc-avr / binutils-avr / avr-libc
-//   from Ubuntu universe) plus the vendored ATtiny_DFP device files
-//   (scripts/fetch_attiny_dfp.sh) can compile AND link a real avrxmega3 image
+//   from Ubuntu universe), with the device support avr-gcc 14 and avr-libc 2.2
+//   carry for the part, can compile AND link a real avrxmega3 image
 //   that touches every peripheral group the eventual ATtiny202 shell
 //   (src/bypass_mcu_avr_xt.c, Increment 2) will drive. It is built by
 //   `make attiny202-smoke` with the project's exact strict CFLAGS

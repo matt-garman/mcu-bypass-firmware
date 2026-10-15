@@ -105,9 +105,9 @@ part it validates**:
   member of `make test` and runs on every push, whatever toolchains are
   installed. That includes all three `*-coverage-check-fw` shipping-source
   coverage gates and every fake-tool build regression.
-- A lane that needs XC8, the PIC device packs, gpsim/libgpsim, Microchip's
-  ATtiny_DFP, or the patched `yasimavr` venv skips cleanly when its input is
-  absent, which is correct for local development on one substrate.
+- A lane that needs XC8, the PIC device packs, gpsim/libgpsim, an avr-gcc
+  with ATtiny202 support, or the patched `yasimavr` venv skips cleanly when its
+  input is absent, which is correct for local development on one substrate.
 - A clean skip is fatal in a gate, so CI and release qualification set
   `STRICT_TOOLS=1`, which turns every such skip into a hard failure, and then
   enter through the fail-closed aggregates below, which additionally require
@@ -142,7 +142,7 @@ the tables that follow: the property first, then the commands whose evidence
 discharges it.
 
 Read a green run with two facts in hand. A lane that needs XC8, a PIC device
-pack, gpsim/libgpsim, the ATtiny_DFP or the patched `yasimavr` venv skips by
+pack, gpsim/libgpsim, ATtiny202 support in avr-gcc or the patched `yasimavr` venv skips by
 name when its input is absent and the run still ends `0 failures`;
 `STRICT_TOOLS=1` turns each of those skips into a failure, and
 `make test-strict-tools` is what proves it really does. And three `make test`
@@ -222,12 +222,12 @@ were never affected.
 
 ## ATtiny202 (AVR-XT) target validation layers
 
-The AVR-XT lane needs two inputs a normal AVR machine does not have: Microchip's
-ATtiny_DFP device files to *build* the image (avr-gcc 7.3.0 predated the part;
-the 14.3.0 pin no longer needs them, TODO T3-attiny-dfp) and a patched `yasimavr`
-venv to *run* it (neither simavr nor QEMU models
-the AVR8X core). Both are fetched on demand and version pinned, and every
-`attiny202-*` target skips cleanly without them.
+The AVR-XT lane *builds* its image from the device support avr-gcc 14.3.0 and
+avr-libc 2.2.1 carry for the part (through v0.9.17 avr-gcc 7.3.0 predated it,
+and the build injected Microchip's ATtiny_DFP). It needs one input a normal AVR
+machine does not have: a patched `yasimavr` venv to *run* the image (neither
+simavr nor QEMU models the AVR8X core), fetched on demand and version pinned.
+Every `attiny202-*` target skips cleanly without either.
 
 The split mirrors the PIC lanes: **the host-only rows below are members of
 `make test`** and run everywhere; the simulator rows need the fetched inputs.
@@ -235,13 +235,13 @@ The split mirrors the PIC lanes: **the host-only rows below are members of
 | layer | target | what it proves | substrate |
 |---|---|---|---|
 | Image generation | `test-attiny202-build` | Missing, partial, or malformed avr-gcc output cannot become an ATtiny202 image; exactly one valid `Program:` and `Data:` record is required, with the 2048-byte flash and 16-of-128-byte static-RAM limits enforced per variant, and each supported variant pinned to its exact selector/driver pair. | host fake-compiler regression |
-| Shell stack frames | `attiny202-test-stack-bound`; `test-stack-bound-regression` | The real AVR-XT shell is compiled once per immutable production variant with shipping flags plus `-fstack-usage`, and every fresh static frame must fit 32 bytes. The host regression pins the routing and rejects missing, malformed, dynamic, stale, extra, and oversized evidence without requiring the DFP. | avr-gcc + ATtiny_DFP; host fake compiler |
+| Shell stack frames | `attiny202-test-stack-bound`; `test-stack-bound-regression` | The real AVR-XT shell is compiled once per immutable production variant with shipping flags plus `-fstack-usage`, and every fresh static frame must fit 32 bytes. The host regression pins the routing and rejects missing, malformed, dynamic, stale, extra, and oversized evidence without requiring a real compiler. | avr-gcc 14 + avr-libc 2.2; host fake compiler |
 | Fuse configuration | `test-fuses` | All seven AVR8X fuse bytes match design intent, and the simulator's descriptor is patched to those exact production values rather than falling back to defaults. | host parser |
 | Golden-model bridge | `test-attiny202-model-ffi` | The ctypes bridge reaches the shipping pure core and behaves correctly at the `>=` press-threshold boundary, both saturation bounds, the lock-out, and a full round trip — against independent hard-coded expectations, not another comparison with the model. | host |
 | Output-sequence oracle | `test-attiny202-output-oracle` | The PA2/PA3 transition, ordering and pulse-presence checker is itself correct. | host |
 | Fault accounting oracle | `test-attiny202-fault-oracle` | The fault driver's run accounting cannot silently under-count injections, latch-only physical-pin handling is rejected, and the reviewed AVR-XT/PIC12F675 emergency register-write order is pinned. | host |
 | Coil-pulse width / ISR ceiling | `attiny202-delay-oracle` | The relay and mute delay widths *compiled into the image*, recovered from the disassembled `_delay_ms` loop, match design and clear the datasheet minimum. The sole `reti` handler and its complete direct call tree stay within the reviewed instruction ceiling, bounding the ISR's duty cycle below 25% of the tick; recursion, unresolved or indirect transfers, and cyclic control flow fail closed. | host, over real image |
-| Static analysis | `attiny202-analyze` | cppcheck + MISRA run the reviewed AVR-XT rows with real DFP/avr-libc headers: both shell branches, the pure core, and every matching-selector driver. | host tools |
+| Static analysis | `attiny202-analyze` | cppcheck + MISRA run the reviewed AVR-XT rows with real avr-libc headers: both shell branches, the pure core, and every matching-selector driver. | host tools |
 | Register-level functional | `attiny202-sim` | The real image toggles on debounced press, boots dark with the WDT locked and `PORTA.DIR` exact, stays stable at idle, handles a switch held through power-on, and drives the correct PA2/PA3 sequence per variant, including delivered pulse width. | yasimavr |
 | Fault response | `attiny202-fault` | Every injected SFR, latch, state and pin-polarity corruption produces the correct response: the sanity gate's force-reset path, a witnessed watchdog reset for the tick timer itself, safe overwrite at the ISR/main persisted-context transaction seams, or relay-coil escalation with modeled PA2/PA3 levels low and OUT/DIR/PINnCTRL canonical before the spin. Zero skips, with exact completion accounting over the whole matrix. | yasimavr |
 | Firmware/model lock-step | `attiny202-lockstep` | `ctx_` in simulated SRAM equals the shipping core's state after **every settled tick**, over both boot scenarios, plus LED and settled control-line agreement. Catches a shell defect on the tick it happens rather than as a wrong output later. | yasimavr + host core via ctypes |
@@ -475,7 +475,7 @@ They are host-only fake-tool regressions unless stated otherwise, so they run in
 | Published release immutability | `test-published-release-immutability` | The signed tag is the immutable identity of the original release; the retained development-branch copy must match it except at explicitly registered amendment paths. Every release's own `SHA256SUMS` is re-verified, while files outside that list are held to `published_release_digests.txt`. A future artifact commit must append exactly the canonical registry block generated after checksum signing, and the two lists must partition each directory exactly. Nothing under `release/` may be a symbolic link. Where tags are present, direct tree comparison rejects every difference outside the amendment register and also rejects a registered difference that is no longer present. The v0.9.0-v0.9.2 TMUX safety warnings are confined to six unsigned result-record files; their images, checksums, signatures, tags, and original publication identity remain unchanged. Image continuity is independently declared and recomputed so deliberate republication cannot hide accidental restaging; prerelease ordering determines which newest release may temporarily owe that declaration. | Python + Git tags where present |
 | PIC12F675 flashing helper | `test-pic12f675-flash-helper` | The release-shipped `scripts/flash-pic12f675.py` is driven against a stateful fake programmer whose device memory persists across invocations. The accepted transaction is exactly version probe, baseline read, immediate re-read, durable reservation, one write, final read, and every fail-closed precondition is driven individually and must reach no write vector at all: an image absent from or mismatching the signed checksums, a missing manifest or signature, an unreleased or symlinked image, an image that would program the calibration word or write EEPROM, and a device whose identity or trim does not match its baseline. | Python + stateful fake programmer |
 | yasimavr venv fetch safety | `test-fetch-yasimavr` | Caller-selected destinations are canonicalized and cannot name roots, symlinks, files, or unstamped directories. Offline fake tools prove a failed build preserves the old owned venv and that only a fully verified sibling tree is renamed into place. | Bash + synthetic toolchain |
-| External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before any privileged install, installation must produce all three required device headers, restored ATtiny_DFP files are re-hashed, and yasimavr dependencies are wheel- and hash-locked and built without dependency resolution. The workflows' single installer and hash-sensitive cache keys are held by `test-workflow-syntax`. The cache manifest is produced by separately status-checked stages, so a scan, ordering or hashing failure is reported by name instead of being masked by the stage after it, and hostile filenames must survive inventory, comparison and tamper detection. | Bash + fixtures |
+| External supply-chain integrity | `test-supply-chain` | XC8 and PIC DFP bytes must match reviewed hashes before any privileged install, installation must produce all three required device headers, and yasimavr dependencies are wheel- and hash-locked and built without dependency resolution. The workflows' single installer and hash-sensitive cache keys are held by `test-workflow-syntax`. The cache manifest is produced by separately status-checked stages, so a scan, ordering or hashing failure is reported by name instead of being masked by the stage after it, and hostile filenames must survive inventory, comparison and tamper detection. | Bash + fixtures |
 
 The release-input coverage of the image and preflight rows extends to Make
 itself: the real Makefile rejects direct source and flag assignments for every
@@ -508,7 +508,7 @@ rather than a built image. They need no toolchain and are members of `make test`
 | `test-resource-tables` | Every image the tree has already built measures at or below the reviewed ceiling its own build gate enforces, and no reviewed ceiling is wider than the silicon it bounds. The ceilings are read from the Makefile that declares them, with exactly one assignment required before its decimal-constant form is accepted, so no document has to restate a measurement and no later computed reassignment can change the effective policy unseen. The release-only strict mode additionally requires the complete released image set plus retained RAM and stack evidence, with every record checked against its own arithmetic and against the limit it reports, bound to the source HEAD. Strict mode emits every figure it measured as one `RESOURCE_*` record per published value rather than reducing them to counts, and the release renders its resource tables from those records instead of deriving its own. Three agreements are required before a figure is published: the two AVR static-data oracles (allocated ELF sections, and the SRAM map the simulated canary gate derives from the device's symbols) must agree, a part's variants must agree before one static figure stands for the part, and the PIC12F675 qualified build and its reproducibility rebuild must agree on Data space. |
 | `test-pinout-alignment` | Every ASCII package-pinout diagram draws a square box: each row's walls sit in the columns the corner rows put them in. |
 | `test-static-assert-guards` | Every modular shell carries an anchored, uncommented direct include of the shared compile-time checks. Selected reachable shared and Classic-AVR predicates fail when their inputs are broken. Near-bound fixtures pin the watchdog pet-to-pet budget to its exact millisecond, convert wall-time ISR duty independently, prove the ISR, tick and loop terms are all load-bearing, and reject the former mixed formula. Its separate census counts every guard in every MCU shell, including the ones only a target toolchain can compile, so a changed per-file declaration count is reported on a host that has no XC8; the census does not prove the semantics of unmutated predicates. |
-| `test-attiny202-guard-mutations` | Selected ATtiny202 pin ordinals, all three enum widths, tick derivation, clock and watchdog budgets fail the build when broken -- under avr-gcc with the vendored device pack, because the pin asserts read `<avr/io.h>` and the budget is computed from that part's floor, tick and ISR duty. Losing the part selector is caught rather than silently taken for a classic AVR. |
+| `test-attiny202-guard-mutations` | Selected ATtiny202 pin ordinals, all three enum widths, tick derivation, clock and watchdog budgets fail the build when broken -- under avr-gcc 14 with avr-libc's device support, because the pin asserts read `<avr/io.h>` and the budget is computed from that part's floor, tick and ISR duty. Losing the part selector is caught rather than silently taken for a classic AVR. |
 | `test-pic-guard-mutations` | The corresponding selected proof for the PIC10F322, PIC12F675 and self-contained PIC10F320 shells under XC8: representative pin ordinals against the device pack, the GP3/GP4 spare-pin family, `_XTAL_FREQ`, a PIC10F320 duplicated threshold invariant and its branch-local pin guards, and each part's watchdog budget pinned to its exact millisecond. Configurations the firmware still accepts in silence are recorded here too, so the guard that closes one has to be proven load-bearing when it lands. |
 | `test-deliberate-duplication` | The register of duplications that are second opinions rather than untidiness, and the structural witness for each: the self-contained PIC10F320 shell reaches no header this tree owns, every part states its own pin ordinals and its own four watchdog terms as literals, each shell owns its main loop, the AVR shells stay interrupt-driven and the PIC shells polled, the clock is only ever tested by the firmware and never supplied by it, the PIC harnesses keep their register facts literal, both PIC return-stack witnesses read different artifacts, every verification layer is still wired to a subject of its own, and the pinned release identity is still spelled in literals rather than composed from the build variables it exists to check. Lexical, so it reports a fold on any host. |
 | `test-fuse-injection-contract` | Every fuse byte the Makefile burns is the byte the `-D`-injected checker verifies; stdout alone carries queried values, while stderr is retained as diagnostic context. |
@@ -569,8 +569,8 @@ source paths it is scoped to.
 ## Mutation testing and skipped optional tools
 
 `make test-mutation` includes PIC mutants whose kill targets need XC8, gpsim and
-libgpsim, plus ATtiny202 mutants whose kill targets need the vendored ATtiny_DFP
-and the patched yasimavr venv. A local host without those tools may run an
+libgpsim, plus ATtiny202 mutants whose kill targets need avr-gcc's ATtiny202
+support and the patched yasimavr venv. A local host without those tools may run an
 explicitly partial suite with `MUTATION_ALLOW_SKIP=1`; that is the non-strict
 default so development on one substrate stays practical. Selective partial runs
 use `MUTATION_ALLOW_SKIP=PIC`, `ATtiny202`, or the canonical combined value
@@ -660,14 +660,15 @@ than its source makes Make skip the rebuild and score a mutant against unmutated
 code), and it must never require a **Git repository**, because these sandboxes
 have no `.git`.
 
-**The ATtiny202 lane carries one extra hazard.** `XT_DFP` and `YASIMAVR_VENV`
-both default to paths *relative* to the tree, which is exactly wrong inside a
-sandbox: `make -C "$work"` would resolve them under the sandbox, find nothing,
-and every `attiny202-*` target would skip cleanly with status 0 — scored as a
-survivor for every mutant in the lane. The driver therefore passes both in as
-absolute paths, sharing the read-only toolchain while keeping sources sandboxed,
-and the probe refuses to enable the lane unless both resolve *and* each distinct
-kill target passes on the unmutated sandbox.
+**The ATtiny202 lane carries one extra hazard.** `YASIMAVR_VENV` defaults to a
+path *relative* to the tree, which is exactly wrong inside a sandbox:
+`make -C "$work"` would resolve it under the sandbox, find nothing, and every
+`attiny202-*` target would skip cleanly with status 0 — scored as a survivor
+for every mutant in the lane. The driver therefore passes it in as an absolute
+path, sharing the read-only toolchain while keeping sources sandboxed, and the
+probe refuses to enable the lane unless it and the compiler's ATtiny202 device
+support (the `XT_SPEC_FILE` and `XT_IO_HEADER` the guards test) resolve *and*
+each distinct kill target passes on the unmutated sandbox.
 
 ## Known gaps (PIC — hardware-bench only)
 
