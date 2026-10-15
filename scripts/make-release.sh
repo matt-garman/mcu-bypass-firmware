@@ -1447,7 +1447,7 @@ require_pinned_compiler() {
 The released images are byte-gated against this exact compiler; refusing to start a release with a drifted image-defining toolchain."
 }
 
-require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 7.3.0 7.3.0
+require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 14.3.0 14.3.0
 require_pinned_compiler "PIC10F322/PIC12F675 XC8" PIC_CC "$PIC_CC" "$TC_XC8_322" 3.10 V3.10
 require_pinned_compiler "PIC10F320 XC8" PIC10F320_CC "$PIC10F320_CC" "$TC_XC8_320" 3.10 V3.10
 

@@ -4,14 +4,14 @@
 # the third prerequisite gate, after test/python_version.py and
 # test/host_compiler_version.sh.
 #
-# avr-gcc 7.3.0 is an image-defining pin. scripts/make-release.sh refuses to
-# start a release with any other, and every AVR gate is qualified against it.
-# Nothing in `make test` checked it, so a host whose distribution ships a newer
-# avr-gcc met the pin as an unrelated-looking error well into the suite. On
-# Ubuntu 26.04 (avr-gcc 14, avr-libc 2.2.1) that error was
-# test-static-assert-guards reporting the UNMUTATED Classic shell as
-# uncompilable, over a -Wsign-conversion inside avr-libc's set_sleep_mode().
-# Nothing in it pointed at the compiler.
+# avr-gcc 14.3.0, Ubuntu 26.04's own gcc-avr, is an image-defining pin.
+# scripts/make-release.sh refuses to start a release with any other, and every
+# AVR gate is qualified against it. Before this gate nothing in `make test`
+# checked it, so a host with another avr-gcc met the pin as an
+# unrelated-looking error well into the suite. When the pin was 7.3.0, Ubuntu
+# 26.04's avr-gcc 14 made test-static-assert-guards report the UNMUTATED
+# Classic shell as uncompilable, over a -Wsign-conversion inside avr-libc's
+# set_sleep_mode(); nothing in that error pointed at the compiler.
 #
 # Policy. The Makefile passes three facts and this script decides:
 #   - lenient (STRICT_TOOLS empty): nothing is enforced; exit 0 silently.
@@ -36,9 +36,8 @@ set -euo pipefail
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 # The release pin. test/test_release_preflight.sh holds it equal to the
-# require_pinned_compiler line in scripts/make-release.sh and to
-# scripts/fetch_avr_toolchain.sh's VERSION_LINE.
-AVR_GCC_PIN=7.3.0
+# require_pinned_compiler line in scripts/make-release.sh.
+AVR_GCC_PIN=14.3.0
 
 usage() {
 	echo "usage: avr_compiler_version.sh CC CC_ORIGIN strict|lenient" >&2
@@ -68,32 +67,33 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../scripts/release-provenance.sh
 . "$ROOT/scripts/release-provenance.sh"
 
-# The project-local install scripts/fetch_avr_toolchain.sh produces, named in
-# the corrective action. A stamped prefix that is not first on PATH gets told
-# that, rather than told to install what is already there.
-TOOLCHAIN_BIN="$ROOT/third_party/avr-toolchain/usr/bin"
-TOOLCHAIN_STAMP="$ROOT/third_party/avr-toolchain/.avr-toolchain.stamp"
+# scripts/fetch_avr_toolchain.sh installs the historic avr-gcc 7.3.0 here: it
+# rebuilds v0.9.17 and earlier, and is T25's comparison compiler. Left first on
+# PATH from that work, it shadows the pin, and the diagnostic says so by name.
+HISTORIC_BIN="$ROOT/third_party/avr-toolchain/usr/bin"
 
 refuse() {
 	{
 		echo "FAIL: STRICT_TOOLS=1 requires the release-pinned avr-gcc $AVR_GCC_PIN as CC; $1"
 		echo "      Every AVR image, and every gate that compiles one, is qualified against exactly"
-		echo "      avr-gcc $AVR_GCC_PIN, and scripts/make-release.sh refuses any other. On a host whose"
-		echo "      packages are newer (Ubuntu 26.04 and later; TOOLCHAIN.adoc, \"Hosts newer than"
-		echo "      Ubuntu 24.04\"), use the pinned toolchain, first on PATH so avr-size and"
-		echo "      avr-objcopy come from it as well:"
-		if [ -f "$TOOLCHAIN_STAMP" ] && [ -x "$TOOLCHAIN_BIN/avr-gcc" ]; then
-			echo "        export PATH=\"$TOOLCHAIN_BIN:\$PATH\"    # installed, but not first on PATH"
-		else
-			echo "        scripts/fetch_avr_toolchain.sh"
-			echo "        export PATH=\"$TOOLCHAIN_BIN:\$PATH\""
-		fi
+		echo "      avr-gcc $AVR_GCC_PIN, and scripts/make-release.sh refuses any other. It is Ubuntu"
+		echo "      26.04's own AVR toolchain (TOOLCHAIN.adoc), and nothing earlier on PATH may"
+		echo "      shadow it, so that avr-size and avr-objcopy come from it as well:"
+		echo "        sudo apt install gcc-avr avr-libc binutils-avr"
+		case "$resolved" in
+			"$HISTORIC_BIN"/*)
+				echo "      The CC that won is the historic avr-gcc 7.3.0 from"
+				echo "      scripts/fetch_avr_toolchain.sh, which rebuilds v0.9.17 and earlier."
+				echo "      Take $HISTORIC_BIN off PATH."
+				;;
+		esac
 		echo "      To run the suite on another compiler deliberately, select it with CC= on the"
 		echo "      command line; this gate then reports it and does not enforce the pin."
 	} >&2
 	exit 1
 }
 
+resolved=
 if ! resolved=$(command -v -- "$CC"); then
 	refuse "CC=$CC was not found."
 fi

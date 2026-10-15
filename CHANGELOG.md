@@ -54,15 +54,15 @@ lengths.
 
 ### Added
 
-- **Ubuntu 26.04 hosts pass every gate natively.** `scripts/fetch_avr_toolchain.sh`
-  installs the pinned avr-gcc 7.3.0 toolchain from SHA-256-pinned Ubuntu 24.04
-  packages, re-verifying the installed tree on every run, and
-  `scripts/fetch_yasimavr.sh` builds the patched yasimavr on 26.04's own CPython
-  3.14: its lock moves to PyYAML 6.0.3, the first release with 3.14 wheels, and
-  `YASIMAVR_PYTHON` selects another interpreter. cppcheck 2.19, clang-tidy 21
-  and uutils coreutils are
-  accommodated (MISRA record D-6 for the analyzer artifacts). Releases are still
-  qualified on Ubuntu 24.04; see `TOOLCHAIN.adoc`, "Hosts newer than Ubuntu 24.04".
+- **Ubuntu 26.04 hosts pass every gate natively.** `scripts/fetch_yasimavr.sh`
+  builds the patched yasimavr on 26.04's own CPython 3.14: its lock moves to
+  PyYAML 6.0.3, the first release with 3.14 wheels, and `YASIMAVR_PYTHON`
+  selects another interpreter. cppcheck 2.19, clang-tidy 21 and uutils
+  coreutils are accommodated (MISRA record D-6 for the analyzer artifacts).
+  `scripts/fetch_avr_toolchain.sh` installs the historic avr-gcc 7.3.0 from
+  SHA-256-pinned Ubuntu 24.04 packages, re-verifying the installed tree on every
+  run, to reproduce v0.9.17 and earlier; see `TOOLCHAIN.adoc`, "Ubuntu 24.04 and
+  releases before v0.9.18".
 - **The AVR firmware also builds under avr-gcc 14.** Each AVR shell's
   `set_sleep_mode()` suppression names `-Wsign-conversion` as well, where avr-gcc
   14 files the warning 7.3.0 filed under `-Wconversion`. The size recipes use
@@ -71,6 +71,20 @@ lengths.
   keeps assembler-local labels, as avr-gcc 14's do, and now also refuses a delay
   loop that any branch or skip can enter past its seed. Under avr-gcc 7.3.0
   every image is byte-identical.
+
+### Changed
+
+- **The AVR images are built with Ubuntu 26.04's own avr-gcc 14.3.0.** The
+  image-defining AVR compiler moves from avr-gcc 7.3.0 to Ubuntu 26.04's avr-gcc
+  14.3.0 (avr-libc 2.2.1, binutils 2.45), and CI and release CI move to
+  `ubuntu-26.04` runners. Every AVR image changes: the nine Classic images are
+  20 B smaller, and the three ATtiny202 images 28-44 B smaller. The PIC images
+  are unchanged. The ATtiny202 tick ISR with its call tree is 86 instructions,
+  so its reviewed ceiling moves from 84 to 86, a bound of 360 of 2000 cycles,
+  inside the 25% duty allowance; the Classic tick ISR takes 144 cycles (it took
+  142). `avr-compiler-valid` and `scripts/make-release.sh` hold the new pin, and
+  name the historic 7.3.0 prefix if it shadows the pin on `PATH`. cppcheck 2.19,
+  the release analyzer from here on, applies MISRA record D-6.
 
 ### Fixed
 
@@ -84,7 +98,7 @@ lengths.
   Make function ran at the first parse-time probe, before any guard could refuse
   it. The Makefile now withholds dollar-bearing command-line values from child
   environments first, and the guards hold under Make 4.3 and 4.4. CI and release
-  run 4.3 and were not affected.
+  ran 4.3 through v0.9.17 and were not affected.
 - **Two gate families ignored AVR and PIC tool overrides.** `test-static-assert-guards`
   and the ATtiny202/PIC guard-mutation gates re-derived their compilers with
   `MAKEFLAGS` stripped, so a `CC=` or device-pack override never reached them;
@@ -97,8 +111,8 @@ lengths.
   the AVR rows name the executables actually resolved. Both rows read
   differently from v0.9.18 on.
 - **`make test STRICT_TOOLS=1` never checked the avr-gcc pin.** Only a release
-  did, so on a host whose default avr-gcc is not 7.3.0 the suite failed well into
-  its run: `test-static-assert-guards` reported the unmutated Classic shell as
+  did, so on a host whose default avr-gcc was off the pin the suite failed well
+  into its run: `test-static-assert-guards` reported the unmutated Classic shell as
   uncompilable. The new `avr-compiler-valid`, third in each aggregate, refuses
   that compiler before anything compiles and names the fix. A `CC=` override is
   reported and not enforced.

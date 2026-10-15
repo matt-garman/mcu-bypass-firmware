@@ -2,20 +2,20 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) Matthew Garman
 #
-# fetch_avr_toolchain.sh -- install the release-pinned AVR toolchain (avr-gcc
-# 7.3.0, binutils-avr 2.26, avr-libc 2.0.0) into a project-local prefix on a host
-# whose distribution no longer ships it.
+# fetch_avr_toolchain.sh -- install the historic AVR toolchain (avr-gcc 7.3.0,
+# binutils-avr 2.26, avr-libc 2.0.0) into a project-local prefix.
 #
 # WHY THIS EXISTS
-#   avr-gcc 7.3.0 is an image-defining release pin: scripts/make-release.sh
-#   refuses any other version, and the tag-triggered CI rebuilds on ubuntu-24.04
-#   and compares every image byte for byte. Ubuntu 26.04 ships avr-gcc 14,
-#   avr-libc 2.2.1 and binutils 2.43+, which produce different images (and whose
-#   avr-size has no Atmel `-C`). The pinned packages are the ones Ubuntu 24.04
-#   (noble) ships, and they run unchanged from a prefix: the compiler locates
-#   its assembler, linker, headers and libraries relative to its own path.
-#   Measured on 2026-10-14, a toolchain installed this way rebuilt all 21 v0.9.16
-#   images bit-for-bit.
+#   avr-gcc 7.3.0 built every release up to v0.9.17, and their published images
+#   are byte-defined by it. From v0.9.18 the image-defining compiler is Ubuntu
+#   26.04's own avr-gcc 14.3.0 (TOOLCHAIN.adoc), which produces different
+#   images, so 7.3.0 is no longer on any supported distribution's shelf. This
+#   installs it to reproduce those releases, and as the comparison compiler for
+#   T25-cross-compiler. The packages are the ones Ubuntu 24.04 (noble) ships,
+#   and they run unchanged from a prefix: the compiler locates its assembler,
+#   linker, headers and libraries relative to its own path. Measured on
+#   2026-10-14, a toolchain installed this way rebuilt all 21 v0.9.16 images
+#   bit-for-bit.
 #
 #   Like scripts/fetch_attiny_dfp.sh, nothing binary is committed: the three
 #   packages are fetched on demand, each pinned by SHA-256 and checked before any
@@ -26,9 +26,12 @@
 # USAGE
 #   scripts/fetch_avr_toolchain.sh [DEST_DIR]
 #     DEST_DIR  install prefix (default: ./third_party/avr-toolchain). The tools
-#               land in DEST_DIR/usr/bin; put that FIRST on PATH so every avr-*
-#               tool, including the ones gates run by name, is the pinned one:
+#               land in DEST_DIR/usr/bin; to rebuild a release up to v0.9.17,
+#               put that FIRST on PATH so every avr-* tool, including the ones
+#               gates run by name, is the historic one:
 #                 export PATH="$PWD/third_party/avr-toolchain/usr/bin:$PATH"
+#               Take it off PATH for current work: under STRICT_TOOLS=1 `make
+#               test` refuses it as the default compiler and names it.
 #   Env overrides (for isolated regression fixtures): AVR_TOOLCHAIN_URL_BASE,
 #   AVR_TOOLCHAIN_DEBS, AVR_TOOLCHAIN_TREE_SHA256, AVR_TOOLCHAIN_VERSION_LINE.
 #
@@ -38,7 +41,7 @@
 # Archive Automatic Signing Key (2018).
 #
 # EXIT STATUS
-#   0  the pinned toolchain is present and verified (freshly installed or cached)
+#   0  the historic toolchain is present and verified (freshly installed or cached)
 #   1  a required tool is missing, or download, verification or install failed
 
 set -eu
@@ -101,7 +104,7 @@ DEST_PARENT=$(dirname -- "$DEST")
 [ -d "$DEST_PARENT" ] || die "DEST_DIR parent does not exist: ${DEST_PARENT}"
 
 if installed; then
-    log "pinned AVR toolchain already installed in ${DEST} (verified stamp + tree digest); nothing to do."
+    log "historic AVR toolchain already installed in ${DEST} (verified stamp + tree digest); nothing to do."
     printf 'AVR_TOOLCHAIN_BIN=%s/usr/bin\n' "$DEST"
     exit 0
 fi
@@ -188,7 +191,7 @@ else
     mv -T -- "$STAGE" "$DEST" || die "could not install ${DEST}"
 fi
 STAGE=
-log "Installed the pinned AVR toolchain (${VERSION_LINE}) into ${DEST}."
-log "Put it first on PATH so every avr-* tool is the pinned one:"
+log "Installed the historic AVR toolchain (${VERSION_LINE}) into ${DEST}."
+log "To rebuild a release up to v0.9.17, put it first on PATH so every avr-* tool is the historic one:"
 log "  export PATH=\"$(cd "$DEST" && pwd -P)/usr/bin:\$PATH\""
 printf 'AVR_TOOLCHAIN_BIN=%s/usr/bin\n' "$DEST"

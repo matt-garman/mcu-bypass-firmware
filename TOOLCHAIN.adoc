@@ -18,15 +18,16 @@ tool, re-run `make clean && make test` before relying on its output.
 == Development platform
 
   OS:           Linux 6.12.33 (TrueNAS production kernel), x86_64
-  Distribution: Ubuntu 24.04 (Noble) base packages, which CI, release CI and
-                release qualification run. The development host moved to
-                Ubuntu 26.04 on 2026-10-14; see "Hosts newer than Ubuntu 24.04".
+  Distribution: Ubuntu 26.04 LTS base packages, which CI, release CI and
+                release qualification run from v0.9.18 on. v0.9.17 and earlier
+                were qualified on Ubuntu 24.04; see "Ubuntu 24.04 and releases
+                before v0.9.18".
 
   flock:        util-linux (required). Complete Make and direct release-script
                 invocations use one worktree-local advisory lock because build,
                 test, coverage, and simulator artifacts are intentionally shared.
-  timeout:      GNU coreutils (required). Mutation and simulator checks use
-                bounded wall-clock execution.
+  timeout:      coreutils (required): uutils 0.10 on 26.04, GNU on 24.04.
+                Mutation and simulator checks use bounded wall-clock execution.
   setsid:       util-linux (required). Each bounded mutation checker owns an
                 isolated process session for descendant cleanup.
   ps:           procps (required). Mutation interruption cleanup enumerates the
@@ -43,18 +44,25 @@ tool, re-run `make clean && make test` before relying on its output.
 
 == AVR toolchain (cross-compile to MCU target)
 
-  avr-gcc:      7.3.0  (package: gcc-avr)
-  avr-libc:     2.0.0+Atmel3.7.0-1  (package: avr-libc)
+  avr-gcc:      14.3.0  (package: gcc-avr 1:14.2.0-2build1, which reports 14.3.0)
+  avr-libc:     2.2.1  (package: avr-libc 1:2.2.1-1build1)
+  binutils-avr: 2.45.50.20251209  (package: binutils-avr 2.43.50.20250108-1build1)
   avrdude:      not installed on build host; flash via dedicated programming
                 host/rig.  Recommended: avrdude 6.3 or 7.x with USBasp or
                 similar ISP programmer.
 
   Minimum avr-gcc version: 4.9 (for _Static_assert / C11 support with -std=gnu11)
-  Recommended: 7.x or later (best -fshort-enums / LTO support for tiny parts)
+  Pinned: exactly 14.3.0, the image-defining compiler. Under STRICT_TOOLS=1,
+  `make test` refuses any other default avr-gcc up front (avr-compiler-valid,
+  test/avr_compiler_version.sh), and scripts/make-release.sh refuses to start.
+  Nothing earlier on PATH may shadow these packages: the gate names the
+  historic prefix below if it wins, and a CC= override is reported, not
+  enforced.
 
-  On a host whose distribution no longer ships these three packages,
-  scripts/fetch_avr_toolchain.sh installs the same noble packages into
-  third_party/avr-toolchain; see "Hosts newer than Ubuntu 24.04".
+  v0.9.17 and earlier were built with avr-gcc 7.3.0 (avr-libc 2.0.0, binutils
+  2.26). scripts/fetch_avr_toolchain.sh installs that historic toolchain from
+  SHA-256-pinned Ubuntu 24.04 packages into third_party/avr-toolchain, to
+  reproduce those releases; see "Ubuntu 24.04 and releases before v0.9.18".
 
 == PIC toolchain (PIC10F322, PIC10F320 and PIC12F675, optional second toolchain)
 
@@ -192,7 +200,7 @@ license or hand-written assembly, neither of which this project will take.
                 `make pic10f320-test-build` rebuilds the complete image matrix and
                 fails unless every raw HEX file matches that reviewed baseline.
 
-  cppcheck:     2.13.0  (the SAME binary as the AVR analysis, below)
+  cppcheck:     2.19.0  (the SAME binary as the AVR analysis, below)
                  `make pic10f322-analyze` runs the shell, pure core, and all
                  three modular drivers with --platform=pic8-enhanced over the
                  real XC8 + DFP register headers.  No install beyond the
@@ -372,8 +380,8 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
 
 == Host toolchain (native test harnesses)
 
-  gcc:          13.3.0  (Ubuntu 13.3.0-6ubuntu2~24.04.1)
-  clang:        18.1.3  (Ubuntu LLVM 18.1.3, package: clang-18)
+  gcc:          15.2.0  (Ubuntu 15.2.0-16ubuntu1)
+  clang:        21.1.8  (Ubuntu clang 21.1.8)
 
   Either compiler works for all test/* host binaries.  The Makefile uses gcc
   by default (HOSTCC ?= gcc); set HOSTCC=clang to override.
@@ -397,13 +405,13 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   image-defining avr-gcc/XC8 pins below, which are exact-version contracts.
   The avr-gcc pin has its own gate, run third: under STRICT_TOOLS=1,
   `make avr-compiler-valid` (test/avr_compiler_version.sh) refuses a default
-  avr-gcc that is not exactly 7.3.0; see "Hosts newer than Ubuntu 24.04".
+  avr-gcc that is not exactly 14.3.0.
 
 == Static analysis
 
-  clang-tidy:   18.1.3  (from LLVM 18 packages)
-  cppcheck:     2.13.0  (Ubuntu package: cppcheck)
-  clang --analyze: provided by clang 18 (no separate install)
+  clang-tidy:   21.1.8  (Ubuntu LLVM 21.1.8, package: clang-tidy)
+  cppcheck:     2.19.0  (Ubuntu package: cppcheck)
+  clang --analyze: provided by clang 21 (no separate install)
 
   All three are wired into `make analyze`; that target's cppcheck/MISRA portion
   runs the ten Classic rows.  The standalone AVR-XT and PIC analyzer targets
@@ -442,11 +450,11 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 installs KLEE or invokes `test-symbolic-klee`; adding that lane
                 remains an open item in TODO.md.
 
-== Reproducing the environment (Ubuntu 24.04)
+== Reproducing the environment (Ubuntu 26.04)
 
   sudo apt install make util-linux git gnupg python3 python3-yaml \
-                   gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
-                   gcc clang clang-tidy cppcheck
+                   gcc-avr avr-libc binutils-avr simavr libsimavr-dev libelf-dev \
+                   gcc clang clang-tidy cppcheck cbmc
 
   Optional analysis tools:
   sudo apt install valgrind lcov gcovr
@@ -490,37 +498,33 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   optional; `make release-preflight VERSION=vX.Y.Z` also reports local/remote tag
   and output-directory conflicts as warnings.
 
-== Hosts newer than Ubuntu 24.04
+== Ubuntu 24.04 and releases before v0.9.18
 
-Measured on Ubuntu 26.04.1 on 2026-10-14. The versions recorded above are the
-Ubuntu 24.04 ones that CI, release CI and release qualification still run. A
-newer host passes `make test` and every release target lane once two things
-are in place:
+v0.9.17 and earlier were built and qualified on Ubuntu 24.04, with avr-gcc
+7.3.0, avr-libc 2.0.0 and binutils 2.26 (gcc 13, clang/clang-tidy 18, cppcheck
+2.13, Python 3.12). From v0.9.18 the image-defining AVR compiler is Ubuntu
+26.04's avr-gcc 14.3.0, so the AVR images differ from v0.9.17's: Classic images
+are 20 B smaller, ATtiny202 images 28-44 B smaller, and the ATtiny202 tick ISR
+with its call tree is 86 instructions (it was 84).
 
-  Pinned AVR toolchain:
-                26.04 ships avr-gcc 14, avr-libc 2.2.1 and binutils 2.43 or
-                later. They build different images, and that avr-size has no
-                Atmel `-C`, which the size and flash-budget recipes use.
-                scripts/fetch_avr_toolchain.sh installs the pinned noble
-                packages (each SHA-256-verified before extraction, the installed
-                tree re-verified against one digest on every run) into
-                third_party/avr-toolchain. Put its usr/bin first on PATH, so
-                every avr-* tool is the pinned one, including those a gate runs
-                by name:
+  Historic AVR toolchain:
+                scripts/fetch_avr_toolchain.sh installs the 7.3.0 packages
+                (each SHA-256-verified before extraction, the installed tree
+                re-verified against one digest on every run) into
+                third_party/avr-toolchain. With its usr/bin first on PATH,
+                every avr-* tool is the historic one, including those a gate
+                runs by name; that way it rebuilt all 21 v0.9.16 images
+                bit-for-bit:
                   scripts/fetch_avr_toolchain.sh
                   export PATH="$PWD/third_party/avr-toolchain/usr/bin:$PATH"
-                Installed this way, it rebuilt all 21 v0.9.16 images
-                bit-for-bit. Under STRICT_TOOLS=1, `make test` refuses up
-                front (avr-compiler-valid, test/avr_compiler_version.sh) when
-                the default avr-gcc is not exactly the pin, and prints these
-                two lines; a CC= override is reported and not enforced.
-  yasimavr:     builds on 26.04's own python3 (3.14) since the lock moved to
-                PyYAML 6.0.3, the first release with 3.14 wheels.
-  Packages:     the upgrade from 24.04 removed libglib2.0-dev (every PIC fault
-                lane needs it) and python3-venv; reinstall both.
+                Take it off PATH again for current work: avr-compiler-valid
+                refuses it as the default compiler and names it.
+  Ubuntu 24.04: has no avr-gcc 14 package, so it cannot build v0.9.18 or later
+                images natively; use an Ubuntu 26.04 userland, for example a
+                container.
 
-The other host-tool differences are handled in the tree, on 24.04 and 26.04
-alike:
+The other host-tool differences between the two releases are handled in the
+tree, on 24.04 and 26.04 alike:
 
   * GNU Make 4.4 (24.04 has 4.3) passes exported variables to `$(shell ...)`
     expanded, so a command-line value carrying a Make function would run at the
@@ -533,31 +537,32 @@ alike:
     itself. They are excluded in CLANG_TIDY_CHECKS and silenced in
     CLANG_ANALYZER_GATE_FLAGS.
   * cppcheck 2.19's MISRA addon reports two analyzer artifacts, recorded as D-6
-    in MISRA_COMPLIANCE.md.
-  * gcc 15, CBMC 6.6, Python 3.14, the 26.04 gpsim 0.32.1 build, and KLEE need
-    no change.
+    in MISRA_COMPLIANCE.md; 2.13 reports neither.
+  * The yasimavr lock covers CPython 3.9-3.14 (PyYAML 6.0.3).
+  * avr-gcc 14 keeps assembler-local labels in the ELF symbol table, and its
+    avr-size has no Atmel `-C`; attiny202-delay-oracle reads both kinds of
+    image, and the size recipes use `--format=avr`, which both binutils accept.
 
-Releasing from such a host natively is possible but costs more than it looks.
 The soak record keys on the soak harness's toolchain (host cc, gpsim, simavr,
-yasimavr), so a release qualified natively on 26.04 cannot use a soak recorded
-on 24.04, and its recorded analyzer versions differ from CI's. Until CI moves,
-qualify releases in an Ubuntu 24.04 userland, for example a container.
+yasimavr) and on the images, so a release built on one of these userlands
+cannot reuse a soak recorded on the other.
 
 == Version pinning strategy
 
-Exact versions above were the latest Ubuntu 24.04 LTS packages at the time
-of initial commit.  Upgrading minor versions of avr-gcc or avr-libc is
-generally safe.  If avr-gcc major version changes, re-verify with
-`make test` and inspect the generated assembly for the ISR to confirm
-the saturating integrator still compiles to the expected atomic read-
+Exact versions above are the Ubuntu 26.04 LTS packages measured on
+2026-10-15 (the project started on Ubuntu 24.04's; see the section above).
+avr-gcc is pinned exactly, so any change to it -- a distribution point release
+included -- is a deliberate pin move. On one, re-verify with `make test`, the
+target lanes and the soak, and inspect the generated assembly for the ISR to
+confirm the saturating integrator still compiles to the expected atomic read-
 modify-write pattern (no multi-byte intermediates).
 
-For CI reproducibility, prefer Ubuntu 24.04 LTS Docker image:
+For CI reproducibility, prefer the Ubuntu 26.04 LTS Docker image:
 
 ....
-    docker run --rm -v $(pwd):/src ubuntu:24.04 bash -c \
+    docker run --rm -v $(pwd):/src ubuntu:26.04 bash -c \
       "apt-get update && \
-       apt-get install -y make util-linux gcc-avr avr-libc simavr libsimavr-dev libelf-dev \
+       apt-get install -y make util-linux gcc-avr avr-libc binutils-avr simavr libsimavr-dev libelf-dev \
                           gcc clang clang-tidy cppcheck cbmc \
                           git gnupg python3 python3-yaml && \
        cd /src && \
@@ -590,15 +595,15 @@ Enforced -- a release cannot ship otherwise:
   BYTE-FOR-BYTE against the signed `SHA256SUMS`. This is the final, independent
   gate; it does not depend on trusting any tool-version claim.
 * *Image-defining compilers, version-pinned and preflight-enforced.* avr-gcc
-  7.3.0 and XC8 V3.10 (PIC10F322 and PIC12F675 share one XC8 selector, PIC_CC;
+  14.3.0 and XC8 V3.10 (PIC10F322 and PIC12F675 share one XC8 selector, PIC_CC;
   PIC10F320 has its own, PIC10F320_CC). `scripts/make-release.sh` HARD FAILS at
   preflight -- before any build or soak -- if any of these three drifts from its
   pin, rather than warning and leaving it to the byte gate.
 +
 The comparison is EXACT: a whole version token is parsed out of the banner of
 the tool each Make variable actually selects, and compared for equality. A
-version that merely CONTAINS the pin is drift and is rejected -- avr-gcc 17.3.0
-and 7.3.0.1 do not satisfy the 7.3.0 pin, and XC8 V3.100 and V13.10 do not
+version that merely CONTAINS the pin is drift and is rejected -- avr-gcc 114.3.0
+and 14.3.0.1 do not satisfy the 14.3.0 pin, and XC8 V3.100 and V13.10 do not
 satisfy the V3.10 pin -- as is a banner carrying no version token at all, or
 more than one. Until v0.9.10 these three checks were shell substring patterns,
 which accepted the first three of those four drifted versions.
@@ -637,7 +642,7 @@ which accepted the first three of those four drifted versions.
 
 Recorded but deliberately NOT pinned:
 
-* The hosted-runner label (`ubuntu-24.04`) is a MOVING image, and the apt tools
+* The hosted-runner label (`ubuntu-26.04`) is a MOVING image, and the apt tools
   install without version constraints.
 * Analyzer and simulator versions (cppcheck, clang-tidy, CBMC, simavr, gpsim,
   binutils-avr, avr-libc, host gcc, Python) ride whatever that runner ships.

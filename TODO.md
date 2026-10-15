@@ -128,27 +128,42 @@ hosted CI.
 
 ### T25-cross-compiler - Add a narrow alternate-AVR-compiler lane
 
-Build the Classic AVR firmware with a supported newer avr-gcc, run all variants
-through the instruction-accurate simulation suite, and compare behavior with the
-pinned avr-gcc 7.3 build. Preserve device, frequency, ABI, and linker flags so
-the lane varies the compiler rather than the firmware contract.
+Build the Classic AVR firmware with a second avr-gcc, run all variants through
+the instruction-accurate simulation suite, and compare behavior with the pinned
+build. Preserve device, frequency, ABI, and linker flags so the lane varies the
+compiler rather than the firmware contract.
 
-Ubuntu 26.04 ships the candidate: avr-gcc 14 (banner 14.3.0) with avr-libc
-2.2.1 and binutils 2.45. Its two blockers are cleared. Each AVR shell's
-`set_sleep_mode()` suppression now also names `-Wsign-conversion`, which is
-where avr-gcc 14 files the warning that 7.3.0 filed under `-Wconversion`. And
-the size recipes call `avr-size --format=avr`, which binutils 2.26 and 2.45
-both accept, in place of the Atmel-only `-C`. Measured with the distro
-compiler on 2026-10-15: `make test STRICT_TOOLS=1` and the ATtiny202
-aggregates pass; the Classic images are 20 B smaller and the ATtiny202 images
-28-44 B smaller; and the ATtiny202 tick ISR with its call tree is 86
-instructions, against the 84-instruction ceiling reviewed for 7.3.0. The
-pinned 7.3.0 toolchain stays installable from a verified source through
-`scripts/fetch_avr_toolchain.sh`.
+From v0.9.18 the pin is Ubuntu 26.04's avr-gcc 14.3.0 (avr-libc 2.2.1,
+binutils 2.45), and the second compiler is the historic avr-gcc 7.3.0 that
+built every earlier release, installable from a verified source through
+`scripts/fetch_avr_toolchain.sh`. The tree builds and passes under both
+(8f58ec9: each AVR shell's `set_sleep_mode()` suppression names
+`-Wsign-conversion`, where avr-gcc 14 files the warning 7.3.0 filed under
+`-Wconversion`, and the size recipes call `avr-size --format=avr`). Measured
+on 2026-10-15, the 14.3.0 Classic images are 20 B smaller and the ATtiny202
+images 28-44 B smaller, the Classic tick ISR takes 144 cycles (142 under
+7.3.0), and the ATtiny202 tick ISR with its call tree is 86 instructions
+(84). The lane should refuse to run when the second compiler is the pin, so
+it can never compare a compiler with itself.
 
 Dependencies: a second AVR compiler and simulator-compatible images. Effort:
 about 2 hours. Risk: Medium; catches compiler-sensitive UB, volatile ordering,
 or ISR code-generation changes.
+
+### T25-gcc-analyzer - Add avr-gcc's -fanalyzer beside clang --analyze
+
+`analyze-deep` uses clang's static analyzer as the stand-in for `gcc
+-fanalyzer`, chosen while the pinned avr-gcc 7.3.0 predated it (GCC 10+). The
+avr-gcc 14.3.0 pin has `-fanalyzer`, which analyzes the code as the shipping
+compiler parses it, with avr-libc's real headers and the project's flags. Run
+it over every shipping translation unit under each selector, fail on any
+finding, and prove the lane can fail with a planted defect, as
+`test-analyzer-gate` does for clang. Keep clang's analyzer as the second
+opinion.
+
+Dependencies: the 14.3.0 pin. Effort: about 1-2 hours. Risk: Medium; a second
+path-sensitive analyzer, and the first that uses the image-defining compiler's
+front end.
 
 ### T25-stack-cross - Add an AVR disassembly stack-depth cross-check
 
@@ -453,13 +468,28 @@ evidence. Risk: High; these four close here or nowhere. They do not block the
 `0.9.x` software release (the part already ships), but they are the gate to the
 `1.x.y` hardware-validated line — the same gate every other part must pass.
 
+### T3-attiny-dfp - Build the ATtiny202 from avr-libc's own device support
+
+avr-gcc 7.3.0 predated the ATtiny202, so its lane builds against Microchip's
+ATtiny_DFP device files (`scripts/fetch_attiny_dfp.sh`, `-B`/`-I` into
+`third_party/attiny_dfp`). The avr-gcc 14.3.0 pin with avr-libc 2.2.1 supports
+the part natively, and measured on 2026-10-15 builds all three ATtiny202
+images byte-identical with and without the DFP. Drop the DFP from the build
+flags, the release preflight and provenance, the supply-chain and CI caches and
+the docs, so the AVR side is built from Ubuntu's own packages alone. Prove the
+images unchanged across the removal.
+
+Dependencies: the 14.3.0 pin. Effort: about 3-4 hours. Risk: Low for the
+images (byte-identical); Medium for the plumbing, which threads through 33
+Makefile lines and the release scripts.
+
 ### T3-toolchain - Broaden compiler and toolchain portability
 
-Document a modern reproducible FSF AVR toolchain (binutils 2.41+, GCC 13+ AVR,
-and avr-libc 2.2+ with native ATtiny202 support), then generalize the narrow
-cross-compiler lane into a behavioral matrix across viable avr-gcc versions and
-clang AVR support. This provides both an adoption path and an independent check
-for compiler-sensitive defects.
+The v0.9.18 pin is already a modern FSF AVR toolchain (Ubuntu 26.04's avr-gcc
+14.3.0, binutils 2.45 and avr-libc 2.2.1, with native ATtiny202 support). What
+remains is to generalize the narrow cross-compiler lane into a behavioral
+matrix across viable avr-gcc versions and clang AVR support. This provides both
+an adoption path and an independent check for compiler-sensitive defects.
 
 Dependencies: reproducible compiler builds and simulator compatibility. Effort:
 Medium. Risk/impact: Medium-High for long-term maintainability and reliability.
@@ -823,6 +853,7 @@ The stable ID in each row matches exactly one open section above.
 | T25-klee-path | Bounded full-path KLEE proof | 2.5 | 2-4 h | High assurance value |
 | T25-klee-ci | Execute KLEE in CI | 2.5 | 2 h | Medium |
 | T25-cross-compiler | Narrow alternate-AVR-compiler lane | 2.5 | 2 h | Medium |
+| T25-gcc-analyzer | avr-gcc -fanalyzer beside clang --analyze | 2.5 | 1-2 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |
 | T25-wdt-rate | Watchdog pet-frequency measurement | 2.5 | 1-2 h | Medium |
@@ -834,6 +865,7 @@ The stable ID in each row matches exactly one open section above.
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
+| T3-attiny-dfp | ATtiny202 from avr-libc's own device support | 3 | 3-4 h | Medium - distro-native build |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |

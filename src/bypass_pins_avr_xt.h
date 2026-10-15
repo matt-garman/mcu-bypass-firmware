@@ -66,7 +66,7 @@
 // Bounded non-blocking work in the pet-to-pet window (boot: init() plus the
 // first loop pass; steady state: one loop pass) -- see the classic-AVR map for
 // the shape of the term. The AVR-XT runs the same code at 2 MHz, so one tick is
-// a wider allowance here than the 0.46 ms measured there.
+// a wider allowance here than the 0.47 ms measured there.
 #define WDT_LOOP_WORK_MS  (1U)
 
 // ISR preemption allowance. Interrupt-driven, like the classic shell. This is
@@ -74,12 +74,12 @@
 // foreground time; p=25% permits at most 25/75 = 33 1/3% additive delay stretch.
 // No cycle-accurate AVR-XT simulator is trusted for this measurement (see the
 // yasimavr stepping note in test/README.md), so the duty is bounded from the
-// built image instead: the TCB0 ISR and its callees are 84 instructions.
-// Charging every instruction a conservative 4 cycles and reserving another 16
-// cycles for interrupt entry and vector dispatch bounds the complete response
-// at 352 of the 2000 cycles in a 1 ms tick (17.6%). The classic map's 25%
-// therefore bounds this part too, with the same re-derivation duty. The compiled
-// call-tree ceiling is enforced by attiny202-delay-oracle.
+// built image instead: the TCB0 ISR and its callees are 86 instructions under
+// avr-gcc 14.3.0. Charging every instruction a conservative 4 cycles and
+// reserving another 16 cycles for interrupt entry and vector dispatch bounds
+// the complete response at 360 of the 2000 cycles in a 1 ms tick (18.0%). The
+// classic map's 25% therefore bounds this part too, with the same re-derivation
+// duty. The compiled call-tree ceiling is enforced by attiny202-delay-oracle.
 #define WDT_ISR_STRETCH_PCT (25U)
 
 

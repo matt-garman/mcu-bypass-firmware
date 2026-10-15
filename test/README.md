@@ -219,8 +219,9 @@ were never affected.
 ## ATtiny202 (AVR-XT) target validation layers
 
 The AVR-XT lane needs two inputs a normal AVR machine does not have: Microchip's
-ATtiny_DFP device files to *build* the image (packaged avr-gcc 7.3.0 predates the
-part) and a patched `yasimavr` venv to *run* it (neither simavr nor QEMU models
+ATtiny_DFP device files to *build* the image (avr-gcc 7.3.0 predated the part;
+the 14.3.0 pin no longer needs them, TODO T3-attiny-dfp) and a patched `yasimavr`
+venv to *run* it (neither simavr nor QEMU models
 the AVR8X core). Both are fetched on demand and version pinned, and every
 `attiny202-*` target skips cleanly without them.
 

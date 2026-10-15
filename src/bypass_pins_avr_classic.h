@@ -62,9 +62,10 @@
 // inside a tick or the loop would drift off the 1 ms sample cadence, which the
 // lock-step and soak lanes fail on; init() is bounded straight-line register
 // writes.
-// Measured worst case (simavr): 0.46 ms of the 1 ms allowance, on the boot path
-// at 1.0 MHz. test/avr/test_sim.c re-measures the real image against this whole
-// budget on every run, so the allowance is not left as an unchecked assertion.
+// Measured worst case (simavr, avr-gcc 14.3.0): 0.47 ms of the 1 ms allowance,
+// on the boot path at 1.0 MHz. test/avr/test_sim.c re-measures the real image
+// against this whole budget on every run, so the allowance is not left as an
+// unchecked assertion.
 #define WDT_LOOP_WORK_MS  (1U)
 
 // ISR preemption allowance. This shell is INTERRUPT-DRIVEN: the 1 ms tick ISR
@@ -73,9 +74,9 @@
 // percentage p of WALL time the ISR may own, not additive stretch relative to
 // foreground time. Foreground receives only 100-p, so p=25% permits at most
 // 25/75 = 33 1/3% additive stretch of the delay body.
-// Measured worst case (simavr): 142 ISR cycles per tick = 11.8% at 1.2 MHz
-// (ATtiny13A) and 14.2% at 1.0 MHz (ATtiny25/45/85). 25% keeps ~1.8x margin on
-// the worse duty bound and MUST be re-derived if the ISR grows.
+// Measured worst case (simavr, avr-gcc 14.3.0): 144 ISR cycles per tick = 12.0%
+// at 1.2 MHz (ATtiny13A) and 14.4% at 1.0 MHz (ATtiny25/45/85). 25% keeps ~1.7x
+// margin on the worse duty bound and MUST be re-derived if the ISR grows.
 #define WDT_ISR_STRETCH_PCT (25U)
 
 

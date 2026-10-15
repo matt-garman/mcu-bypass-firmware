@@ -975,10 +975,11 @@ rm -f "$$out" *.dump *.ctu-info cppcheck-addon-ctu-file-list*; \
 echo "MISRA-C:2012 ($(3)): clean (documented deviations waived per MISRA_COMPLIANCE.md)"
 endef
 
-# Clang static analyzer (deep symbolic-execution path analysis). This is the
-# stand-in for `gcc -fanalyzer`: the system avr-gcc (7.3.0) predates -fanalyzer
-# (which needs GCC 10+), but clang's analyzer understands -target avr and the
-# real avr-libc headers, giving equivalent inter-procedural flow analysis.
+# Clang static analyzer (deep symbolic-execution path analysis). It was chosen
+# as the stand-in for `gcc -fanalyzer` while the pinned avr-gcc (7.3.0)
+# predated -fanalyzer (GCC 10+); clang's analyzer understands -target avr and the
+# real avr-libc headers, giving equivalent inter-procedural flow analysis. The
+# avr-gcc 14 pin has -fanalyzer; adding it is TODO T25-gcc-analyzer.
 CLANG              ?= clang
 
 # --- Firmware compile/link flags ---------------------------------------------
@@ -4722,8 +4723,8 @@ attiny13a-trace: variant-selectors-valid test/avr/test_trace_$(VARIANT)
 #   - clang-tidy   : lint + bug-pattern checks (ANALYZE_CMD)
 #   - cppcheck     : second-opinion static analyzer (analyze-cppcheck)
 #   - clang --analyze : deep symbolic-execution path analysis (analyze-deep),
-#                       the stand-in for `gcc -fanalyzer` since the installed
-#                       avr-gcc (7.3) predates it.
+#                       chosen as the stand-in for `gcc -fanalyzer` while the
+#                       pinned avr-gcc (7.3) predated it.
 #   - cppcheck misra : MISRA-C:2012 compliance gate (analyze-misra), clean
 #                      except for the documented deviations in MISRA_COMPLIANCE.md
 # -Wconversion is already enforced by the normal build (CFLAGS); these targets

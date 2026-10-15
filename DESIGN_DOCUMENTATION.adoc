@@ -520,12 +520,13 @@ executions needs cycle-granular instruction stepping -- precisely the mode the
 pinned yasimavr's unpatched `SimLoop.run(n)` rewind makes untrustworthy, even
 though the pin edges it timestamps from a signal hook are exact (see the
 yasimavr note in `test/README.md`). Its term is therefore bounded from the built
-image instead. The reviewed ceiling is 84 instructions for the TCB0 ISR and its
-callees; charging every instruction four cycles and reserving another 16 cycles
-for interrupt entry and vector dispatch bounds the complete response at 352 of
-the 2000 cycles in a 1 ms tick (17.6% duty, or at most 21.4% additive stretch).
+image instead. The reviewed ceiling is 86 instructions for the TCB0 ISR and its
+callees, as avr-gcc 14.3.0 compiles them (7.3.0 compiled 84); charging every
+instruction four cycles and reserving another 16 cycles for interrupt entry and
+vector dispatch bounds the complete response at 360 of the 2000 cycles in a 1 ms
+tick (18.0% duty, or at most 22.0% additive stretch).
 `attiny202-delay-oracle` recovers the sole `reti` handler and its direct call
-tree from every built image and enforces that 84-instruction
+tree from every built image and enforces that 86-instruction
 ceiling; recursion, unresolved or indirect transfers, and control-flow cycles
 fail closed rather than being undercounted; acyclic branches to earlier shared
 epilogues remain countable.  Its compiled delay-body oracle and delivered-pulse

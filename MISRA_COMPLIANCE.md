@@ -29,9 +29,9 @@ of those records below.
 
 | | |
 |---|---|
-| Analyzer | `cppcheck` 2.13.0, MISRA addon (`misra.py`), as release and CI run it; 2.19.0 also passes, with the D-6 artifacts |
+| Analyzer | `cppcheck` 2.19.0, MISRA addon (`misra.py`), as release and CI run it from v0.9.18, with the D-6 artifacts; 2.13.0, which v0.9.17 and earlier ran, also passes |
 | Target model | `--platform=avr8`, `--std=c11`; separate ATtiny13A and tinyx5 configurations |
-| Compiler / headers | `avr-gcc` 7.3.0 (avr-libc register definitions) |
+| Compiler / headers | `avr-gcc` 14.3.0 (avr-libc 2.2.1 register definitions) |
 | Build target | `make analyze-misra` |
 | Report target | `make analyze-misra-report` |
 | Direct source inputs | Classic AVR shell, `bypass_pure.c`, and the three `bypass_output_*.c` drivers |
@@ -226,8 +226,9 @@ to know. Do not restate the rule as "header findings never fail the lane", and
 do not use cppcheck's exit status as evidence that an authored file is clean.
 Re-measured 2026-10-14 with a minimal header of each kind: cppcheck 2.13.0
 still leaves the status at 0 for the Rule 2.5 finding and sets it to 2 for
-Rule 20.7, and cppcheck 2.19.0 sets it to 2 for both. The parser stays, because
-release and CI run 2.13.0, and because a status-independent gate is the point.
+Rule 20.7, and cppcheck 2.19.0 sets it to 2 for both. The parser stays now that
+release and CI run 2.19.0: a status-independent gate is the point, and two
+measured header kinds do not show that every header finding sets the status.
 
 All five recipes now force structured output through the repository parser
 independently of cppcheck's status. `make test-misra-output-contract` emits a
@@ -453,9 +454,10 @@ shells, changes to their ISR/atomic code require an unsuppressed inventory revie
 |---|---|
 | **Rule** | 17.3 (a function shall not be declared implicitly, Mandatory); 8.7 (no external linkage for an object or function referenced in only one translation unit, Advisory) |
 | **Suppression scope** | 17.3: the five MCU implementation files. 8.7: `bypass_mcu_avr_classic.c`, `bypass_mcu_avr_xt.c`, `bypass_mcu_pic10f322.c`, `bypass_mcu_pic12f675.c`, `bypass_pure.c` and the three `bypass_output_*.c` drivers |
-| **Classification** | Analyzer artifact of one analyzer release, not a deviation. Inert under cppcheck 2.13.0, which reports neither finding |
+| **Classification** | Analyzer artifact of one analyzer release, not a deviation. Active from v0.9.18, whose release analyzer is cppcheck 2.19.0; inert under 2.13.0, which reports neither finding |
 
-**Why it exists.** Ubuntu 26.04 ships cppcheck 2.19.0. Its MISRA addon reports
+**Why it exists.** Ubuntu 26.04 ships cppcheck 2.19.0, which release and CI run
+from v0.9.18. Its MISRA addon reports
 two finding families that 2.13.0 does not, against unchanged source. Measured on
 2026-10-14 across all five lanes, they are the only new findings.
 
@@ -467,10 +469,11 @@ firmware every reported site is assembly: avr-libc's `cli()`, `sei()`,
 compiler barriers, and XC8's `CLRWDT()`, which the PIC DFP's `pic.h` defines as
 `__asm("clrwdt")`. Rule 17.3 is Mandatory, so it admits no deviation and none is
 taken. The source complies, and the compilers show it independently of any
-analyzer. Under the project's own flags, `avr-gcc` 7.3.0 rejects a call to an
-undeclared function as `-Werror=implicit-function-declaration`, and XC8 V3.10
-rejects it as a hard C99 error even without `-Werror`. Both were measured with
-an undeclared call. A genuine implicit declaration therefore cannot reach a
+analyzer. `avr-gcc` 14.3.0 rejects a call to an undeclared function as a hard
+error even without `-Werror` (re-measured 2026-10-15; 7.3.0, which built
+v0.9.17 and earlier, rejected it under the project's `-Werror` as
+`-Werror=implicit-function-declaration`), and XC8 V3.10 rejects it as a hard
+C99 error even without `-Werror`. Each was measured with an undeclared call. A genuine implicit declaration therefore cannot reach a
 built image, whatever the suppression covers.
 
 **Rule 8.7.** Each matrix row analyzes one translation unit, so cppcheck 2.19
@@ -478,15 +481,18 @@ cannot see that the functions it flags are called from other units: the `hw_*`
 interface the shells implement and the drivers call, the output-driver entry
 points the shells call, and the `bypass_pure.c` core. Every flagged identifier
 was checked to be referenced from at least four other `src/*.c` files.
-cppcheck 2.13.0 does not report 8.7 on these single-file runs either, so this
-suppression hides nothing the release analyzer reports.
+cppcheck 2.13.0 does not report 8.7 on these single-file runs at all, so
+through v0.9.17 this suppression hid nothing the release analyzer reported;
+from v0.9.18 it hides exactly the single-unit artifact described here.
 
 **What the scope costs.** Like every entry here, the scope is `rule:file`. Under
 2.19 it would also hide a genuine 8.7 finding in a listed file, which is the
 state 2.13.0 already leaves; only a whole-program run could evaluate 8.7. It
 would hide a genuine 17.3 finding too, and the compilers still reject that one.
-Revisit this record when the release analyzer moves to 2.19, or when a later
-cppcheck stops treating inline assembly as a call.
+This record was revisited on 2026-10-15, when the release analyzer moved to
+2.19 for v0.9.18: the classification stands, and the compiler evidence for
+17.3 was re-measured on avr-gcc 14.3.0. Revisit it when a later cppcheck stops
+treating inline assembly as a call.
 
 ## Notes on specific constructs
 

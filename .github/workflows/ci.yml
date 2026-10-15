@@ -6,17 +6,19 @@ name: CI
 # build + verification suite passes on a clean machine, not just on the
 # developer's box.
 #
-# `ubuntu-24.04` is a MOVING hosted-runner label, and the apt tools below install
+# `ubuntu-26.04` is a MOVING hosted-runner label, and the apt tools below install
 # without version constraints -- so the runner and its apt toolchain are
 # RECORDED, not pinned: the `verify`, `pic` and `attiny202` jobs each print the
 # versions they actually got, so drift surfaces as a changed version line in the
-# log rather than silently. The label is chosen because its packages sit closest
-# to TOOLCHAIN.adoc (avr-gcc 7.3, gcc 13, clang/clang-tidy 18, cppcheck 2.13,
-# simavr 1.6). What IS pinned here: every third-party action by commit SHA, and
-# the image-defining PIC toolchain -- XC8 V3.10 + PIC10-12Fxxx_DFP 1.9.189,
-# SHA-verified by the installer and integrity-checked on every cache restore
-# (see the `pic` job). The release pipeline enforces more; see TOOLCHAIN.adoc
-# "What the release enforces".
+# log rather than silently. The label is chosen because its packages ARE the
+# toolchain TOOLCHAIN.adoc records (avr-gcc 14.3, gcc 15, clang/clang-tidy 21,
+# cppcheck 2.19, simavr 1.6, Python 3.14). What IS pinned here: every
+# third-party action by commit SHA; the image-defining AVR compiler, avr-gcc
+# 14.3.0, which `make test STRICT_TOOLS=1` refuses to run without
+# (avr-compiler-valid); and the image-defining PIC toolchain -- XC8 V3.10 +
+# PIC10-12Fxxx_DFP 1.9.189, SHA-verified by the installer and integrity-checked
+# on every cache restore (see the `pic` job). The release pipeline enforces
+# more; see TOOLCHAIN.adoc "What the release enforces".
 #
 # Most of the matrix lives inside the Makefile: a single `make test` already
 # exercises all three variants (cd4053_simple, cd4053_with_mute,
@@ -76,7 +78,7 @@ jobs:
   # -------------------------------------------------------------------------
   verify:
     name: verify (make test)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     # Gate the AVR suite behind the fast PIC job: a PIC failure short-circuits
     # the run -- the slow AVR jobs are skipped instead of running in parallel.
@@ -182,7 +184,7 @@ jobs:
   # DFP packs.download.microchip.com/<pack>.atpack URL scheme is stable.
   pic:
     name: pic (10F322 + 10F320 + 12F675)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       # Pin to the versions in TOOLCHAIN.adoc; bump compiler + DFP together.
@@ -413,7 +415,7 @@ jobs:
   # the separate soak step checks its own per-variant count.
   attiny202:
     name: "attiny202 (AVR-XT: pre-hardware/target/soak)"
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     needs: pic   # gate behind the fast PIC job (see `verify`)
     steps:
@@ -540,7 +542,7 @@ jobs:
   # -------------------------------------------------------------------------
   build-matrix:
     name: build (${{ matrix.mcu }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     needs: pic   # gate behind the fast PIC job (see `verify`)
     strategy:
@@ -582,7 +584,7 @@ jobs:
   # -------------------------------------------------------------------------
   stress:
     name: stress (make stress)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Full-domain simulation/model workloads are deliberately much larger than
     # the PR suite. Keep a conservative bound so a severed workload override
     # still fails with a useful log before GitHub's six-hour default.

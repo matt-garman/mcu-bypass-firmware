@@ -32,13 +32,13 @@ name: Release
 #      publishes a bare `vX.Y.Z` as an ordinary release and any accepted suffix
 #      (`v1.0.0-rc.1`) as a prerelease.
 #
-# `ubuntu-24.04` is a MOVING hosted-runner label, and the apt tools below install
+# `ubuntu-26.04` is a MOVING hosted-runner label, and the apt tools below install
 # without version constraints -- so the runner and the apt toolchain are RECORDED,
 # not pinned. What the release actually enforces: (1) every published image is
 # reproduced and compared BYTE-FOR-BYTE against the signed SHA256SUMS (the final,
 # independent gate); (2) the image-defining compilers are version-pinned and
 # preflight-enforced -- XC8 V3.10 + PIC10-12Fxxx_DFP 1.9.189 by digest here, and
-# avr-gcc 7.3.0 by scripts/make-release.sh (hard fail on drift); (3) the XC8/DFP
+# avr-gcc 14.3.0 by scripts/make-release.sh (hard fail on drift); (3) the XC8/DFP
 # cache is integrity-verified on every restore (verify_pic_toolchain_cache.sh).
 # Analyzer/simulator versions ride the runner and are recorded in the MANIFEST,
 # not pinned. See TOOLCHAIN.adoc "What the release enforces".
@@ -75,7 +75,7 @@ env:
 jobs:
   release:
     name: reproduce + publish ${{ github.ref_name }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

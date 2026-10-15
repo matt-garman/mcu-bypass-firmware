@@ -1197,7 +1197,7 @@ mapfile -t preflight_exit_lines < <(grep -nF \
 	|| fail "release preflight success marker is missing or ambiguous"
 preflight_exit_line=${preflight_exit_lines[0]%%:*}
 for pin_call in \
-		'require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 7.3.0 7.3.0' \
+		'require_pinned_compiler "avr-gcc" CC "$AVR_CC" "$TC_AVR_GCC" 14.3.0 14.3.0' \
 		'require_pinned_compiler "PIC10F322/PIC12F675 XC8" PIC_CC "$PIC_CC" "$TC_XC8_322" 3.10 V3.10' \
 		'require_pinned_compiler "PIC10F320 XC8" PIC10F320_CC "$PIC10F320_CC" "$TC_XC8_320" 3.10 V3.10'; do
 	mapfile -t pin_lines < <(grep -nFx "$pin_call" "$RELEASE")
@@ -1210,7 +1210,7 @@ done
 # The substring patterns these replaced accepted any banner CONTAINING the pin,
 # which is how avr-gcc 17.3.0 and XC8 V3.100 passed. Keep them out of the CODE
 # -- comments still quote them, which is why this reads uncommented lines only.
-for stale_pattern in '*7.3.0*' '*V3.10*' '*v3.10*'; do
+for stale_pattern in '*14.3.0*' '*7.3.0*' '*V3.10*' '*v3.10*'; do
 	if grep -vE '^[[:space:]]*#' "$RELEASE" | grep -Fq "$stale_pattern"; then
 		fail "release still matches a compiler pin as the substring pattern $stale_pattern"
 	fi
