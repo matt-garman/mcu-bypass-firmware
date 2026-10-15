@@ -33,6 +33,63 @@ release_tool_version_line() {
 	printf '%s\n' "$first_line"
 }
 
+# Identify the avr-libc the selected AVR compiler actually links against.
+#
+# Until 2026-10 the manifest recorded `dpkg-query -W avr-libc`, the version of
+# whatever avr-libc package the HOST had installed. That is right only when the
+# selected compiler is the apt one. A compiler run from a prefix (for example
+# scripts/fetch_avr_toolchain.sh's, on a host whose distribution ships a newer
+# avr-libc) uses its own headers and libraries, and the manifest would have
+# attested the host's package instead. Ask the compiler: preprocess
+# <avr/version.h> through it, read __AVR_LIBC_VERSION_STRING__, and name the
+# header it resolved and, when one does, the package that owns that file.
+#
+#   release_avr_libc_version_line LABEL CC REPO_ROOT
+# prints e.g. `2.0.0 (/usr/lib/avr/include/avr/version.h, dpkg avr-libc
+# 1:2.0.0+Atmel3.7.0-1)`. A header under REPO_ROOT is printed relative to it,
+# so a release's MANIFEST does not carry the qualifying host's home path.
+release_avr_libc_version_line() {
+	if [ "$#" -ne 3 ]; then
+		printf 'FATAL: release_avr_libc_version_line requires a label, compiler and repository root\n' >&2
+		return 2
+	fi
+	local label=$1 cc=$2 root=$3
+	local version header resolved owner owner_version origin
+
+	version=$(printf '#include <avr/version.h>\n__AVR_LIBC_VERSION_STRING__\n' \
+		| "$cc" -x c -E -P - 2>/dev/null | tail -n 1) || version=
+	if [[ ! "$version" =~ ^\"[0-9][0-9A-Za-z.+~_-]*\"$ ]]; then
+		printf 'FATAL: cannot identify %s: %s did not expand __AVR_LIBC_VERSION_STRING__ from <avr/version.h> (got: %s)\n' \
+			"$label" "$cc" "${version:-nothing}" >&2
+		return 1
+	fi
+	version=${version//\"/}
+
+	header=$(printf '#include <avr/version.h>\n' \
+		| "$cc" -x c -E -H -o /dev/null - 2>&1 \
+		| awk 'substr($0, 1, 2) == ". " { print substr($0, 3); exit }') || header=
+	resolved=$(realpath -e -- "$header" 2>/dev/null) || resolved=
+	if [ -z "$resolved" ]; then
+		printf 'FATAL: cannot identify %s: %s did not report the <avr/version.h> it included\n' \
+			"$label" "$cc" >&2
+		return 1
+	fi
+
+	owner=$(dpkg-query -S -- "$resolved" 2>/dev/null | head -n 1) || owner=
+	owner=${owner%%:*}
+	if [ -n "$owner" ] \
+			&& owner_version=$(dpkg-query -W -f='${Version}' -- "$owner" 2>/dev/null) \
+			&& [ -n "$owner_version" ]; then
+		origin="dpkg $owner $owner_version"
+	else
+		origin="no dpkg owner"
+	fi
+	case "$resolved" in
+		"$root"/*) resolved=${resolved#"$root"/} ;;
+	esac
+	printf '%s (%s, %s)\n' "$version" "$resolved" "$origin"
+}
+
 # Identify the patched yasimavr build the ATtiny202 lane runs on.
 #
 # yasimavr has no --version flag that reports what this project actually

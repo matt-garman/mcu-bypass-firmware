@@ -7,7 +7,9 @@
 # This file holds DOCUMENTED, PROJECT-SPECIFIC finding suppressions. D-1 records
 # actual MISRA deviations; D-2/D-3 are advisory analyzer artifacts for
 # declarations used elsewhere in the project; D-4 contains analyzer
-# accommodations, including one diagnostic that is not a MISRA rule. Every entry
+# accommodations, including one diagnostic that is not a MISRA rule; D-5 is the
+# avr-libc ATOMIC_BLOCK deviation; D-6 holds cppcheck 2.19 analyzer artifacts
+# that cppcheck 2.13.0 does not report, so they match nothing there. Every entry
 # maps to a classified D-n record in MISRA_COMPLIANCE.md with its rationale. An
 # entry without a matching record is a compliance defect.
 
@@ -138,3 +140,28 @@ misra-c2012-14.2:src/bypass_mcu_avr_classic.c
 misra-c2012-14.2:src/bypass_mcu_avr_xt.c
 unreadVariable:src/bypass_mcu_avr_classic.c
 unreadVariable:src/bypass_mcu_avr_xt.c
+
+# --- D-6: cppcheck 2.19 analyzer artifacts (Rules 17.3, 8.7) -----------------
+# cppcheck 2.19's misra.py reports every inline-assembly statement as a call to
+# an implicitly declared function (17.3): avr-libc's cli(), sei(), sleep_mode()
+# and wdt_reset(), the AVR shells' own __asm__ barriers, and XC8's CLRWDT(),
+# which the PIC DFP defines as __asm("clrwdt"). Rule 17.3 is Mandatory and is
+# NOT deviated: both production compilers reject a genuine implicit declaration
+# under this project's flags, so the source complies and the finding is the
+# tool's. See D-6.
+misra-c2012-17.3:src/bypass_mcu_avr_classic.c
+misra-c2012-17.3:src/bypass_mcu_avr_xt.c
+misra-c2012-17.3:src/bypass_mcu_pic10f322.c
+misra-c2012-17.3:src/bypass_mcu_pic10f320.c
+misra-c2012-17.3:src/bypass_mcu_pic12f675.c
+# The same release reports 8.7 (external linkage, referenced in one translation
+# unit) on functions that other translation units call: each MISRA row analyzes
+# one file, so the cross-unit references are invisible to it. See D-6.
+misra-c2012-8.7:src/bypass_mcu_avr_classic.c
+misra-c2012-8.7:src/bypass_mcu_avr_xt.c
+misra-c2012-8.7:src/bypass_mcu_pic10f322.c
+misra-c2012-8.7:src/bypass_mcu_pic12f675.c
+misra-c2012-8.7:src/bypass_pure.c
+misra-c2012-8.7:src/bypass_output_cd4053_simple.c
+misra-c2012-8.7:src/bypass_output_cd4053_with_mute.c
+misra-c2012-8.7:src/bypass_output_tq2_l2_5v_relay.c

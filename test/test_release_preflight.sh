@@ -226,12 +226,18 @@ write_avr_gcc_fake() {
 			printf '\t%s\n' ':'   # a compiler that answers --version with nothing
 		fi
 		printf '%s\n' 'fi'
+		# release_avr_libc_version_line's two queries: the version string its
+		# <avr/version.h> expands to, and the header -H reports it included.
+		printf '%s\n' 'if [ "$*" = "-x c -E -P -" ]; then cat >/dev/null; printf '"'"'\n"2.0.0"\n'"'"'; exit 0; fi'
+		printf '%s\n' "if [ \"\$*\" = \"-x c -E -H -o /dev/null -\" ]; then cat >/dev/null; printf '. %s\\n' '${path}.libc/avr/version.h' >&2; exit 0; fi"
 		printf '%s\n' 'if [[ " $* " == *" -mmcu=attiny13a "* ]] && [[ " $* " == *" -E "* ]]; then'
 		printf '\t%s\n' '[ "${TEST_AVR_LIBC_FAIL:-0}" -eq 0 ] || exit 81'
 		printf '%s\n' 'fi'
 		printf '%s\n' 'exit 0'
 	} > "$path"
 	chmod 750 "$path"
+	mkdir -p "${path}.libc/avr"
+	: > "${path}.libc/avr/version.h"
 }
 write_avr_gcc_fake "$fakebin/fake-avr-gcc" 'avr-gcc (GCC) 7.3.0'
 
@@ -3711,6 +3717,27 @@ if (
 fi
 [ ! -e "$make_injection_marker" ] \
 	|| fail "make release-preflight expanded a Make function in VERSION"
+
+# GNU Make 4.4+ expands every exported variable into each $(shell ...)
+# environment, and command-line assignments are exported, so the Makefile
+# withholds dollar-bearing command-line values from child environments before
+# its FIRST $(shell ...). CI runs Make 4.3, where a probe moved above that block
+# executes nothing and every injection check here stays green; only a Make 4.4
+# host would notice. Hold the order lexically, so any Make catches it.
+unexport_precedes_first_shell() {
+	local first_shell unexport_line
+	first_shell=$(awk '!/^[[:space:]]*#/ && index($0, "$(shell") { print NR; exit }' "$1")
+	unexport_line=$(awk '$0 == "unexport $(_MAKE_DOLLAR_COMMAND_LINE_NAMES)" { print NR; exit }' "$1")
+	[ -n "$first_shell" ] && [ -n "$unexport_line" ] \
+		&& [ "$unexport_line" -lt "$first_shell" ]
+}
+unexport_precedes_first_shell "$ROOT/Makefile" \
+	|| fail "the Makefile no longer withholds dollar-bearing command-line values before its first \$(shell ...); on Make 4.4+ an injected Make function would run there"
+{ printf 'EARLY_PROBE := $(shell true)\n'; cat "$ROOT/Makefile"; } > "$work/Makefile.early-shell"
+if unexport_precedes_first_shell "$work/Makefile.early-shell"; then
+	fail "the dollar-value ordering check accepted a \$(shell ...) placed above the unexport"
+fi
+checks=$((checks + 2))
 grep -Fq 'must not contain dollar signs' "$output" \
 	|| fail "Make-function VERSION failed for the wrong reason"
 checks=$((checks + 1))

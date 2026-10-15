@@ -255,6 +255,32 @@ run_fake() {
 expect_fail "unsupported Python platform" "lock supports standard 64-bit CPython" \
 	env PATH="$fakebin:$PATH" FAKE_PYTHON_PLATFORM_FAIL=1 \
 		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$work/python-platform-venv"
+expect_fail "unusable YASIMAVR_PYTHON" "YASIMAVR_PYTHON is not an executable interpreter" \
+	env PATH="$fakebin:$PATH" YASIMAVR_PYTHON="$work/no-such-python" \
+		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$work/no-python-venv"
+[ ! -e "$work/no-python-venv" ] || fail "an unusable YASIMAVR_PYTHON still created its destination"
+
+# YASIMAVR_PYTHON must replace python3 at every step, not only the first: the
+# PATH python3 here fails the platform check, so a build that consulted it
+# anywhere fails. The selected interpreter logs each invocation.
+selected_python="$work/selected python/python3.12"
+mkdir -p "${selected_python%/*}"
+cat > "$selected_python" <<EOF
+#!/bin/sh
+printf '%s\n' "\${1:-} \${2:-}" >> "$work/selected-python.log"
+FAKE_PYTHON_PLATFORM_FAIL=0 exec "$fakebin/python3" "\$@"
+EOF
+chmod +x "$selected_python"
+selected_venv="$work/selected-python-venv"
+output=$(FAKE_PYTHON_PLATFORM_FAIL=1 YASIMAVR_PYTHON="$selected_python" \
+	run_fake "$selected_venv" 2>&1) \
+	|| fail "a build with a supported YASIMAVR_PYTHON failed although only the PATH python3 is unsupported: $output"
+for step in "-c import" "- " "-m venv"; do
+	grep -Fq -- "$step" "$work/selected-python.log" \
+		|| fail "YASIMAVR_PYTHON was not used for the '$step' step: $(cat "$work/selected-python.log")"
+done
+checks=$((checks + 1))
+
 expect_fail "missing C++20 feature" "does not support C++20" \
 	env PATH="$fakebin:$PATH" FAKE_CXX20_FAIL=1 \
 		YASIMAVR_SDIST_SHA256="$empty_sha" "$FETCH" "$work/cxx20-venv"

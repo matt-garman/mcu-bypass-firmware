@@ -52,6 +52,41 @@ lengths.
 
 ## [Unreleased]
 
+### Added
+
+- **Ubuntu 26.04 hosts pass every gate natively.** `scripts/fetch_avr_toolchain.sh`
+  installs the pinned avr-gcc 7.3.0 toolchain from SHA-256-pinned Ubuntu 24.04
+  packages, re-verifying the installed tree on every run, and
+  `scripts/fetch_yasimavr.sh` takes `YASIMAVR_PYTHON` for hosts whose `python3`
+  is newer than 3.13. cppcheck 2.19, clang-tidy 21 and uutils coreutils are
+  accommodated (MISRA record D-6 for the analyzer artifacts). Releases are still
+  qualified on Ubuntu 24.04; see `TOOLCHAIN.adoc`, "Hosts newer than Ubuntu 24.04".
+
+### Fixed
+
+- **`analyze-deep` could not fail on an analyzer finding.** `clang --analyze
+  -Werror` reports static-analyzer findings as warnings and exits 0, on clang 18
+  and 21 alike, so the gate printed a planted division by zero and passed. It now
+  passes `-analyzer-werror`, and `test-analyzer-gate` proves it fails. Nothing was
+  hidden: clang 18 reports no finding in the firmware.
+- **GNU Make 4.4 defeated the command-line injection guards.** Make 4.4 passes
+  exported command-line values to `$(shell ...)` expanded, so a value carrying a
+  Make function ran at the first parse-time probe, before any guard could refuse
+  it. The Makefile now withholds dollar-bearing command-line values from child
+  environments first, and the guards hold under Make 4.3 and 4.4. CI and release
+  run 4.3 and were not affected.
+- **Two gate families ignored AVR and PIC tool overrides.** `test-static-assert-guards`
+  and the ATtiny202/PIC guard-mutation gates re-derived their compilers with
+  `MAKEFLAGS` stripped, so a `CC=` or device-pack override never reached them;
+  the PIC lane also compiled its PIC10F320 rows with `PIC_CC` rather than
+  `PIC10F320_CC`. The recipes now pass the selected tools.
+- **Release provenance could misattribute the AVR toolchain.** The manifest
+  recorded avr-libc from the host's installed package, and labelled whichever
+  `avr-objcopy` came first on `PATH` as binutils-avr: v0.9.16's row is XC8's
+  bundled copy. avr-libc is now identified through the selected compiler, and
+  the AVR rows name the executables actually resolved. Both rows read
+  differently from v0.9.18 on.
+
 ## [0.9.17] - 2026-10-14
 
 ### Changed

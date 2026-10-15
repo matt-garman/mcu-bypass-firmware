@@ -35,6 +35,11 @@
 # The flags come from the Makefile via print-<VAR> rather than being restated
 # here: a guard proven under flags nobody ships is not proven, and the same
 # print-<VAR> vocabulary is itself held in place by the name-contract gate.
+# The compilers and device packs are the caller's: the recipes pass $(CC),
+# $(XT_DFP), $(PIC_CC), $(PIC_DFP), $(PIC10F320_CC) and $(PIC10F320_DFP) as
+# arguments, and the flags are composed with those packs. read_var strips
+# MAKEFLAGS, so a print-CC query would otherwise answer with the default
+# compiler while the recipe's skip check had tested the selected one.
 #
 # WHAT A ROW CAN CLAIM. Four outcomes, because the honest answer is not always
 # "a dedicated guard rejects this":
@@ -68,17 +73,21 @@ set -euo pipefail
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
 usage() {
-	printf 'usage: %s <avr-xt|pic>\n' "${0##*/}" >&2
+	printf 'usage: %s avr-xt CC XT_DFP\n' "${0##*/}" >&2
+	printf '       %s pic PIC_CC PIC_DFP PIC10F320_CC PIC10F320_DFP\n' "${0##*/}" >&2
 	printf '  avr-xt  the ATtiny202 shell under avr-gcc + the vendored ATtiny_DFP\n' >&2
 	printf '  pic     the PIC10F322, PIC10F320 and PIC12F675 shells under XC8\n' >&2
 }
 
-[ "$#" -eq 1 ] || { usage; exit 1; }
-LANE=$1
+LANE=${1:-}
 case "$LANE" in
-	avr-xt|pic) ;;
+	avr-xt) [ "$#" -eq 3 ] || { usage; exit 1; } ;;
+	pic) [ "$#" -eq 5 ] || { usage; exit 1; } ;;
 	*) printf 'FAIL: unknown lane: %s\n' "$LANE" >&2; usage; exit 1 ;;
 esac
+for selected in "${@:2}"; do
+	[ -n "$selected" ] || { printf 'FAIL: an empty tool or device-pack selector\n' >&2; usage; exit 1; }
+done
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Overridable ONLY so this file's own failure modes can be exercised against a
@@ -163,8 +172,9 @@ resolve_config() {
 		pic10f320)
 			# Self-contained lane: its output macro is spelled OUTPUT_* and is
 			# already inside the flags the Makefile composes per variant, so the
-			# variant is a Make assignment here rather than an extra -D.
-			CONFIG_CC=$PIC_CC
+			# variant is a Make assignment here rather than an extra -D. Its
+			# compiler is its own selector, which may differ from PIC_CC.
+			CONFIG_CC=$PIC10F320_CC
 			CONFIG_FLAGS=${PIC10F320_FLAGS[$variant]}
 			CONFIG_CWD=TREE
 			;;
@@ -175,24 +185,26 @@ resolve_config() {
 }
 
 if [ "$LANE" = avr-xt ]; then
-	XT_CC=$(read_var print-CC)
-	XT_FLAGS=$(read_var print-XT_FW_CFLAGS)
-	[ -n "$XT_CC" ] && [ -n "$XT_FLAGS" ] \
-		|| fail "print-CC / print-XT_FW_CFLAGS came back empty -- cannot compile anything"
+	XT_CC=$2
+	XT_FLAGS=$(read_var print-XT_FW_CFLAGS "XT_DFP=$3")
+	[ -n "$XT_FLAGS" ] \
+		|| fail "print-XT_FW_CFLAGS came back empty -- cannot compile anything"
 	[[ "$XT_FLAGS" == *-fshort-enums* ]] \
 		|| fail "XT_FW_CFLAGS no longer carries -fshort-enums; the enum-size row below cannot be exercised as written"
 	checks=$((checks + 1))
 	PARTS_IN_LANE="avr_xt"
 else
-	PIC_CC=$(read_var print-PIC_CC)
-	PIC10F322_FLAGS=$(read_var print-PIC10F322_CFLAGS)
-	PIC12F675_FLAGS=$(read_var print-PIC12F675_CFLAGS)
-	[ -n "$PIC_CC" ] && [ -n "$PIC10F322_FLAGS" ] && [ -n "$PIC12F675_FLAGS" ] \
-		|| fail "print-PIC_CC / print-PIC10F322_CFLAGS / print-PIC12F675_CFLAGS came back empty -- cannot compile anything"
+	PIC_CC=$2
+	PIC10F320_CC=$4
+	PIC10F322_FLAGS=$(read_var print-PIC10F322_CFLAGS "PIC_DFP=$3")
+	PIC12F675_FLAGS=$(read_var print-PIC12F675_CFLAGS "PIC_DFP=$3")
+	[ -n "$PIC10F322_FLAGS" ] && [ -n "$PIC12F675_FLAGS" ] \
+		|| fail "print-PIC10F322_CFLAGS / print-PIC12F675_CFLAGS came back empty -- cannot compile anything"
 	checks=$((checks + 1))
 	declare -A PIC10F320_FLAGS=()
 	for v in "${VARIANTS[@]}"; do
-		PIC10F320_FLAGS[$v]=$(read_var print-PIC10F320_CFLAGS "PIC10F320_VARIANT=$v")
+		PIC10F320_FLAGS[$v]=$(read_var print-PIC10F320_CFLAGS \
+			"PIC10F320_VARIANT=$v" "PIC10F320_DFP=$5")
 		[ -n "${PIC10F320_FLAGS[$v]}" ] \
 			|| fail "the Makefile reported no PIC10F320 flags for variant $v"
 		checks=$((checks + 1))

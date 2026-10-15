@@ -1380,7 +1380,17 @@ TC_AVR_GCC=$(release_tool_version_line "AVR GCC (CC=$AVR_CC)" "$AVR_CC") \
 	|| die "could not record the AVR compiler provenance"
 TC_AVR_BU=$(release_tool_version_line "AVR objcopy (OBJCOPY=$AVR_OBJCOPY)" "$AVR_OBJCOPY") \
 	|| die "could not record the AVR binutils provenance"
-TC_AVR_LIBC=$(pkgver avr-libc)
+# Through the selected compiler, not `dpkg-query avr-libc`: a prefix-installed
+# toolchain links its own avr-libc, whatever package the host has.
+TC_AVR_LIBC=$(release_avr_libc_version_line "avr-libc (CC=$AVR_CC)" "$AVR_CC" "$REPO_ROOT") \
+	|| die "could not record the avr-libc provenance"
+# Label the AVR rows with the executables PATH actually resolved. A bare
+# `avr-objcopy` used to be reported as binutils-avr even where an earlier PATH
+# entry (XC8's bundled AVR toolchain) supplied it.
+AVR_CC_RESOLVED=$(command -v -- "$AVR_CC") \
+	|| die "could not resolve the AVR compiler: $AVR_CC"
+AVR_OBJCOPY_RESOLVED=$(command -v -- "$AVR_OBJCOPY") \
+	|| die "could not resolve the AVR objcopy: $AVR_OBJCOPY"
 TC_HOST_CC=$(release_tool_version_line "host C compiler (HOSTCC=$HOST_CC)" "$HOST_CC") \
 	|| die "could not record the host compiler provenance"
 TC_XC8_322=$(release_tool_version_line "PIC10F322 XC8 (PIC_CC=$PIC_CC)" "$PIC_CC") \
@@ -2530,9 +2540,9 @@ ok "required release artifacts stage clean (${#RELEASE_HELPER_NAMES[@]}: ${RELEA
 {
 	printf 'TOOLCHAIN format=1 source_commit=%s\n' "$GIT_SHA"
 	printf '%s\t%s\n' \
-		'avr-gcc' "$TC_AVR_GCC" \
-		'binutils-avr (objcopy)' "$TC_AVR_BU" \
-		'avr-libc (pkg)' "$TC_AVR_LIBC" \
+		"avr-gcc (\`CC=$AVR_CC_RESOLVED\`)" "$TC_AVR_GCC" \
+		"AVR objcopy (\`OBJCOPY=$AVR_OBJCOPY_RESOLVED\`)" "$TC_AVR_BU" \
+		'avr-libc (`<avr/version.h>` via CC)' "$TC_AVR_LIBC" \
 		'host cc' "$TC_HOST_CC" \
 		"PIC10F322/PIC12F675 XC8 (\`PIC_CC=$PIC_CC\`)" "$TC_XC8_322" \
 		"PIC10F320 XC8 (\`PIC10F320_CC=$PIC10F320_CC\`)" "$TC_XC8_320" \

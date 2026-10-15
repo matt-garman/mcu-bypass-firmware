@@ -2105,11 +2105,13 @@ EOF
     # A nested wrapper deadline may fire before the outer bound and then be
     # collapsed by Make to an ordinary status. Its out-of-band marker must still
     # force infrastructure status 125 rather than crediting a mutation kill.
+    # The fixture mirrors test/pic/gpsim_wrapper_common.sh, which accepts both
+    # `timeout -s KILL` expiry statuses: 137 under GNU coreutils, 124 under uutils.
     nested_timeout_rc=0
     MUTATION_TIMEOUT_S=1 mutation_bounded bash -c '
         timeout -s KILL 0.1 sleep 30 && exit 91
         rc=$?
-        [ "$rc" -ne 137 ] || : > "$MUTATION_INFRA_MARKER"
+        case "$rc" in 124|137) : > "$MUTATION_INFRA_MARKER" ;; esac
         exit 1
     ' \
         >/dev/null 2>&1 || nested_timeout_rc=$?

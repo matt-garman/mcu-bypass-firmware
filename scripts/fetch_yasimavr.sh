@@ -68,12 +68,17 @@
 #   scripts/fetch_yasimavr.sh [VENV_DIR]
 #     VENV_DIR  where to create the venv (default: ./third_party/yasimavr/venv).
 #               The Makefile's YASIMAVR_VENV defaults to the same path.
-#   Env overrides: YASIMAVR_VER, YASIMAVR_SDIST_SHA256, PIP_INDEX_URL.
+#   Env overrides: YASIMAVR_VER, YASIMAVR_SDIST_SHA256, PIP_INDEX_URL, and
+#   YASIMAVR_PYTHON (default: python3), the interpreter that builds and then
+#   runs the venv. A host whose python3 is outside the supported range below
+#   (Ubuntu 26.04 ships 3.14) names a supported one here, e.g.
+#   YASIMAVR_PYTHON=/home/linuxbrew/.linuxbrew/bin/python3.12.
 #
 # PREREQUISITES (hard -- the script fails loud, it does not silently skip; the
 # Makefile harness targets are the ones that skip cleanly when the venv is
 # absent, exactly as `make attiny202` skips without the DFP):
-#   * CPython 3.9-3.13 on glibc Linux x86_64/aarch64, with the venv module
+#   * CPython 3.9-3.13 on glibc Linux x86_64/aarch64, with the venv module,
+#     as python3 or as YASIMAVR_PYTHON
 #                                              (apt: python3 python3-venv)
 #   * the CPython development headers        (apt: python3-dev)  -- to compile
 #                                            yasimavr's C++/SIP extension modules
@@ -103,6 +108,9 @@ normalize_physical_path() {
 # --- pinned upstream release (bump VER + SHA together, from a trusted run) ------
 VER="${YASIMAVR_VER:-0.1.6}"
 SDIST_SHA256="${YASIMAVR_SDIST_SHA256:-3742dae364a8d65ff7d4180d00b40c0901656dafcea6e53e94db1127b7ec6285}"
+# The interpreter is not part of the build signature below: the venv records it,
+# and already_built() proves the compiled extension imports on it.
+PYTHON="${YASIMAVR_PYTHON:-python3}"
 
 # Resolve paths relative to the repo root (this script's parent's parent), so it
 # works regardless of the caller's cwd.
@@ -233,8 +241,12 @@ if already_built; then
 fi
 
 # --- tool checks ----------------------------------------------------------------
-have python3   || die "python3 not found (install 'python3')."
-python3 -c 'import platform, struct, sys, sysconfig
+if [ "$PYTHON" = python3 ]; then
+    have python3 || die "python3 not found (install 'python3')."
+else
+    have "$PYTHON" || die "YASIMAVR_PYTHON is not an executable interpreter: ${PYTHON}"
+fi
+"$PYTHON" -c 'import platform, struct, sys, sysconfig
 libc_name, libc_version = platform.libc_ver()
 try:
     libc_parts = tuple(int(part) for part in libc_version.split(".")[:2])
@@ -250,7 +262,7 @@ ok = ((3, 9) <= sys.version_info[:2] < (3, 14)
       and platform.machine() in ("x86_64", "aarch64")
       and libc_name == "glibc" and libc_parts >= (2, 17))
 raise SystemExit(0 if ok else 1)' \
-    || die "the lock supports standard 64-bit CPython 3.9-3.13 on glibc 2.17+ Linux x86_64/aarch64 only."
+    || die "the lock supports standard 64-bit CPython 3.9-3.13 on glibc 2.17+ Linux x86_64/aarch64 only (${PYTHON} is not one; select another with YASIMAVR_PYTHON=)."
 if have c++; then CXX=c++
 elif have g++; then CXX=g++
 else die "no C++ compiler (install 'g++')."
@@ -270,7 +282,7 @@ else die "need curl or wget to download the yasimavr sdist."
 fi
 # CPython headers are needed to compile yasimavr's C++/SIP modules. Fail early
 # with an actionable message rather than deep inside a pip build log.
-python3 - <<'PY' 2>/dev/null || die "CPython development headers not found (install 'python3-dev')."
+"$PYTHON" - <<'PY' 2>/dev/null || die "CPython development headers not found for ${PYTHON} (install 'python3-dev')."
 import os, sysconfig
 h = os.path.join(sysconfig.get_path('include'), 'Python.h')
 raise SystemExit(0 if os.path.exists(h) else 1)
@@ -357,8 +369,8 @@ done
 
 # --- create the venv and install only hash-locked dependency wheels --------------
 log "Creating virtualenv for ${VENV}"
-python3 -m venv "$BUILD_VENV" \
-    || die "python3 -m venv failed (install 'python3-venv')."
+"$PYTHON" -m venv "$BUILD_VENV" \
+    || die "${PYTHON} -m venv failed (install 'python3-venv')."
 "$BUILD_PY" -m pip --version >/dev/null 2>&1 \
     || die "pip is not available in the venv (install 'python3-venv')."
 if ! "$BUILD_PY" -m pip install --disable-pip-version-check --no-input \

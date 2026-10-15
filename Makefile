@@ -1,3 +1,21 @@
+# Command-line values are exported, and an exported recursive variable is
+# EXPANDED whenever Make builds a child environment. GNU Make has always done
+# that for recipes. From 4.4 it also does it for $(shell ...), so
+# `make VARIANT='$(shell cmd)'` would run cmd at the first parse-time probe
+# below, before any guard further down can refuse it. A value without a dollar sign
+# expands to itself, so only dollar-bearing command-line values are dangerous,
+# and only those are withheld from child environments. Their origin stays
+# `command line`, and sub-makes still receive them through MAKEFLAGS, so every
+# guard below sees and refuses exactly what it did under Make 4.3. This must stay
+# ahead of the first $(shell ...).
+_MAKE_DOLLAR := $$
+_MAKE_DOLLAR_COMMAND_LINE_NAMES := $(foreach n,$(.VARIABLES),$(if \
+	$(filter command line,$(origin $(n))),$(if \
+	$(findstring $(_MAKE_DOLLAR),$(value $(n))),$(n))))
+ifneq ($(strip $(_MAKE_DOLLAR_COMMAND_LINE_NAMES)),)
+unexport $(_MAKE_DOLLAR_COMMAND_LINE_NAMES)
+endif
+
 # Build and validation recipes share worktree-local firmware images, host test
 # binaries, coverage data, and simulator logs. Route each independent top-level
 # invocation through one persistent flock, then execute the real graph serially.
@@ -801,7 +819,12 @@ CLANG_TIDY_FLAGS   ?= $(CLANG_AVR_FLAGS)
 # misc-include-cleaner is excluded because it flags the (correct) transitive
 # include of <stdint.h>/<stdint.h> macros via <avr/io.h>, which is idiomatic
 # for AVR firmware and not worth churning the includes over.
-CLANG_TIDY_CHECKS  ?= -*,bugprone-*,cert-*,clang-analyzer-*,misc-*,-misc-include-cleaner,readability-misleading-indentation,performance-*
+# performance-no-int-to-ptr and clang-analyzer-core.FixedAddressDereference
+# (both reporting from clang-tidy 21) are excluded because they object to
+# memory-mapped I/O itself: every avr-libc register macro is an integer
+# address cast to a volatile pointer and dereferenced, which is the only way
+# firmware can reach the hardware.
+CLANG_TIDY_CHECKS  ?= -*,bugprone-*,cert-*,clang-analyzer-*,misc-*,-misc-include-cleaner,readability-misleading-indentation,performance-*,-performance-no-int-to-ptr,-clang-analyzer-core.FixedAddressDereference
 # clang-tidy command (override to point at a different tidy binary).
 CLANG_TIDY         ?= clang-tidy
 # The clang-tidy invocation PREFIX (tool + checks). The analyze-tidy recipe
@@ -865,6 +888,9 @@ MISRA_SUPPRESS     ?= test/misra_suppressions.txt
 # included header. Force every diagnostic into one strict record format and let
 # the repository-owned parser decide whether its normalized path is authored
 # firmware. These are validation mechanisms, not caller-selectable tools.
+# Re-measured 2026-10-14: cppcheck 2.19.0 does set the status for a header
+# finding that 2.13.0 left at 0 (Rule 2.5), but the release analyzer is still
+# 2.13.0, and the parser holds whatever the tool's status says.
 override MISRA_OUTPUT_GATE := test/misra_output_gate.py
 override MISRA_DIAGNOSTIC_TEMPLATE := --template='MCU_BYPASS_CPPCHECK|{file}|{line}|{column}|{severity}|{id}|{message}'
 
@@ -1031,7 +1057,7 @@ FORCE:
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
-        test-analyze-variant-guard test-variant-selector-guard \
+        test-analyze-variant-guard test-analyzer-gate test-variant-selector-guard \
         test-fuse-injection-contract test-static-assert-guards \
         test-attiny202-guard-mutations test-pic-guard-mutations \
         test-deliberate-duplication \
@@ -3262,7 +3288,7 @@ TEST_GATES_LATE = \
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
-        test-analyze-variant-guard test-variant-selector-guard \
+        test-analyze-variant-guard test-analyzer-gate test-variant-selector-guard \
         test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools \
         coverage-check coverage-check-core
@@ -3990,6 +4016,16 @@ test-pinout-alignment: python-version-valid test/test_pinout_alignment.py
 test-analyze-variant-guard:
 	./test/test_analyze_variant_guard.sh
 
+# Proof that analyze-deep can fail. `clang --analyze -Werror` reports analyzer
+# findings as warnings and exits 0, so until CLANG_ANALYZER_GATE_FLAGS the gate
+# printed a planted division by zero and still passed. This plants one, and a
+# register read-modify-write that must stay accepted, under the gate's own flags.
+test-analyzer-gate:
+	@if ! command -v $(CLANG) >/dev/null 2>&1; then \
+		echo "$(CLANG) not installed; skipping the analyzer-gate proof"; $(SKIP); \
+	fi; \
+	./test/test_analyzer_gate.sh '$(CLANG)'
+
 # Fake-cppcheck proof that all 30 reviewed target/TU/selector rows execute once
 # in each analyzer mode with the exact platform, standard, and target policy.
 test-analysis-matrix:
@@ -4040,7 +4076,7 @@ test-static-assert-guards:
 	@if ! command -v $(CC) >/dev/null 2>&1; then \
 		echo "$(CC) not installed; skipping the static_assert guard checks"; $(SKIP); \
 	fi; \
-	./test/test_static_assert_guards.sh
+	./test/test_static_assert_guards.sh '$(CC)'
 
 # The same proof for the guards test-static-assert-guards cannot reach. Its
 # mutations compile the classic-AVR lane with avr-gcc; 53 of the firmware's 81
@@ -4061,7 +4097,7 @@ test-attiny202-guard-mutations:
 		echo "    scripts/fetch_attiny_dfp.sh $(XT_DFP)"; \
 		$(SKIP); \
 	fi; \
-	./test/test_target_guard_mutations.sh avr-xt
+	./test/test_target_guard_mutations.sh avr-xt '$(CC)' '$(XT_DFP)'
 
 test-pic-guard-mutations:
 	@if [ ! -x "$(PIC_CC)" ] && ! command -v $(PIC_CC) >/dev/null 2>&1; then \
@@ -4070,7 +4106,13 @@ test-pic-guard-mutations:
 	if [ ! -d "$(PIC_DFP)" ]; then \
 		echo "PIC device pack not found at PIC_DFP=$(PIC_DFP); skipping the PIC compile-guard mutations"; $(SKIP); \
 	fi; \
-	./test/test_target_guard_mutations.sh pic
+	if [ ! -x "$(PIC10F320_CC)" ] && ! command -v $(PIC10F320_CC) >/dev/null 2>&1; then \
+		echo "XC8 not found at PIC10F320_CC=$(PIC10F320_CC); skipping the PIC compile-guard mutations"; $(SKIP); \
+	fi; \
+	if [ ! -d "$(PIC10F320_DFP)" ]; then \
+		echo "PIC device pack not found at PIC10F320_DFP=$(PIC10F320_DFP); skipping the PIC compile-guard mutations"; $(SKIP); \
+	fi; \
+	./test/test_target_guard_mutations.sh pic '$(PIC_CC)' '$(PIC_DFP)' '$(PIC10F320_CC)' '$(PIC10F320_DFP)'
 
 # Several facts in this tree are decided twice on purpose, by routes that can
 # disagree: two core generations, two compilers, two execution models, two
@@ -4728,12 +4770,23 @@ analyze-cppcheck: classic-variant-request-valid $(call analysis_matrix_sources,$
 # Deep path analysis via the clang static analyzer on the AVR target. Emits
 # diagnostics as text and FAILS the build on any report (-Werror). This is the
 # `-fanalyzer`-equivalent gate.
+# -Werror does not reach static-analyzer findings: `clang --analyze -Werror`
+# prints a null dereference as a warning and exits 0, on clang 18 and 21 alike,
+# so until -analyzer-werror this gate could report a finding but never fail on
+# one. core.FixedAddressDereference (clang 21) objects to memory-mapped I/O
+# itself, as in CLANG_TIDY_CHECKS. It is silenced rather than disabled because
+# clang 18 rejects disabling a checker it does not have, and compatibility mode
+# lets clang 18 accept the silence list, which names a checker it lacks.
+override CLANG_ANALYZER_GATE_FLAGS := -Xclang -analyzer-werror \
+	-Xclang -analyzer-config -Xclang silence-checkers=core.FixedAddressDereference \
+	-Xclang -analyzer-config-compatibility-mode=true
 analyze-deep: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@if command -v $(CLANG) >/dev/null 2>&1; then \
 		for tuple in $(CLANG_CLASSIC_ROWS); do \
 			f=$${tuple%%:*}; selector=$${tuple#*:}; \
 			echo "clang --analyze (-target avr): $(CLANG) $$f"; \
 			$(CLANG) --analyze -Xclang -analyzer-output=text -Werror \
+				$(CLANG_ANALYZER_GATE_FLAGS) \
 				$(CLANG_AVR_FLAGS) -D$$selector $$f || exit 1; \
 		done; \
 	elif $(CC) -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then \
@@ -8177,6 +8230,7 @@ help:
 	@echo "  test-resource-tables  resource-document arithmetic/agreement + final-evidence contract regression (included in test)"
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
+	@echo "  test-analyzer-gate  analyze-deep fails on a planted analyzer finding and accepts register access (included in test)"
 	@echo "  test-analysis-matrix  exact 30-row cppcheck/MISRA target/TU/selector contract (included in test)"
 	@echo "  test-misra-output-contract  authored source/header MISRA diagnostics fail every lane (included in test)"
 	@echo "  test-variant-selector-guard  every lane rejects a bad single-variant selector, every per-variant map is guard-registered (included in test)"

@@ -188,7 +188,11 @@ for wrapper in run_toggle run_power_on; do
 		printf 'FAIL: %s accepted a timed-out gpsim run\n' "$wrapper" >&2
 		exit 1
 	fi
-	[[ "$output" == *"gpsim exited with status 137"* \
+	# `timeout -s KILL` expiry is 137 (128+9) under GNU coreutils and 124 under
+	# uutils, the coreutils Ubuntu 25.10+ ships. The wrapper classifies both as
+	# infrastructure, so either is the right report.
+	[[ ( "$output" == *"gpsim exited with status 137"* \
+			|| "$output" == *"gpsim exited with status 124"* ) \
 		&& "$output" == *"$expected_final"* \
 		&& "$output" == *"FAKE_GPSIM_SNAPSHOTS_COMPLETE"* \
 		&& -f "$infra_marker" ]] \

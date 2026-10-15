@@ -60,13 +60,21 @@ set -euo pipefail
 # release evidence, because test-long.summary.txt is built by grepping ^FAIL.
 trap 'err_rc=$?; case $- in *e*) printf "FAIL: %s:%d exited %d with no diagnostic (a command substitution that matched nothing?)\n" "${BASH_SOURCE[0]}" "$LINENO" "$err_rc" >&2 ;; esac' ERR
 
+# usage: test_static_assert_guards.sh [--mixed-control-child] CC
+# CC is the caller's selected AVR compiler; the recipe passes $(CC). It is an
+# argument, not a print-CC query, because read_var below strips MAKEFLAGS, so a
+# CC= override would otherwise never reach the compiler being proven.
 mixed_control_child=0
+if [ "${1:-}" = --mixed-control-child ]; then
+	mixed_control_child=1
+	shift
+fi
 case ${1:-} in
-	"") ;;
-	--mixed-control-child) mixed_control_child=1 ;;
-	*) printf 'FAIL: unknown argument: %s\n' "$1" >&2; exit 1 ;;
+	"") printf 'FAIL: usage: %s [--mixed-control-child] CC\n' "${0##*/}" >&2; exit 1 ;;
+	-*) printf 'FAIL: unknown argument: %s\n' "$1" >&2; exit 1 ;;
 esac
-[ "$#" -le 1 ] || { printf 'FAIL: too many arguments\n' >&2; exit 1; }
+[ "$#" -eq 1 ] || { printf 'FAIL: too many arguments\n' >&2; exit 1; }
+SELECTED_CC=$1
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # Overridable ONLY so this file's own failure modes can be exercised against a
@@ -90,8 +98,8 @@ plant() {
 	cp "$SRC"/*.c "$SRC"/*.h "$tree/"
 }
 
-# Read the real build's compiler and flags rather than restating them: a guard
-# proven under flags nobody ships is not proven. print-<VAR> is itself held to
+# Read the real build's flags rather than restating them: a guard proven under
+# flags nobody ships is not proven. The compiler is the caller's (see usage). print-<VAR> is itself held to
 # the Makefile's vocabulary by the name-contract gate.
 read_var() {
 	(
@@ -99,10 +107,10 @@ read_var() {
 		make -s -C "$ROOT" "print-$1"
 	)
 }
-CC=$(read_var CC)
+CC=$SELECTED_CC
 CFLAGS=$(read_var CFLAGS)
 [ -n "$CC" ] && [ -n "$CFLAGS" ] \
-	|| fail "print-CC / print-CFLAGS came back empty -- cannot compile anything"
+	|| fail "the selected CC or print-CFLAGS is empty -- cannot compile anything"
 [[ "$CFLAGS" == *-fshort-enums* ]] \
 	|| fail "CFLAGS no longer carries -fshort-enums; the enum-size guards below cannot be exercised as written"
 checks=$((checks + 1))
@@ -552,7 +560,7 @@ if [ "$mixed_control_child" -eq 0 ]; then
 	done
 	log="$work/mixed-duty-formula.log"
 	if STATIC_ASSERT_SRC="$tree" \
-			bash "$ROOT/test/test_static_assert_guards.sh" --mixed-control-child \
+			bash "$ROOT/test/test_static_assert_guards.sh" --mixed-control-child "$CC" \
 			>"$log" 2>&1; then
 		fail "the complete exact-bound suite accepted the restored mixed duty/stretch formula"
 	fi

@@ -507,6 +507,7 @@ rather than a built image. They need no toolchain and are members of `make test`
 | `test-fuse-injection-contract` | Every fuse byte the Makefile burns is the byte the `-D`-injected checker verifies; stdout alone carries queried values, while stderr is retained as diagnostic context. |
 | `test-variant-selector-guard` | Every lane rejects a bad single-variant selector instead of reporting a missing tool, and every per-variant map is registered with the parse-time guard, so a new variant cannot be half-declared. |
 | `test-analyze-variant-guard` | The `analyze-*` targets reject a bad `VARIANTS=` request instead of silently analyzing less. |
+| `test-analyzer-gate` | `analyze-deep` fails on a planted analyzer finding under its own flags, and still accepts a volatile register read-modify-write. `-Werror` alone does not reach analyzer findings, so before this the gate could print a finding and pass. |
 | `test-workflow-syntax` | The GitHub workflow YAML parses, nothing in either workflow reaches a gate except through a declared Make goal -- one goal per step, no Make flags, exactly the pins that goal declares, and no suite under `test/` run directly -- and every goal has a local counterpart: `ci-local.sh` for a push, `make-release.sh` for a tag. |
 | `test-ci-local-routing` | Local CI executes the Make-declared goal sequence, and routes each skip option to the commands it claims to run. |
 | `test-build-serialization` | Independent top-level Make and release invocations sharing one worktree cannot enter the shared critical section concurrently. |

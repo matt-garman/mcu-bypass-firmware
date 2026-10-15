@@ -18,7 +18,9 @@ tool, re-run `make clean && make test` before relying on its output.
 == Development platform
 
   OS:           Linux 6.12.33 (TrueNAS production kernel), x86_64
-  Distribution: Ubuntu 24.04 (Noble) base packages
+  Distribution: Ubuntu 24.04 (Noble) base packages, which CI, release CI and
+                release qualification run. The development host moved to
+                Ubuntu 26.04 on 2026-10-14; see "Hosts newer than Ubuntu 24.04".
 
   flock:        util-linux (required). Complete Make and direct release-script
                 invocations use one worktree-local advisory lock because build,
@@ -49,6 +51,10 @@ tool, re-run `make clean && make test` before relying on its output.
 
   Minimum avr-gcc version: 4.9 (for _Static_assert / C11 support with -std=gnu11)
   Recommended: 7.x or later (best -fshort-enums / LTO support for tiny parts)
+
+  On a host whose distribution no longer ships these three packages,
+  scripts/fetch_avr_toolchain.sh installs the same noble packages into
+  third_party/avr-toolchain; see "Hosts newer than Ubuntu 24.04".
 
 == PIC toolchain (PIC10F322, PIC10F320 and PIC12F675, optional second toolchain)
 
@@ -160,7 +166,9 @@ license or hand-written assembly, neither of which this project will take.
                 gate, and release preflight checks it before PyYAML or validation.
                 This host-Python range has no upper cap and is distinct from the
                 patched yasimavr build/runtime requirement, which supports only
-                standard 64-bit CPython 3.9 through 3.13 (see below).
+                standard 64-bit CPython 3.9 through 3.13 (see below); a host
+                whose python3 is newer names a supported interpreter with
+                YASIMAVR_PYTHON.
                 The PIC12F675 needs python3 for a second reason: `make
                 pic12f675-simcal` runs the repository's calibration-word
                 injector to derive its simulator images, so every 12F675
@@ -331,6 +339,8 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
                 test/test_fetch_yasimavr.sh).
   install:      sudo apt install python3 python3-venv python3-dev g++ curl
                 scripts/fetch_yasimavr.sh
+                (where python3 is outside 3.9-3.13, e.g. Ubuntu 26.04's 3.14:
+                YASIMAVR_PYTHON=/path/to/python3.12 scripts/fetch_yasimavr.sh)
   patches:      two upstream yasimavr bugs (reported upstream) block our
                 fuse-locked-WDT firmware and are carried as the vendored patches:
                 (0001) the tinyAVR 0-series device builder omits the WDT
@@ -477,6 +487,56 @@ XC8 and the device pack are Microchip downloads, NOT apt packages:
   optional; `make release-preflight VERSION=vX.Y.Z` also reports local/remote tag
   and output-directory conflicts as warnings.
 
+== Hosts newer than Ubuntu 24.04
+
+Measured on Ubuntu 26.04.1 on 2026-10-14. The versions recorded above are the
+Ubuntu 24.04 ones that CI, release CI and release qualification still run. A
+newer host passes `make test` and every release target lane once three things
+are in place:
+
+  Pinned AVR toolchain:
+                26.04 ships avr-gcc 14, avr-libc 2.2.1 and binutils 2.43 or
+                later. They build different images, and that avr-size has no
+                Atmel `-C`, which the size and flash-budget recipes use.
+                scripts/fetch_avr_toolchain.sh installs the pinned noble
+                packages (each SHA-256-verified before extraction, the installed
+                tree re-verified against one digest on every run) into
+                third_party/avr-toolchain. Put its usr/bin first on PATH, so
+                every avr-* tool is the pinned one, including those a gate runs
+                by name:
+                  scripts/fetch_avr_toolchain.sh
+                  export PATH="$PWD/third_party/avr-toolchain/usr/bin:$PATH"
+                Installed this way, it rebuilt all 21 v0.9.16 images
+                bit-for-bit.
+  yasimavr:     26.04's python3 is 3.14, outside the 3.9-3.13 lock. Name a
+                supported interpreter with YASIMAVR_PYTHON (see "Simulator").
+  Packages:     the upgrade from 24.04 removed libglib2.0-dev (every PIC fault
+                lane needs it) and python3-venv; reinstall both.
+
+The other host-tool differences are handled in the tree, on 24.04 and 26.04
+alike:
+
+  * GNU Make 4.4 (24.04 has 4.3) passes exported variables to `$(shell ...)`
+    expanded, so a command-line value carrying a Make function would run at the
+    first parse-time probe. The Makefile withholds dollar-bearing command-line
+    values from child environments before its first `$(shell ...)`, so the
+    injection guards hold on both versions.
+  * uutils coreutils (Ubuntu 25.10 and later): `timeout -s KILL` exits 124
+    where GNU coreutils exits 137. Both are classified as infrastructure.
+  * clang and clang-tidy 21 add two checks that object to memory-mapped I/O
+    itself. They are excluded in CLANG_TIDY_CHECKS and silenced in
+    CLANG_ANALYZER_GATE_FLAGS.
+  * cppcheck 2.19's MISRA addon reports two analyzer artifacts, recorded as D-6
+    in MISRA_COMPLIANCE.md.
+  * gcc 15, CBMC 6.6, Python 3.14, the 26.04 gpsim 0.32.1 build, and KLEE need
+    no change.
+
+Releasing from such a host natively is possible but costs more than it looks.
+The soak record keys on the soak harness's toolchain (host cc, gpsim, simavr,
+yasimavr), so a release qualified natively on 26.04 cannot use a soak recorded
+on 24.04, and its recorded analyzer versions differ from CI's. Until CI moves,
+qualify releases in an Ubuntu 24.04 userland, for example a container.
+
 == Version pinning strategy
 
 Exact versions above were the latest Ubuntu 24.04 LTS packages at the time
@@ -575,6 +635,10 @@ Recorded but deliberately NOT pinned:
   install without version constraints.
 * Analyzer and simulator versions (cppcheck, clang-tidy, CBMC, simavr, gpsim,
   binutils-avr, avr-libc, host gcc, Python) ride whatever that runner ships.
+  avr-libc is identified through the selected compiler, by the version its
+  `<avr/version.h>` expands to and the header and package behind it, not by the
+  host's installed package; the AVR compiler and objcopy rows name the
+  executables PATH actually resolved.
   `scripts/make-release.sh` reads each one THROUGH its Makefile variable and
   records the exact version into the signed provenance MANIFEST, so runner or
   package drift cannot silently change which analyzer/simulator supplied a given

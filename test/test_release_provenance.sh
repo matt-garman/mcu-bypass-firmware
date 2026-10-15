@@ -274,6 +274,75 @@ fi
 	|| fail "empty compiler probe produced the wrong diagnostic: $output"
 checks=$((checks + 1))
 
+# avr-libc is identified THROUGH the selected compiler: the version its
+# <avr/version.h> expands to, the header it resolved, and that header's dpkg
+# owner when one exists. A fake compiler answers the two preprocessor queries
+# the helper makes; a fake dpkg-query answers for an owned header, or for none.
+declare -F release_avr_libc_version_line >/dev/null \
+	|| fail "release avr-libc provenance helper was not defined"
+libc_root="$work/libc root"
+mkdir -p "$libc_root/prefix/avr" "$work/dpkg-owned" "$work/dpkg-none"
+: > "$libc_root/prefix/avr/version.h"
+cat > "$tools/avr-cc" <<EOF
+#!/usr/bin/env bash
+cat >/dev/null
+case "\$*" in
+	"-x c -E -P -") printf '\n%s\n' "\${FAKE_LIBC_VERSION-\"2.0.0\"}" ;;
+	"-x c -E -H -o /dev/null -")
+		[ -n "\${FAKE_LIBC_NO_HEADER:-}" ] || printf '. %s\n' "$libc_root/prefix/avr/../avr/version.h" >&2 ;;
+	*) exit 9 ;;
+esac
+EOF
+cat > "$work/dpkg-owned/dpkg-query" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+	-S) [ "\$3" = "$libc_root/prefix/avr/version.h" ] && printf 'avr-libc: %s\n' "\$3" ;;
+	-W) printf '1:9.9.9+test-1' ;;
+	*) exit 9 ;;
+esac
+EOF
+printf '#!/bin/sh\nexit 1\n' > "$work/dpkg-none/dpkg-query"
+chmod 750 "$tools/avr-cc" "$work/dpkg-owned/dpkg-query" "$work/dpkg-none/dpkg-query"
+libc_header=$(realpath -e -- "$libc_root/prefix/avr/version.h")
+
+output=$(PATH="$work/dpkg-owned:$PATH" release_avr_libc_version_line \
+	"avr-libc" "$tools/avr-cc" /nonexistent-root) \
+	|| fail "avr-libc probe failed for a dpkg-owned header"
+[ "$output" = "2.0.0 ($libc_header, dpkg avr-libc 1:9.9.9+test-1)" ] \
+	|| fail "avr-libc probe misreported a dpkg-owned header: $output"
+checks=$((checks + 1))
+
+output=$(PATH="$work/dpkg-none:$PATH" release_avr_libc_version_line \
+	"avr-libc" "$tools/avr-cc" "$(realpath -e -- "$libc_root")") \
+	|| fail "avr-libc probe failed for a prefix header"
+[ "$output" = "2.0.0 (prefix/avr/version.h, no dpkg owner)" ] \
+	|| fail "avr-libc probe did not report a prefix header repo-relative with no owner: $output"
+checks=$((checks + 1))
+
+if output=$(FAKE_LIBC_VERSION=__AVR_LIBC_VERSION_STRING__ \
+		release_avr_libc_version_line "avr-libc" "$tools/avr-cc" / 2>&1); then
+	fail "an unexpanded __AVR_LIBC_VERSION_STRING__ was accepted"
+fi
+[[ "$output" == *"did not expand __AVR_LIBC_VERSION_STRING__"* ]] \
+	|| fail "unexpanded avr-libc version produced the wrong diagnostic: $output"
+checks=$((checks + 1))
+
+if output=$(FAKE_LIBC_NO_HEADER=1 \
+		release_avr_libc_version_line "avr-libc" "$tools/avr-cc" / 2>&1); then
+	fail "an avr-libc probe that named no header was accepted"
+fi
+[[ "$output" == *"did not report the <avr/version.h> it included"* ]] \
+	|| fail "missing avr-libc header produced the wrong diagnostic: $output"
+checks=$((checks + 1))
+
+# ...and the release records it that way, not through the host's package.
+grep -Fq 'TC_AVR_LIBC=$(release_avr_libc_version_line "avr-libc (CC=$AVR_CC)" "$AVR_CC" "$REPO_ROOT")' \
+	"$RELEASE" || fail "make-release.sh no longer identifies avr-libc through the selected compiler"
+if grep -Eq 'TC_AVR_LIBC=\$\(pkgver' "$RELEASE"; then
+	fail "make-release.sh records avr-libc from the host package again"
+fi
+checks=$((checks + 1))
+
 # The three image-defining compiler pins compare an exact version TOKEN. They
 # were shell substring patterns until v0.9.10, which accepted any banner
 # CONTAINING the pin -- so avr-gcc 17.3.0 satisfied the 7.3.0 pin and XC8
