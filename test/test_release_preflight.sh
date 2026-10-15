@@ -3401,11 +3401,18 @@ fi
 exit 0
 FAKE_AVR_GCC
 chmod +x "$fake_avr_bin/avr-gcc"
+# The corrective action depends on whether this checkout has the stamped
+# prefix installed. Drive a byte-identical copy whose third_party this suite
+# owns, so both branches run whatever this checkout has installed.
+avr_gate_tree="$work/avr-gate-tree"
+mkdir -p "$avr_gate_tree/test" "$avr_gate_tree/scripts"
+cp -p "$avr_cc_gate" "$avr_gate_tree/test/avr_compiler_version.sh"
+cp -p "$ROOT/scripts/release-provenance.sh" "$avr_gate_tree/scripts/release-provenance.sh"
 # avr_gate BANNER ORIGIN MODE: drive the gate directly; sets avr_rc.
 avr_gate() {
 	avr_rc=0
-	FAKE_AVR_BANNER=$1 "$avr_cc_gate" "$fake_avr_bin/avr-gcc" "$2" "$3" \
-		>"$output" 2>&1 || avr_rc=$?
+	FAKE_AVR_BANNER=$1 "$avr_gate_tree/test/avr_compiler_version.sh" \
+		"$fake_avr_bin/avr-gcc" "$2" "$3" >"$output" 2>&1 || avr_rc=$?
 }
 avr_gate 'avr-gcc (GCC) 7.3.0' file strict
 [ "$avr_rc" -eq 0 ] && [ ! -s "$output" ] \
@@ -3422,6 +3429,16 @@ for diagnostic in "release-pinned avr-gcc $avr_gcc_pin" 'avr-gcc (GCC) 14.3.0' \
 	grep -Fq -- "$diagnostic" "$output" \
 		|| fail "drifted-avr-gcc diagnostic omitted: $diagnostic"
 done
+# Installed but not first on PATH: told to fix PATH, not to reinstall.
+mkdir -p "$avr_gate_tree/third_party/avr-toolchain/usr/bin"
+cp -p "$fake_avr_bin/avr-gcc" "$avr_gate_tree/third_party/avr-toolchain/usr/bin/avr-gcc"
+: > "$avr_gate_tree/third_party/avr-toolchain/.avr-toolchain.stamp"
+avr_gate 'avr-gcc (GCC) 14.3.0' file strict
+[ "$avr_rc" -eq 1 ] && grep -Fq 'installed, but not first on PATH' "$output" \
+		&& grep -Fq 'third_party/avr-toolchain/usr/bin:$PATH' "$output" \
+		&& ! grep -Fq scripts/fetch_avr_toolchain.sh "$output" \
+	|| fail "an installed-but-unselected pinned toolchain was not told to fix PATH only (rc=$avr_rc): $(cat "$output")"
+rm -rf "$avr_gate_tree/third_party"
 avr_gate 'avr-gcc (GCC) 17.3.0' file strict
 [ "$avr_rc" -eq 1 ] \
 	|| fail "a banner merely containing the pin was accepted (rc=$avr_rc)"
