@@ -579,9 +579,12 @@ cleanup_mutation_run() {
     # grace period to close worker and checker launch windows. Numeric IDs are
     # signalled only while the shell still owns the job or the session still
     # carries its private token, so a completed ID cannot hit an unrelated reuse.
+    # List running and stopped jobs only. `jobs -p` also lists jobs Bash has
+    # already reaped (bash 5.3 keeps signal-killed ones too): their IDs are free
+    # for reuse, and they held this loop "alive" until it gave up.
     for ((attempt = 0; attempt < 120; attempt++)); do
         alive=0
-        if jobs -p > "$job_file" 2>/dev/null; then
+        if { jobs -rp && jobs -sp; } > "$job_file" 2>/dev/null; then
             mapfile -t groups < "$job_file"
         else
             groups=()
@@ -2226,6 +2229,10 @@ EOF
     if wait "$interrupt_runner_pid"; then interrupt_runner_rc=0; else interrupt_runner_rc=$?; fi
     [ "$interrupt_runner_rc" -eq 143 ] \
         || interrupt_error="${interrupt_error:+$interrupt_error; }interrupted runner exited $interrupt_runner_rc, expected 143"
+    # The runner's own cleanup must prove its processes gone, not only this
+    # check: it removes its run root on that proof and retains it otherwise.
+    [ ! -e "$interrupt_result" ] \
+        || interrupt_error="${interrupt_error:+$interrupt_error; }interrupted runner could not prove its own cleanup and retained $interrupt_result"
 
     if [ -n "${interrupt_checker_sid:-}" ]; then
         for ((interrupt_attempt = 0; interrupt_attempt < 100; interrupt_attempt++)); do
@@ -2363,6 +2370,12 @@ EOF
             kill -KILL -- "-$job_gap_pgid" 2>/dev/null || true
         fi
         echo "ERROR: unregistered worker survived current-shell job cleanup" >&2
+        exit 1
+    fi
+    # As for the interrupted runner: its cleanup must prove its own exit, silently.
+    if [ -e "$job_gap_result" ] || [ -s "$job_gap_runner_log" ]; then
+        echo "ERROR: worker launch-gap runner could not prove its own cleanup:" >&2
+        sed 's/^/  /' "$job_gap_runner_log" >&2
         exit 1
     fi
     if mutation_checker_status_is_infrastructure_error 1; then
@@ -3030,7 +3043,7 @@ EOF
             "$RESULT_DIR/selftest-no-newline.status" >/dev/null 2>&1; then
         echo "ERROR: mutation accounting accepted an unterminated status" >&2; exit 1
     fi
-    echo "mutation sandbox/accounting validation: 133 checks, 0 failures"
+    echo "mutation sandbox/accounting validation: 135 checks, 0 failures"
     exit 0
 fi
 

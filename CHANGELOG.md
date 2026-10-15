@@ -144,6 +144,17 @@ lengths.
   release preflight refuse a default that is not the program avr-gcc names as
   its own, and name the `PATH` order that fixes it. An `OBJCOPY=` or `OBJDUMP=`
   override is reported and not enforced.
+- **An interrupted mutation run could not prove its cleanup on bash 5.3.** The
+  exit cleanup counted every `jobs -p` entry as a live job, and Ubuntu 26.04's
+  bash 5.3 keeps reaped jobs in that list, signal-killed ones included. A
+  cancelled or interrupted run therefore spent its whole grace period waiting on
+  jobs that were gone, ready to signal the process group of any process that
+  reused one of their IDs, then reported `could not prove all owned processes
+  exited` and left its run root in `/tmp`.
+  The sandbox selftest showed the message and still passed. Cleanup now lists
+  running and stopped jobs only, and the selftest fails unless both interrupted
+  fixtures prove their own cleanup. Completed runs were not affected, and bash
+  5.2 runs were clean.
 
 ## [0.9.17] - 2026-10-14
 
