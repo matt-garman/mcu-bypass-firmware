@@ -440,8 +440,8 @@ lane consumes this suppression file, so its 12.3 / 14.2 / `unreadVariable` waive
 live here. The parallel native-cppcheck lane (`analyze-cppcheck`,
 `attiny202-analyze-cppcheck`) does **not** read this file; it waives the same
 `unreadVariable` through an inline `--suppress=unreadVariable:<shell>` on its
-command line (`CPPCHECK_FLAGS`, `XT_CPPCHECK_FLAGS`). The clang-tidy and
-clang-analyzer lanes report nothing for the construct.
+command line (`CPPCHECK_FLAGS`, `XT_CPPCHECK_FLAGS`). The clang-tidy,
+clang-analyzer and avr-gcc `-fanalyzer` lanes report nothing for the construct.
 
 **Scope control.** File-scoped like the rest of the list: a new instance of any of
 these IDs in another authored source or header re-fails its lane. Because the

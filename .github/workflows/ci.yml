@@ -24,12 +24,13 @@ name: CI
 # Most of the matrix lives inside the Makefile: a single `make test` already
 # exercises all three variants (cd4053_simple, cd4053_with_mute,
 # tq2_l2_5v_relay) across the ATtiny13a and the tinyx5 family, plus every
-# analysis gate (clang-tidy, cppcheck, clang-analyzer, MISRA-C:2012), the
-# ATtiny202 host-side oracles (fail-closed build regression, the output/delay/
-# fault parsers and the golden-model FFI bridge), the PIC10F320 host lanes
-# (firmware<->core equivalence, actuation, host fault injection and firmware
-# line coverage, all three variants), the PIC10F322 and PIC12F675 shipping-
-# source coverage gates, the simavr functional and fault-injection lanes, and
+# analysis gate (clang-tidy, cppcheck, clang-analyzer, avr-gcc -fanalyzer,
+# MISRA-C:2012), the ATtiny202 host-side oracles (fail-closed build regression,
+# the output/delay/fault parsers and the golden-model FFI bridge), the
+# PIC10F320 host lanes (firmware<->core equivalence, actuation, host fault
+# injection and firmware line coverage, all three variants), the PIC10F322 and
+# PIC12F675 shipping-source coverage gates, the simavr functional and
+# fault-injection lanes, and
 # the coverage gates. None of that needs a vendor toolchain: it runs on the host
 # compiler, avr-gcc and simavr, all from apt. The jobs below wrap it, surface
 # the per-MCU build matrix as discrete checks, add the lanes `make test` cannot
@@ -63,7 +64,8 @@ env:
 jobs:
   # -------------------------------------------------------------------------
   # Gating job: the full fast suite. This is the "build passing" badge.
-  # `make test` = analyze (clang-tidy + cppcheck + clang-analyzer + MISRA)
+  # `make test` = analyze (clang-tidy + cppcheck + clang-analyzer
+  #             + avr-gcc -fanalyzer + MISRA)
   #             + host/model-check/symbolic/fuse tests
   #             + CBMC SAT/SMT proof of the real bypass_pure.c core
   #             + PIC10F320 host lanes, all three variants (equivalence against

@@ -303,7 +303,7 @@ unexport _MAKE_SERIAL_VARIANT_EMPTY _MAKE_SERIAL_VARIANT_MULTI \
 #   `make VARIANT=tq2_l2_5v_relay attiny45-program` (ATtiny45).
 #
 # HOW THE TESTS ARE LAYERED (fast -> thorough)
-#   1. analyze            static analysis (clang-tidy / -fanalyzer)
+#   1. analyze            static analysis (clang-tidy, cppcheck, clang + avr-gcc analyzers, MISRA)
 #   2. test-host          independent "golden model" of the debounce algorithm
 #   3. test-model-check   exhaustive proof of invariants over the whole state space
 #   4. test-sim-attiny13a / -attiny85   the REAL compiled firmware run inside
@@ -979,8 +979,30 @@ endef
 # as the stand-in for `gcc -fanalyzer` while the pinned avr-gcc (7.3.0)
 # predated -fanalyzer (GCC 10+); clang's analyzer understands -target avr and the
 # real avr-libc headers, giving equivalent inter-procedural flow analysis. The
-# avr-gcc 14 pin has -fanalyzer; adding it is TODO T25-gcc-analyzer.
+# avr-gcc 14 pin has -fanalyzer, which now runs as a gate of its own
+# (analyze-gcc, attiny202-analyze-gcc); clang's stays the second opinion.
 CLANG              ?= clang
+
+# avr-gcc's own path-sensitive analyzer. Added to CFLAGS_COMMON, whose -Werror
+# turns each analyzer warning into an error. -Wanalyzer-too-complex (off by
+# default) reports an analysis that hit its exploration limit and stopped, so a
+# truncated analysis fails rather than reporting clean over the paths it reached.
+override GCC_ANALYZER_FLAGS := -fanalyzer -Wanalyzer-too-complex
+# The analyzer gates reach the image rules through a sub-make named by this
+# variable, not by $(MAKE) written in the recipe. GNU Make runs any recipe line
+# that spells $(MAKE) even under -n, and these lines also probe, skip and check
+# the images they expect, so a dry run (`make -np attiny202-test`, in
+# test-stack-bound-regression) executed them and failed. Named this way, a dry
+# run prints them, as it does every other analyzer recipe.
+override GCC_ANALYZER_MAKE = $(MAKE)
+# $(call gcc_analyzer_probe_sh,<what is skipped>): $(SKIP) unless $(CC) can run
+# -fanalyzer. The historic avr-gcc 7.3.0 cannot.
+override define gcc_analyzer_probe_sh
+if ! $(CC) -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then \
+	echo "CC=$(CC) cannot run -fanalyzer (not installed, or older than GCC 10); skipping $(1)"; \
+	$(SKIP); \
+fi
+endef
 
 # --- Firmware compile/link flags ---------------------------------------------
 # -Os                 optimize for size (tiny flash)
@@ -1058,7 +1080,8 @@ FORCE:
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
-        test-analyze-variant-guard test-analyzer-gate test-cross-compiler-guard \
+        test-analyze-variant-guard test-analyzer-gate test-gcc-analyzer-gate \
+        test-cross-compiler-guard \
         test-variant-selector-guard \
         test-fuse-injection-contract test-static-assert-guards \
         test-attiny202-guard-mutations test-pic-guard-mutations \
@@ -1067,7 +1090,7 @@ FORCE:
         pic10f322-test-target pic10f322-test-target-variants pic10f322-test-io pic10f322-test-lockstep \
         test-stack-bound attiny202-test-stack-bound test-stack-bound-regression test-flash-budget \
         test-flash-budget-regression test-soak test-soak-reset-witness \
-        analyze analyze-tidy analyze-cppcheck analyze-deep \
+        analyze analyze-tidy analyze-cppcheck analyze-deep analyze-gcc \
         coverage coverage-check coverage-clean
 
 # ============================================================================
@@ -2956,9 +2979,39 @@ override ANALYSIS_XT_ROWS := \
                      $(call analysis_tuple,src/bypass_mcu_avr_xt.c,TQ2_L2_5V_RELAY) \
                      $(ANALYSIS_SHARED_MODULAR_ROWS)
 
-.PHONY: attiny202-analyze attiny202-analyze-cppcheck attiny202-analyze-misra
-attiny202-analyze: attiny202-analyze-cppcheck attiny202-analyze-misra
-	@echo "=== ATtiny202 static analysis (cppcheck + MISRA) complete ==="
+.PHONY: attiny202-analyze attiny202-analyze-cppcheck attiny202-analyze-gcc attiny202-analyze-misra
+attiny202-analyze: attiny202-analyze-cppcheck attiny202-analyze-gcc attiny202-analyze-misra
+	@echo "=== ATtiny202 static analysis (cppcheck + avr-gcc -fanalyzer + MISRA) complete ==="
+
+# avr-gcc -fanalyzer over the three shipping ATtiny202 images, the AVR-XT
+# counterpart of analyze-gcc and built the same way: the `attiny202` image
+# recipe itself, with $(GCC_ANALYZER_FLAGS) added to CFLAGS_COMMON, into a
+# private build directory, every variant, each image required afterwards. The
+# recipe's own transcript (budgets, and each failing variant's compiler log) is
+# printed only on failure.
+attiny202-analyze-gcc: $(call analysis_matrix_sources,$(ANALYSIS_XT_ROWS)) $(XT_HEADERS)
+	@$(call gcc_analyzer_probe_sh,the ATtiny202 avr-gcc -fanalyzer analysis); \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping the ATtiny202 avr-gcc -fanalyzer analysis"; \
+		$(SKIP); \
+	fi; \
+	d=`mktemp -d "$${TMPDIR:-/tmp}/attiny202-analyze-gcc.XXXXXX"` || exit 1; \
+	echo "avr-gcc -fanalyzer (ATtiny202): $(CC) over the $(words $(XT_RELEASE_IMAGES)) shipping images"; \
+	rc=0; \
+	$(GCC_ANALYZER_MAKE) --no-print-directory XT_BUILD_DIR="$$d" \
+		VARIANTS='$(XT_VARIANTS_SUPPORTED)' \
+		CFLAGS_COMMON='$(CFLAGS_COMMON) $(GCC_ANALYZER_FLAGS)' \
+		attiny202 > "$$d/analyze.log" 2>&1 || rc=1; \
+	if [ "$$rc" -ne 0 ]; then \
+		cat "$$d/analyze.log"; \
+	else \
+		for img in $(patsubst %.hex,%.elf,$(XT_RELEASE_IMAGES)); do \
+			[ -s "$$d/$$img" ] || { echo "FAIL: avr-gcc -fanalyzer: no analyzed image $$img"; rc=1; }; \
+		done; \
+	fi; \
+	rm -rf "$$d"; \
+	[ "$$rc" -eq 0 ] || exit 1; \
+	echo "avr-gcc -fanalyzer (ATtiny202): clean"
 
 attiny202-analyze-cppcheck: $(call analysis_matrix_sources,$(ANALYSIS_XT_ROWS)) $(XT_HEADERS)
 	@if ! command -v $(CPPCHECK) >/dev/null 2>&1; then \
@@ -3285,7 +3338,8 @@ TEST_GATES_LATE = \
         test-reference-contract test-release-prepare \
         test-resource-tables \
         test-pinout-alignment test-analysis-matrix test-misra-output-contract \
-        test-analyze-variant-guard test-analyzer-gate test-cross-compiler-guard \
+        test-analyze-variant-guard test-analyzer-gate test-gcc-analyzer-gate \
+        test-cross-compiler-guard \
         test-variant-selector-guard \
         test-fuse-injection-contract \
         test-soak-reset-witness test-strict-tools \
@@ -4053,6 +4107,20 @@ test-analyzer-gate:
 	fi; \
 	./test/test_analyzer_gate.sh '$(CLANG)'
 
+# Proof that analyze-gcc and attiny202-analyze-gcc can fail, end to end, in a
+# scratch tree: a planted NULL dereference must fail every shipping AVR image,
+# one diagnostic per image, and an analysis cut short by its exploration limit
+# must fail too. Both depend on flags (-Werror from CFLAGS_COMMON,
+# -Wanalyzer-too-complex) that a later edit could drop while the clean tree
+# stayed green.
+test-gcc-analyzer-gate:
+	@$(call gcc_analyzer_probe_sh,the avr-gcc analyzer-gate proof); \
+	if [ ! -f "$(XT_SPEC_FILE)" ] || [ ! -f "$(XT_IO_HEADER)" ]; then \
+		echo "$(XT_NO_DEVICE_SUPPORT); skipping the avr-gcc analyzer-gate proof"; \
+		$(SKIP); \
+	fi; \
+	./test/test_gcc_analyzer_gate.sh '$(CC)'
+
 # Host-only proof that the cross-compiler lane admits only a genuinely second
 # compiler: fake toolchains that are absent, silent, the pin, or CC itself.
 test-cross-compiler-guard:
@@ -4769,13 +4837,16 @@ attiny13a-trace: variant-selectors-valid test/avr/test_trace_$(VARIANT)
 # STATIC ANALYSIS & COVERAGE
 # ============================================================================
 
-# Static analysis of the firmware. Runs THREE independent analyzers and gates
+# Static analysis of the firmware. Runs FOUR independent analyzers and gates
 # the build on any finding:
 #   - clang-tidy   : lint + bug-pattern checks (ANALYZE_CMD)
 #   - cppcheck     : second-opinion static analyzer (analyze-cppcheck)
 #   - clang --analyze : deep symbolic-execution path analysis (analyze-deep),
 #                       chosen as the stand-in for `gcc -fanalyzer` while the
 #                       pinned avr-gcc (7.3) predated it.
+#   - avr-gcc -fanalyzer : path analysis by the image-defining compiler, over
+#                       every shipping Classic image compiled as it ships
+#                       (analyze-gcc)
 #   - cppcheck misra : MISRA-C:2012 compliance gate (analyze-misra), clean
 #                      except for the documented deviations in MISRA_COMPLIANCE.md
 # -Wconversion is already enforced by the normal build (CFLAGS); these targets
@@ -4797,31 +4868,24 @@ attiny13a-trace: variant-selectors-valid test/avr/test_trace_$(VARIANT)
 # classic-variant-request-valid rejects empty, unknown and duplicate names, the
 # same guard the build targets carry. Recognized SUBSETS stay valid for the
 # caller-selected clang lanes; cppcheck/MISRA always retain their full matrix.
-analyze: analyze-tidy analyze-cppcheck analyze-deep analyze-misra
-	@echo "=== static analysis (clang-tidy + cppcheck + clang-analyzer + MISRA) clean ==="
+analyze: analyze-tidy analyze-cppcheck analyze-deep analyze-gcc analyze-misra
+	@echo "=== static analysis (clang-tidy + cppcheck + clang-analyzer + avr-gcc -fanalyzer + MISRA) clean ==="
 
-# clang-tidy (or whatever ANALYZE_CMD points at). Falls back to avr-gcc
-# -fanalyzer if a NEWER avr-gcc that supports it is ever installed; otherwise
-# errors with guidance.
+# clang-tidy (or whatever ANALYZE_CMD points at); errors with guidance when it
+# is absent. avr-gcc -fanalyzer used to stand in for it, but that analyzer is a
+# gate of its own now (analyze-gcc), so standing in would only run it twice and
+# drop clang-tidy's checks unnoticed.
 analyze-tidy: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
 	@cmd=$(word 1,$(ANALYZE_CMD)); \
-	if command -v $$cmd >/dev/null 2>&1; then \
-		for tuple in $(CLANG_CLASSIC_ROWS); do \
-			f=$${tuple%%:*}; selector=$${tuple#*:}; \
-			echo "clang-tidy: $$cmd $$f"; \
-			$(ANALYZE_CMD) $$f -- $(CLANG_TIDY_FLAGS) -D$$selector || exit 1; \
-		done; \
-	elif $(CC) -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then \
-		echo "avr-gcc -fanalyzer"; \
-		for tuple in $(CLANG_CLASSIC_ROWS); do \
-			f=$${tuple%%:*}; selector=$${tuple#*:}; \
-			$(CC) $(CFLAGS) -D$$selector -fanalyzer -c $$f -o $(FW_BASE).analyze.o || exit 1; \
-		done; \
-		rm -f $(FW_BASE).analyze.o; \
-	else \
-		echo "No clang-tidy and avr-gcc lacks -fanalyzer. Install clang-tidy or set ANALYZE_CMD=..."; \
+	if ! command -v $$cmd >/dev/null 2>&1; then \
+		echo "No clang-tidy ($$cmd). Install clang-tidy or set ANALYZE_CMD=..."; \
 		exit 1; \
-	fi
+	fi; \
+	for tuple in $(CLANG_CLASSIC_ROWS); do \
+		f=$${tuple%%:*}; selector=$${tuple#*:}; \
+		echo "clang-tidy: $$cmd $$f"; \
+		$(ANALYZE_CMD) $$f -- $(CLANG_TIDY_FLAGS) -D$$selector || exit 1; \
+	done
 
 # Cppcheck second-opinion analyzer (gates via --error-exitcode=2). Analyze the
 # same five modular TUs under both materially distinct Classic device models.
@@ -4834,8 +4898,10 @@ analyze-cppcheck: classic-variant-request-valid $(call analysis_matrix_sources,$
 	fi
 
 # Deep path analysis via the clang static analyzer on the AVR target. Emits
-# diagnostics as text and FAILS the build on any report (-Werror). This is the
-# `-fanalyzer`-equivalent gate.
+# diagnostics as text and FAILS the build on any report. It is the second
+# opinion beside avr-gcc's own analyzer (analyze-gcc), so it errors with guidance
+# when clang is absent: avr-gcc -fanalyzer used to stand in, and standing in now
+# would be the first opinion twice.
 # -Werror does not reach static-analyzer findings: `clang --analyze -Werror`
 # prints a null dereference as a warning and exits 0, on clang 18 and 21 alike,
 # so until -analyzer-werror this gate could report a finding but never fail on
@@ -4847,25 +4913,50 @@ override CLANG_ANALYZER_GATE_FLAGS := -Xclang -analyzer-werror \
 	-Xclang -analyzer-config -Xclang silence-checkers=core.FixedAddressDereference \
 	-Xclang -analyzer-config-compatibility-mode=true
 analyze-deep: classic-variant-request-valid $(FW_SOURCES) $(FW_HEADERS)
-	@if command -v $(CLANG) >/dev/null 2>&1; then \
-		for tuple in $(CLANG_CLASSIC_ROWS); do \
-			f=$${tuple%%:*}; selector=$${tuple#*:}; \
-			echo "clang --analyze (-target avr): $(CLANG) $$f"; \
-			$(CLANG) --analyze -Xclang -analyzer-output=text -Werror \
-				$(CLANG_ANALYZER_GATE_FLAGS) \
-				$(CLANG_AVR_FLAGS) -D$$selector $$f || exit 1; \
-		done; \
-	elif $(CC) -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then \
-		echo "clang unavailable; using avr-gcc -fanalyzer"; \
-		for tuple in $(CLANG_CLASSIC_ROWS); do \
-			f=$${tuple%%:*}; selector=$${tuple#*:}; \
-			$(CC) $(CFLAGS) -D$$selector -fanalyzer -c $$f -o $(FW_BASE).analyze.o || exit 1; \
-		done; \
-		rm -f $(FW_BASE).analyze.o; \
-	else \
-		echo "No deep analyzer available (need clang or avr-gcc>=10 with -fanalyzer)."; \
+	@if ! command -v $(CLANG) >/dev/null 2>&1; then \
+		echo "No clang ($(CLANG)) for the second-opinion analyzer. Install clang or set CLANG=..."; \
 		exit 1; \
-	fi
+	fi; \
+	for tuple in $(CLANG_CLASSIC_ROWS); do \
+		f=$${tuple%%:*}; selector=$${tuple#*:}; \
+		echo "clang --analyze (-target avr): $(CLANG) $$f"; \
+		$(CLANG) --analyze -Xclang -analyzer-output=text -Werror \
+			$(CLANG_ANALYZER_GATE_FLAGS) \
+			$(CLANG_AVR_FLAGS) -D$$selector $$f || exit 1; \
+	done
+
+# avr-gcc's own analyzer, -fanalyzer, over every shipping Classic image (all
+# three output stages on the ATtiny13A and each tinyx5 part). It runs the image
+# rules themselves, with $(GCC_ANALYZER_FLAGS) added to CFLAGS_COMMON, into a
+# private build directory, so it analyzes the shipping compile commands --
+# compiler, device, clock, selector and flags -- rather than a restatement of
+# them. The image list is the release's own (ATTINY13A_ and TINYX5_
+# RELEASE_IMAGES), and VARIANTS is pinned to the full set: like cppcheck and
+# MISRA, this gate rejects an invalid request but does not shrink for a valid
+# subset. -k reports every image with a finding, not only the first. Each image
+# must exist afterwards, so a sub-make that exits 0 having compiled less cannot
+# pass. The images are discarded; analysis does not change what ships.
+analyze-gcc: classic-variant-request-valid $(call analysis_matrix_sources,$(ANALYSIS_CLASSIC_ROWS)) $(FW_HEADERS)
+	@$(call gcc_analyzer_probe_sh,the Classic AVR avr-gcc -fanalyzer analysis); \
+	d=`mktemp -d "$${TMPDIR:-/tmp}/analyze-gcc.XXXXXX"` || exit 1; \
+	elves=; \
+	for img in $(patsubst %.hex,%.elf,$(ATTINY13A_RELEASE_IMAGES) $(TINYX5_RELEASE_IMAGES)); do \
+		elves="$$elves $$d/$$img"; \
+	done; \
+	echo "avr-gcc -fanalyzer (Classic AVR): $(CC) over the $(words $(ATTINY13A_RELEASE_IMAGES) $(TINYX5_RELEASE_IMAGES)) shipping images"; \
+	rc=0; \
+	$(GCC_ANALYZER_MAKE) --no-print-directory -k AVR_BUILD_DIR="$$d" \
+		VARIANTS='$(CLASSIC_VARIANTS_SUPPORTED)' \
+		CFLAGS_COMMON='$(CFLAGS_COMMON) $(GCC_ANALYZER_FLAGS)' \
+		$$elves || rc=1; \
+	if [ "$$rc" -eq 0 ]; then \
+		for elf in $$elves; do \
+			[ -s "$$elf" ] || { echo "FAIL: avr-gcc -fanalyzer: no analyzed image $${elf##*/}"; rc=1; }; \
+		done; \
+	fi; \
+	rm -rf "$$d"; \
+	[ "$$rc" -eq 0 ] || exit 1; \
+	echo "avr-gcc -fanalyzer (Classic AVR): clean"
 
 # MISRA-C:2012 compliance analysis (cppcheck misra addon). Runs every Classic
 # modular TU under both ATtiny13A and tinyx5 models with an explicit reviewed
@@ -8214,7 +8305,7 @@ help:
 	@echo "  attiny202-smoke  toolchain gate: compile/link the peripheral smoke image, assert"
 	@echo "                   avrxmega3 + $(XT_FLASH_BYTES) B budget (standalone; skips without device support)"
 	@echo "  attiny202        build all variants; enforce 2 KB flash and $(XT_STATIC_RAM_LIMIT)/$(XT_SRAM_BYTES) B static-RAM limits"
-	@echo "  attiny202-analyze  cppcheck + MISRA on the AVR-XT shell (avr-libc headers; standalone)"
+	@echo "  attiny202-analyze  cppcheck + avr-gcc -fanalyzer + MISRA on the AVR-XT shell (avr-libc headers; standalone)"
 	@echo "  attiny202-delay-oracle  verify disassembled coil-pulse widths + tick-ISR instruction ceiling"
 	@echo "  attiny202-test   all ATtiny202 pre-hardware checks (fuses + smoke + build + stack + analyze + delay)"
 	@echo "  attiny202-test-stack-bound  shipping-flag frame bound for all immutable variants ($(XT_STACK_MAX_FRAME) B)"
@@ -8296,6 +8387,7 @@ help:
 	@echo "  test-pinout-alignment  every ASCII package-pinout diagram draws a square box (included in test)"
 	@echo "  test-analyze-variant-guard  every analyze-* target rejects a bad VARIANTS= instead of analyzing less (included in test)"
 	@echo "  test-analyzer-gate  analyze-deep fails on a planted analyzer finding and accepts register access (included in test)"
+	@echo "  test-gcc-analyzer-gate  analyze-gcc and attiny202-analyze-gcc fail on a planted finding and on a truncated analysis (included in test)"
 	@echo "  test-cross-compiler  the Classic images built by a second avr-gcc (ALT_AVR_BIN; default the historic 7.3.0) pass the simavr suites"
 	@echo "  test-cross-compiler-guard  the cross-compiler lane refuses an absent, silent or pinned second compiler (included in test)"
 	@echo "  test-analysis-matrix  exact 30-row cppcheck/MISRA target/TU/selector contract (included in test)"
@@ -8313,7 +8405,7 @@ help:
 	@echo "  attiny13a-trace  emit $(AVR_BUILD_DIR)/bypass_trace.vcd for VARIANT (GTKWave)"
 	@echo "Analysis:"
 	@echo "  analyze         static analysis of core + all drivers (3 analyzers)"
-	@echo "  analyze-tidy / analyze-cppcheck / analyze-deep  individual analyzers"
+	@echo "  analyze-tidy / analyze-cppcheck / analyze-deep / analyze-gcc  individual analyzers"
 	@echo "  analyze-misra   MISRA-C:2012 gate (cppcheck misra addon; see MISRA_COMPLIANCE.md)"
 	@echo "  analyze-misra-report  full MISRA inventory incl. waived deviations (report-only)"
 	@echo "  coverage        human-readable golden-model coverage report"

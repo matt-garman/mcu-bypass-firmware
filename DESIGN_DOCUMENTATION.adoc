@@ -1041,7 +1041,7 @@ See TOOLCHAIN.adoc for details.  Summary:
       ** cppcheck MISRA addon
     * AVR Classic
       ** avr tools: avr-gcc, avr-libc, avrdude toolchain
-      ** clang/clang-tidy static-analysis lanes
+      ** clang/clang-tidy and avr-gcc -fanalyzer static-analysis lanes
       ** no Arduino
       ** simavr
     * ATtiny202 (AVR-XT)

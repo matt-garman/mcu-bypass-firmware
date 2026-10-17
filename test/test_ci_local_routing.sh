@@ -162,10 +162,9 @@ for tool in gpsim cppcheck pkg-config c++ cc clang clang-tidy cbmc gcov python3 
 exit 0
 EOF
 done
-# avr-gcc exits NON-zero so the preflight's `-fanalyzer` probe reports the
-# fallback as unavailable, which is what drives it down the clang/clang-tidy
-# branch. That is the branch worth covering here: the alternative (a fake that
-# claims -fanalyzer support) would skip those two checks entirely.
+# avr-gcc answers only -print-file-name and exits NON-zero for anything else.
+# The preflight no longer asks it about -fanalyzer: clang and clang-tidy are
+# required outright, so the fakes above must stand in for both.
 cat > "$fakebin/avr-gcc" <<'EOF'
 #!/usr/bin/env bash
 # The ATtiny202 device support, as GCC reports a file it has: the spec file,

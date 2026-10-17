@@ -80,8 +80,24 @@ lengths.
   and afterwards checks that every image names the second compiler in its ELF
   `.comment`. CI runs it as the `cross-compiler` job; `test-cross-compiler-guard`
   in `make test` proves the refusals.
+- **avr-gcc's own path analyzer.** `analyze-gcc`, in `make analyze`, and
+  `attiny202-analyze-gcc`, in `make attiny202-analyze`, run avr-gcc 14.3.0's
+  `-fanalyzer` over all twelve shipping AVR images, by running the image rules
+  themselves with the analyzer added: the image-defining compiler, avr-libc's
+  headers and the shipping flags, rather than a restatement of them. Any finding
+  fails, and so does an analysis that hits its exploration limit
+  (`-Wanalyzer-too-complex`). `test-gcc-analyzer-gate`, in `make test`, proves
+  both gates fail end to end on a planted defect, once per image. They find
+  nothing in the firmware. clang's analyzer stays as the second opinion.
 
 ### Changed
+
+- **clang and clang-tidy are required, not optional.** `analyze-tidy` and
+  `analyze-deep` ran avr-gcc `-fanalyzer` in place of a missing clang-tidy or
+  clang, and `scripts/ci-local.sh` accepted either. With avr-gcc's analyzer now
+  a gate of its own, that stand-in only ran it twice and dropped the second
+  opinion unnoticed, so both targets fail with guidance without their tool, and
+  the local CI preflight requires both.
 
 - **The AVR images are built with Ubuntu 26.04's own avr-gcc 14.3.0.** The
   image-defining AVR compiler moves from avr-gcc 7.3.0 to Ubuntu 26.04's avr-gcc

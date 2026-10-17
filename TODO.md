@@ -126,21 +126,6 @@ Dependencies: a reproducible CI environment for the pinned KLEE/LLVM pair.
 Effort: about 2 hours. Risk: Medium; the proof runs locally but is not watched by
 hosted CI.
 
-### T25-gcc-analyzer - Add avr-gcc's -fanalyzer beside clang --analyze
-
-`analyze-deep` uses clang's static analyzer as the stand-in for `gcc
--fanalyzer`, chosen while the pinned avr-gcc 7.3.0 predated it (GCC 10+). The
-avr-gcc 14.3.0 pin has `-fanalyzer`, which analyzes the code as the shipping
-compiler parses it, with avr-libc's real headers and the project's flags. Run
-it over every shipping translation unit under each selector, fail on any
-finding, and prove the lane can fail with a planted defect, as
-`test-analyzer-gate` does for clang. Keep clang's analyzer as the second
-opinion.
-
-Dependencies: the 14.3.0 pin. Effort: about 1-2 hours. Risk: Medium; a second
-path-sensitive analyzer, and the first that uses the image-defining compiler's
-front end.
-
 ### T25-stack-cross - Add an AVR disassembly stack-depth cross-check
 
 Use `avr-objdump` to recover the actual CALL/RCALL graph, combine it with frame
@@ -813,7 +798,6 @@ The stable ID in each row matches exactly one open section above.
 | T25-golden-cross | Independent-model/direct-core cross-validation | 2.5 | 1-2 h | Medium |
 | T25-klee-path | Bounded full-path KLEE proof | 2.5 | 2-4 h | High assurance value |
 | T25-klee-ci | Execute KLEE in CI | 2.5 | 2 h | Medium |
-| T25-gcc-analyzer | avr-gcc -fanalyzer beside clang --analyze | 2.5 | 1-2 h | Medium |
 | T25-stack-cross | AVR disassembly stack cross-check | 2.5 | 2-3 h | Medium |
 | T25-pic320-thresholds | Optionally centralize PIC10F320 thresholds | 2.5 | 20 min + reruns | Low |
 | T25-wdt-rate | Watchdog pet-frequency measurement | 2.5 | 1-2 h | Medium |

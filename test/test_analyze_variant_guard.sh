@@ -23,8 +23,9 @@
 #
 # SCOPE, stated so the next reader does not over-trust it: the contract half
 # covers targets that consume the caller-selected $(FW_SOURCES) Classic subject.
-# Cppcheck/MISRA now use an immutable complete matrix, but the behavioural half
-# still proves they reject invalid caller requests rather than ignore them.
+# Cppcheck, MISRA and avr-gcc -fanalyzer (analyze-gcc) use an immutable complete
+# matrix, but the behavioural half still proves they reject invalid caller
+# requests rather than ignore them.
 set -euo pipefail
 # A bare `var=$(... grep ...)` that matches nothing takes this suite down with
 # `set -e` and NO output: the failure has no diagnostic, and any guard on the
@@ -193,18 +194,18 @@ expect_reject() {
 	# analysis that stops early still prints findings a reader could mistake for
 	# a verdict over the full matrix.
 	[[ "$output" != *"Checking src/"* && "$output" != *"clang-tidy:"* \
-		&& "$output" != *"clang --analyze"* ]] \
+		&& "$output" != *"clang --analyze"* && "$output" != *"avr-gcc -fanalyzer"* ]] \
 		|| fail "$goal analyzed sources before rejecting VARIANTS=$(printf '%q' "$variants"): $output"
 	checks=$((checks + 1))
 }
 
 # The defect itself, on every analysis target: the retired stage vocabulary
 # names three real output stages and maps to no driver source at all.
-for goal in analyze-tidy analyze-cppcheck analyze-deep analyze-misra analyze-misra-report; do
+for goal in analyze-tidy analyze-cppcheck analyze-deep analyze-gcc analyze-misra analyze-misra-report; do
 	expect_reject "$goal" "$RETIRED" "VARIANTS contains unsupported names"
 done
 
-# The other two malformed requests. One target is enough: all five share the one
+# The other two malformed requests. One target is enough: all six share the one
 # guard target, which the contract half above proves.
 expect_reject analyze-misra "" "VARIANTS must not be empty"
 expect_reject analyze-misra "cd4053_simple cd4053_simple" \

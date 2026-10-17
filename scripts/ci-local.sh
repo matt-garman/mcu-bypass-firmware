@@ -385,16 +385,14 @@ assert_host_toolchain() {
 		|| missing+=("gpg  (apt: gnupg; release-history signature fixtures)")
 	command -v "$cbmc" >/dev/null 2>&1 \
 		|| missing+=("$cbmc  (apt: cbmc; test-cbmc)")
-	# analyze-tidy and analyze-deep each accept their clang tool OR an avr-gcc new
-	# enough for -fanalyzer, and hard-fail (exit 1, NOT a skip) only when neither
-	# is available. Probe the shared fallback once and report a genuine dead end
-	# rather than demanding clang on a box whose avr-gcc can stand in.
-	if ! "$cc" -fsyntax-only -fanalyzer -xc /dev/null >/dev/null 2>&1; then
-		command -v "$tidy" >/dev/null 2>&1 \
-			|| missing+=("$tidy  (apt: clang-tidy; analyze-tidy -- this $cc has no -fanalyzer)")
-		command -v "$clang" >/dev/null 2>&1 \
-			|| missing+=("$clang  (apt: clang; analyze-deep -- this $cc has no -fanalyzer)")
-	fi
+	# analyze-tidy and analyze-deep hard-fail (exit 1, NOT a skip) without their
+	# clang tool. avr-gcc's -fanalyzer no longer stands in for either: it is a
+	# gate of its own (analyze-gcc), so a box without clang lacks a second opinion
+	# that nothing else supplies.
+	command -v "$tidy" >/dev/null 2>&1 \
+		|| missing+=("$tidy  (apt: clang-tidy; analyze-tidy)")
+	command -v "$clang" >/dev/null 2>&1 \
+		|| missing+=("$clang  (apt: clang; analyze-deep)")
 	if [ "${#missing[@]}" -gt 0 ]; then
 		log "Host/AVR toolchain incomplete -- these back lanes that run on EVERY invocation:"
 		for m in "${missing[@]}"; do log "  - $m"; done
@@ -407,7 +405,7 @@ assert_host_toolchain() {
 	# reproduction says so in PREFLIGHT instead of ~12 minutes into the PIC job.
 	"$REPO_ROOT/test/host_compiler_version.sh" "$hostcc" \
 		|| die "host C compiler too old (see TOOLCHAIN.adoc, \"Host toolchain\")."
-	ok "Host/AVR toolchain present ($cc + $hostcc + simavr + $cppcheck_bin + Python/PyYAML + gpg + $cbmc + analyzer + $gcov)."
+	ok "Host/AVR toolchain present ($cc + $hostcc + simavr + $cppcheck_bin + Python/PyYAML + gpg + $cbmc + $clang + $tidy + $gcov)."
 }
 
 # ----------------------------------------------------------------------------

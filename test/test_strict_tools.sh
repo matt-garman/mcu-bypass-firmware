@@ -120,6 +120,12 @@ expect_both attiny202-analyze-cppcheck "cppcheck not installed" \
 	"CPPCHECK=$missing_cppcheck"
 expect_both attiny202-analyze-misra "cppcheck and/or python3 not available" \
 	"CPPCHECK=$missing_cppcheck"
+# avr-gcc's analyzer gates and their proof need an avr-gcc that can run
+# -fanalyzer; the historic 7.3.0 cannot, and an absent one cannot either.
+for target in analyze-gcc attiny202-analyze-gcc test-gcc-analyzer-gate; do
+	expect_both "$target" "CC=$missing_avr_gcc cannot run -fanalyzer" \
+		"CC=$missing_avr_gcc"
+done
 
 # The ATtiny202 compile-guard mutations need avr-gcc, and an avr-gcc with the
 # part's device support. Exercise those decisions separately so the host's real
@@ -137,6 +143,13 @@ chmod 750 "$fake_avr_gcc"
 expect_both test-attiny202-guard-mutations \
 	"no ATtiny202 device support in CC=$fake_avr_gcc and its avr-libc" \
 	"CC=$fake_avr_gcc"
+# The fake also accepts -fanalyzer, so the ATtiny202 analyzer gate and the proof
+# reach their device-support check.
+for target in attiny202-analyze-gcc test-gcc-analyzer-gate; do
+	expect_both "$target" \
+		"no ATtiny202 device support in CC=$fake_avr_gcc and its avr-libc" \
+		"CC=$fake_avr_gcc"
+done
 
 # --- all three PIC parts' optional-tool recipes ------------------------------
 # The build directories are redirected into the scratch tree: `pic10f322`,
@@ -401,6 +414,6 @@ fi
 	|| fail "analyze-cppcheck omitted its per-profile execution diagnostics"
 checks=$((checks + 1))
 
-[ "$checks" -eq 79 ] \
-	|| fail "strict optional-tool inventory ran $checks checks, expected 79"
+[ "$checks" -eq 89 ] \
+	|| fail "strict optional-tool inventory ran $checks checks, expected 89"
 printf 'strict optional-tool validation (host + AVR-XT + all three PIC parts): %d checks, 0 failures\n' "$checks"
