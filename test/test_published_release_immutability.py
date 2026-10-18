@@ -167,6 +167,10 @@ IMAGE_CONTINUITY = {
     "v0.9.16": (21, 0, "a documentation and release-policy release: every "
                        "firmware source change was a comment, so all 21 "
                        "images were republished byte for byte"),
+    "v0.9.17": (21, 0, "a test and release-policy release: the in-range "
+                       "context check became unconditional source, but every "
+                       "image already compiled it in, so removing the unused "
+                       "alternate branches left all 21 byte for byte"),
 }
 
 
