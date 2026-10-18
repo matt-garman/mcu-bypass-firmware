@@ -52,6 +52,8 @@ lengths.
 
 ## [Unreleased]
 
+## [0.9.18] - 2026-10-18
+
 ### Added
 
 - **Ubuntu 26.04 hosts pass every gate natively.** `scripts/fetch_yasimavr.sh`
@@ -1864,7 +1866,8 @@ to six parts and 18 images.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.17...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.18...HEAD
+[0.9.18]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.15...v0.9.16
 [0.9.15]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.14...v0.9.15
