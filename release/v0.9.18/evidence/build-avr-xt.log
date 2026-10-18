@@ -1,0 +1,7 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+=== ATtiny202 (avrxmega3) build + resource budgets (flash 2048 B, static RAM 16/128 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : flash 940 B (45.9%) of 2048 B; static RAM 5/16 B (128 B device)
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : flash 980 B (47.9%) of 2048 B; static RAM 5/16 B (128 B device)
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : flash 996 B (48.6%) of 2048 B; static RAM 5/16 B (128 B device)
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+EVIDENCE_RESULT format=2 status=pass role=build evidence=build-avr-xt.log lines=6 payload_sha256=d2618581a66fd4022f5044c131496ab6f166a2f5fe413a0e2e27ea727c2803a9 source_commit=3e3a13294782022baf27555c81c09595b217ec85

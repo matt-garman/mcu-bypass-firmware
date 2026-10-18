@@ -1,0 +1,111 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+== build_avr_classic/bypass-attiny13a-cd4053_simple.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     818 bytes (79.9% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (7.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     858 bytes (83.8% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (7.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny13a-tq2_l2_5v_relay.elf ==
+AVR Memory Usage
+----------------
+Device: attiny13a
+
+Program:     848 bytes (82.8% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (7.8% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny85-cd4053_simple.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     844 bytes (10.3% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (1.0% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny85-cd4053_with_mute.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     884 bytes (10.8% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (1.0% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny85-tq2_l2_5v_relay.elf ==
+AVR Memory Usage
+----------------
+Device: attiny85
+
+Program:     874 bytes (10.7% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (1.0% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny45-cd4053_simple.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     844 bytes (20.6% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (2.0% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny45-cd4053_with_mute.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     884 bytes (21.6% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (2.0% Full)
+(.data + .bss + .noinit)
+
+
+== build_avr_classic/bypass-attiny45-tq2_l2_5v_relay.elf ==
+AVR Memory Usage
+----------------
+Device: attiny45
+
+Program:     874 bytes (21.3% Full)
+(.text + .data + .bootloader)
+
+Data:          5 bytes (2.0% Full)
+(.data + .bss + .noinit)
+
+
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+EVIDENCE_RESULT format=2 status=pass role=final-image-build evidence=final-image-build.log lines=110 payload_sha256=36fac5f0fdefd78904c7273d0c94540b670514b250e38bf66e822b773671bd72 source_commit=3e3a13294782022baf27555c81c09595b217ec85

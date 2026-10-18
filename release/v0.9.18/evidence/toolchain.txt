@@ -1,0 +1,18 @@
+TOOLCHAIN format=1 source_commit=3e3a13294782022baf27555c81c09595b217ec85
+avr-gcc (`CC=/usr/bin/avr-gcc`)	avr-gcc (GCC) 14.3.0
+AVR objcopy (`OBJCOPY=/usr/bin/avr-objcopy`)	GNU objcopy (GNU Binutils) 2.45.50.20251209
+avr-libc (`<avr/version.h>` via CC)	2.2.1 (/usr/lib/avr/include/avr/version.h, dpkg avr-libc 1:2.2.1-1build1)
+host cc	cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+PIC10F322/PIC12F675 XC8 (`PIC_CC=/opt/microchip/xc8/v3.10/bin/xc8-cc`)	Microchip MPLAB XC8 C Compiler V3.10
+PIC10F320 XC8 (`PIC10F320_CC=/opt/microchip/xc8/v3.10/bin/xc8-cc`)	Microchip MPLAB XC8 C Compiler V3.10
+PIC10F322/PIC12F675 DFP (`PIC_DFP`)	/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
+PIC10F320 DFP (`PIC10F320_DFP`)	/opt/microchip/mdfp/PIC10-12Fxxx_DFP/1.9.189/xc8
+gpsim	gpsim-0.32.1 # (Feb  3 2026)
+libsimavr-dev (pkg)	1.6+dfsg-3build2
+yasimavr (patched venv: version sdist patchset)	0.1.6 3742dae364a8d65ff7d4180d00b40c0901656dafcea6e53e94db1127b7ec6285 6c4c034ea39ef1d26e429b751a803c224b18547ff72d4ca45523c3d1c0132923 e14b66201bc6da330760ba2529396728091530a8a71e03876c14dfaa98860b27
+cppcheck	Cppcheck 2.19.0
+cbmc	6.6.0 (cbmc-6.6.0)
+clang	Ubuntu clang version 21.1.8 (6ubuntu1)
+python3	Python 3.14.4
+PIC12F675 Python	Python 3.14.4
+TOOLCHAIN_RESULT format=1 status=pass rows=16 source_commit=3e3a13294782022baf27555c81c09595b217ec85

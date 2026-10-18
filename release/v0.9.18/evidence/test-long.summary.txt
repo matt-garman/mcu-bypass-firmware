@@ -1,0 +1,106 @@
+# test-long retained result
+
+TEST_LONG_RESULT format=1 status=pass source_commit=3e3a13294782022baf27555c81c09595b217ec85 target=test-long strict_tools=1 mutation_allow_skip=0
+
+# Selected terminal output (the full transcript is not retained).
+
+62:MISRA (ATtiny13A/avr8): src/bypass_mcu_avr_classic.c (-DCD4053_SIMPLE)
+65:MISRA (ATtiny13A/avr8): src/bypass_pure.c (-DCD4053_SIMPLE)
+68:MISRA (ATtiny13A/avr8): src/bypass_output_cd4053_simple.c (-DCD4053_SIMPLE)
+71:MISRA (ATtiny13A/avr8): src/bypass_output_cd4053_with_mute.c (-DCD4053_WITH_MUTE)
+74:MISRA (ATtiny13A/avr8): src/bypass_output_tq2_l2_5v_relay.c (-DTQ2_L2_5V_RELAY)
+77:MISRA-C:2012 (ATtiny13A/avr8): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+78:MISRA (tinyx5/avr8): src/bypass_mcu_avr_classic.c (-DCD4053_SIMPLE)
+81:MISRA (tinyx5/avr8): src/bypass_pure.c (-DCD4053_SIMPLE)
+84:MISRA (tinyx5/avr8): src/bypass_output_cd4053_simple.c (-DCD4053_SIMPLE)
+87:MISRA (tinyx5/avr8): src/bypass_output_cd4053_with_mute.c (-DCD4053_WITH_MUTE)
+90:MISRA (tinyx5/avr8): src/bypass_output_tq2_l2_5v_relay.c (-DTQ2_L2_5V_RELAY)
+93:MISRA-C:2012 (tinyx5/avr8): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+94:=== static analysis (clang-tidy + cppcheck + clang-analyzer + avr-gcc -fanalyzer + MISRA) clean ===
+114:cbmc: prove_integrate
+232:cbmc: prove_debounce_step
+350:cbmc: prove_corrupt_state_faults
+468:cbmc: prove_init_context
+586:cbmc: prove_step_transition
+704:cbmc: prove_oor_recovery_step
+822:cbmc: prove_ctx_check_single_bit_detected
+940:cbmc: prove_ctx_check_definition
+1058:cbmc: prove_press_liveness (--unwind 50)
+1172:cbmc: prove_release_liveness (--unwind 50)
+1290:cbmc: prove_oor_recovery_bounded (--unwind 257)
+1408:=== CBMC: all debounce-core proofs SUCCESSFUL ===
+1417:=== -fstack-usage static bound (limit: 32 B/frame) ===
+1447:OK: 5 fresh reports; all frames <= 32 B
+1460:--- fault-injection (ATtiny85) variant: cd4053_simple ---
+1462:--- fault-injection (ATtiny85) variant: cd4053_with_mute ---
+1464:--- fault-injection (ATtiny45) variant: cd4053_with_mute ---
+1466:--- fault-injection (ATtiny45) variant: tq2_l2_5v_relay ---
+1468:--- fault-injection (ATtiny45) variant: cd4053_simple ---
+1470:--- fault-injection (ATtiny85) variant: tq2_l2_5v_relay ---
+1756:===================== PIC10F320 HOST VARIANT cd4053_simple =====================
+1773:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1774:=== all PIC10F320 host lanes passed (variant cd4053_simple) ===
+1775:===================== PIC10F320 HOST VARIANT cd4053_with_mute =====================
+1792:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1793:=== all PIC10F320 host lanes passed (variant cd4053_with_mute) ===
+1794:===================== PIC10F320 HOST VARIANT tq2_l2_5v_relay =====================
+1810:OK: every firmware line is covered except the allowlisted watchdog-reset fault path.
+1811:=== all PIC10F320 host lanes passed (variant tq2_l2_5v_relay) ===
+1812:=== PIC10F320 host equivalence/actuation/fault/coverage validated for all variants ===
+1975:OK: all PIC shipping-source lines are covered except the documented reset path.
+1985:OK: all PIC shipping-source lines are covered except the documented reset path.
+1988:=== mutation testing: baseline sanity check ===
+2006:=== PIC toolchain probe (gates the PIC-shell mutants) ===
+2011:=== PIC10F320 toolchain probe (gates its tool-dependent mutants) ===
+2020:=== PIC12F675 toolchain probe (gates its mutants) ===
+2028:=== AVR-XT toolchain probe (gates the ATtiny202 mutants) ===
+2039:=== running 137 mutants across up to 16 parallel job(s) ===
+2041:=== 32 core/AVR mutants ===
+2075:=== 30 PIC10F320 host mutants (equiv/actuation/fault) ===
+2107:=== 12 PIC10F320 target mutants (gpsim/libgpsim/soak) ===
+2121:=== 6 PIC-shell mutants (gpsim register-level) ===
+2129:=== 1 PIC-shell mutant (WDT liveness, libgpsim soak 2500ms) ===
+2132:=== 10 PIC target mutants (fault + lock-step + target I/O) ===
+2144:=== 23 PIC12F675 mutants (gpsim/target aggregate/soak) ===
+2169:=== 23 ATtiny202 shell mutants (yasimavr sim/lock-step/fault/soak + delay oracle) ===
+2198:=== mutation summary: 137 killed, 0 survived, 0 errored, 0 PIC skipped, 0 ATtiny202 skipped ===
+2203:=== flash-utilization budget (attiny13a: 90% of 1024 B = 921 B) ===
+2204:OK:   build_avr_classic/bypass-attiny13a-cd4053_simple.elf uses 818 B (79.9%) of 1024 B
+2205:OK:   build_avr_classic/bypass-attiny13a-cd4053_with_mute.elf uses 858 B (83.8%) of 1024 B
+2206:OK:   build_avr_classic/bypass-attiny13a-tq2_l2_5v_relay.elf uses 848 B (82.8%) of 1024 B
+2207:OK: measured all 3 firmware images; each is within the 921 B limit.
+2211:--- sim (ATtiny13a) variant: cd4053_simple ---
+2213:--- sim (ATtiny13a) variant: cd4053_with_mute ---
+2215:--- sim (ATtiny13a) variant: tq2_l2_5v_relay ---
+2786:--- sim (ATtiny45) variant: cd4053_simple ---
+2788:--- sim (ATtiny85) variant: cd4053_simple ---
+2790:--- sim (ATtiny45) variant: cd4053_with_mute ---
+2792:--- sim (ATtiny85) variant: cd4053_with_mute ---
+2794:--- sim (ATtiny45) variant: tq2_l2_5v_relay ---
+2796:--- sim (ATtiny85) variant: tq2_l2_5v_relay ---
+4152:MISRA authored-output contract: 42 checks, 0 failures
+4163:--- soak reset witness: variant=cd4053_simple  MCU=attiny85 ---
+4178:golden-model line coverage: 99.39% (floor 90%)
+4180:=== all FULL (exhaustive) pre-hardware tests passed ===
+
+# --- last 20 lines ---
+fuse injection contract: 18 checks, 0 failures (11 bytes injected and burned, round-tripped through the compiled checker; T13_LFUSE drift caught unseen by the checker itself)
+--- soak reset witness: variant=cd4053_simple  MCU=attiny85 ---
+HOSTCC="cc" \
+AVR_SOAK_WITNESS_CFLAGS="-std=c11 -Wall -Wextra -Werror -I/usr/include/simavr -include test/bypass_config_host.h" \
+AVR_SOAK_WITNESS_LIBS="-lsimavr -lelf" \
+AVR_SOAK_WITNESS_MACRO="CD4053_SIMPLE" \
+AVR_SOAK_WITNESS_FW="build_avr_classic/bypass-attiny85-cd4053_simple.elf" \
+AVR_SOAK_WITNESS_MCU="attiny85" \
+AVR_SOAK_WITNESS_F_CPU="1000000UL" \
+AVR_SOAK_WITNESS_DURATION_MS="3000" \
+AVR_SOAK_WITNESS_LIVENESS_MS="1000" \
+AVR_SOAK_WITNESS_KILL_TIMER_MS="1500" \
+./test/test_soak_reset_witness.sh
+soak reset witness: 16 checks, 0 failures (un-pet run recorded 1 reset(s))
+./test/test_strict_tools.sh
+strict optional-tool validation (host + AVR-XT + all three PIC parts): 89 checks, 0 failures
+golden-model line coverage: 99.39% (floor 90%)
+verified-core line coverage (src/bypass_pure.c): 100.00% (floor 95%)
+=== all FULL (exhaustive) pre-hardware tests passed ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'

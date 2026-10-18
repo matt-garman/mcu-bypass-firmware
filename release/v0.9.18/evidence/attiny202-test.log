@@ -1,0 +1,101 @@
+make[1]: Entering directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+./test/avr/test_fuses
+fuse-byte verification:
+  ATtiny13a: lfuse=0x4a hfuse=0xf9
+  ATtiny85:  lfuse=0x62 hfuse=0xcc
+  ATtiny202:  WDTCFG=0x06 BODCFG=0xe5 OSCCFG=0x01 SYSCFG0=0xf6 SYSCFG1=0x07 APPEND=0x00 BOOTEND=0x00
+fuse checks: 46 checks, 0 failures
+ATTINY202_FUSE_WDTCFG=0x06 ATTINY202_FUSE_BODCFG=0xE5 ATTINY202_FUSE_OSCCFG=0x01 ATTINY202_FUSE_SYSCFG0=0xF6 ATTINY202_FUSE_SYSCFG1=0x07 ATTINY202_FUSE_APPEND=0x00 ATTINY202_FUSE_BOOTEND=0x00 PYTHONPATH=test/avr python3 test/avr/test_attiny202_fuses.py
+ATtiny202 simulator fuse validation: 39 checks, 0 failures
+=== ATtiny202 (avrxmega3) smoke: compile + link + arch + 2048 B budget ===
+OK:   avrxmega3, build_avr_classic/attiny202_smoke.elf uses 246 B (12.0%) of 2048 B
+=== ATtiny202 (avrxmega3) build + resource budgets (flash 2048 B, static RAM 16/128 B) ===
+OK:   cd4053_simple -> build_avr_xt/bypass-attiny202-cd4053_simple.hex : flash 940 B (45.9%) of 2048 B; static RAM 5/16 B (128 B device)
+OK:   cd4053_with_mute -> build_avr_xt/bypass-attiny202-cd4053_with_mute.hex : flash 980 B (47.9%) of 2048 B; static RAM 5/16 B (128 B device)
+OK:   tq2_l2_5v_relay -> build_avr_xt/bypass-attiny202-tq2_l2_5v_relay.hex : flash 996 B (48.6%) of 2048 B; static RAM 5/16 B (128 B device)
+=== ATtiny202 -fstack-usage static bound (limit: 32 B/frame) ===
+Per-function stack frames:
+src/bypass_mcu_avr_xt.c:169:6:hw_led_pin_set_high	2	static
+src/bypass_mcu_avr_xt.c:170:6:hw_led_pin_set_low	2	static
+src/bypass_mcu_avr_xt.c:173:6:hw_pin_set_high	2	static
+src/bypass_mcu_avr_xt.c:174:6:hw_pin_set_low	2	static
+src/bypass_mcu_avr_xt.c:175:6:hw_pin_mask_set_low	2	static
+src/bypass_mcu_avr_xt.c:182:6:hw_configure_output_pins	2	static
+src/bypass_mcu_avr_xt.c:196:9:hw_output_state_intact	2	static
+src/bypass_mcu_avr_xt.c:320:1:__vector_13	21	static
+src/bypass_mcu_avr_xt.c:400:30:main	8	static
+src/bypass_mcu_avr_xt.c:169:6:hw_led_pin_set_high	2	static
+src/bypass_mcu_avr_xt.c:170:6:hw_led_pin_set_low	2	static
+src/bypass_mcu_avr_xt.c:173:6:hw_pin_set_high	2	static
+src/bypass_mcu_avr_xt.c:174:6:hw_pin_set_low	2	static
+src/bypass_mcu_avr_xt.c:175:6:hw_pin_mask_set_low	2	static
+src/bypass_mcu_avr_xt.c:182:6:hw_configure_output_pins	2	static
+src/bypass_mcu_avr_xt.c:196:9:hw_output_state_intact	2	static
+src/bypass_mcu_avr_xt.c:320:1:__vector_13	21	static
+src/bypass_mcu_avr_xt.c:400:30:main	8	static
+src/bypass_mcu_avr_xt.c:156:39:hw_force_wdt_reset	2	static
+src/bypass_mcu_avr_xt.c:169:6:hw_led_pin_set_high	2	static
+src/bypass_mcu_avr_xt.c:170:6:hw_led_pin_set_low	2	static
+src/bypass_mcu_avr_xt.c:173:6:hw_pin_set_high	2	static
+src/bypass_mcu_avr_xt.c:174:6:hw_pin_set_low	2	static
+src/bypass_mcu_avr_xt.c:175:6:hw_pin_mask_set_low	2	static
+src/bypass_mcu_avr_xt.c:182:6:hw_configure_output_pins	2	static
+src/bypass_mcu_avr_xt.c:196:9:hw_output_state_intact	2	static
+src/bypass_mcu_avr_xt.c:320:1:__vector_13	21	static
+src/bypass_mcu_avr_xt.c:400:30:main	8	static
+OK: 3 fresh AVR-XT reports; all frames <= 32 B
+cppcheck (ATtiny202/avr8): src/bypass_mcu_avr_xt.c (-DCD4053_SIMPLE)
+Checking src/bypass_mcu_avr_xt.c ...
+Checking src/bypass_mcu_avr_xt.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_SIMPLE=1...
+cppcheck (ATtiny202/avr8): src/bypass_mcu_avr_xt.c (-DTQ2_L2_5V_RELAY)
+Checking src/bypass_mcu_avr_xt.c ...
+Checking src/bypass_mcu_avr_xt.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;TQ2_L2_5V_RELAY=1...
+cppcheck (ATtiny202/avr8): src/bypass_pure.c (-DCD4053_SIMPLE)
+Checking src/bypass_pure.c ...
+Checking src/bypass_pure.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_SIMPLE=1...
+cppcheck (ATtiny202/avr8): src/bypass_output_cd4053_simple.c (-DCD4053_SIMPLE)
+Checking src/bypass_output_cd4053_simple.c ...
+Checking src/bypass_output_cd4053_simple.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_SIMPLE=1...
+cppcheck (ATtiny202/avr8): src/bypass_output_cd4053_with_mute.c (-DCD4053_WITH_MUTE)
+Checking src/bypass_output_cd4053_with_mute.c ...
+Checking src/bypass_output_cd4053_with_mute.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_WITH_MUTE=1...
+cppcheck (ATtiny202/avr8): src/bypass_output_tq2_l2_5v_relay.c (-DTQ2_L2_5V_RELAY)
+Checking src/bypass_output_tq2_l2_5v_relay.c ...
+Checking src/bypass_output_tq2_l2_5v_relay.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;TQ2_L2_5V_RELAY=1...
+avr-gcc -fanalyzer (ATtiny202): avr-gcc over the 3 shipping images
+avr-gcc -fanalyzer (ATtiny202): clean
+MISRA (ATtiny202/avr8): src/bypass_mcu_avr_xt.c (-DCD4053_SIMPLE)
+Checking src/bypass_mcu_avr_xt.c ...
+Checking src/bypass_mcu_avr_xt.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_SIMPLE=1...
+MISRA (ATtiny202/avr8): src/bypass_mcu_avr_xt.c (-DTQ2_L2_5V_RELAY)
+Checking src/bypass_mcu_avr_xt.c ...
+Checking src/bypass_mcu_avr_xt.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;TQ2_L2_5V_RELAY=1...
+MISRA (ATtiny202/avr8): src/bypass_pure.c (-DCD4053_SIMPLE)
+Checking src/bypass_pure.c ...
+Checking src/bypass_pure.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_SIMPLE=1...
+MISRA (ATtiny202/avr8): src/bypass_output_cd4053_simple.c (-DCD4053_SIMPLE)
+Checking src/bypass_output_cd4053_simple.c ...
+Checking src/bypass_output_cd4053_simple.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_SIMPLE=1...
+MISRA (ATtiny202/avr8): src/bypass_output_cd4053_with_mute.c (-DCD4053_WITH_MUTE)
+Checking src/bypass_output_cd4053_with_mute.c ...
+Checking src/bypass_output_cd4053_with_mute.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;CD4053_WITH_MUTE=1...
+MISRA (ATtiny202/avr8): src/bypass_output_tq2_l2_5v_relay.c (-DTQ2_L2_5V_RELAY)
+Checking src/bypass_output_tq2_l2_5v_relay.c ...
+Checking src/bypass_output_tq2_l2_5v_relay.c: __AVR__=1;__AVR_XMEGA__=1;__AVR_MEGA__=1;__AVR_ATtiny202__=1;__AVR_ARCH__=103;__AVR_DEV_LIB_NAME__=tn202;BYPASS_MCU_AVR_XT=1;F_CPU=2000000UL;TQ2_L2_5V_RELAY=1...
+MISRA-C:2012 (ATtiny202/avr8): clean (documented deviations waived per MISRA_COMPLIANCE.md)
+=== ATtiny202 static analysis (cppcheck + avr-gcc -fanalyzer + MISRA) complete ===
+[delay] OK    cd4053_simple: coil-pulse widths [(none)] == design (none) (+/-0.10 ms)
+[delay] OK    cd4053_simple: tick ISR + call tree uses 86 instructions <= reviewed ceiling 86
+[delay] OK    cd4053_simple: conservative ISR bound 360 cycles <= 500-cycle duty allowance
+[delay] OK    cd4053_with_mute: coil-pulse widths [4.998 ms, 4.998 ms] == design [5, 5] (+/-0.10 ms)
+[delay] OK    cd4053_with_mute: tick ISR + call tree uses 86 instructions <= reviewed ceiling 86
+[delay] OK    cd4053_with_mute: conservative ISR bound 360 cycles <= 500-cycle duty allowance
+[delay] OK    tq2_l2_5v_relay: coil-pulse widths [11.998 ms, 11.998 ms] == design [12, 12] (+/-0.10 ms)
+[delay] OK    tq2_l2_5v_relay: every coil pulse >= 10 ms recommended minimum (11.998 ms, 11.998 ms)
+[delay] OK    tq2_l2_5v_relay: tick ISR + call tree uses 86 instructions <= reviewed ceiling 86
+[delay] OK    tq2_l2_5v_relay: conservative ISR bound 360 cycles <= 500-cycle duty allowance
+[delay] 10 checks, 0 failures
+target compile-guard mutations (avr-xt): 40 checks, 0 failures (18 fixtures over 5 compile configurations, 3 exact watchdog bounds)
+=== all ATtiny202 pre-hardware checks complete ===
+make[1]: Leaving directory '/mnt/home/matt/development/github/mcu-bypass-firmware'
+EVIDENCE_RESULT format=2 status=pass role=target-test evidence=attiny202-test.log lines=100 payload_sha256=f91b5d36e9d408defe2e0bb0c6432dc4bb969e87ad33b49688bd893f3b2766a6 source_commit=3e3a13294782022baf27555c81c09595b217ec85
