@@ -318,9 +318,10 @@ directory and that device together.
 
 ### If it is interrupted
 
-`finalize` is not a step of a normal flash. A `program` run that prints
-`PIC12F675_FLASH_RESULT` has already published `result.json`, and `finalize`
-refuses any directory that holds one, without issuing a device command.
+<!-- name-contract: exempt (PIC12F675_FLASH_RESULT is the helper's stdout token, not a make variable) -->
+A `program` run that prints `PIC12F675_FLASH_RESULT` has already published
+`result.json`. `finalize` is not a step of a normal flash: it refuses any
+directory that holds `result.json`, without issuing a device command.
 
 An evidence directory with `reservation.json` and no `result.json` is
 **PENDING**. Keep physical custody of the same device. Do not write, reflash, or
