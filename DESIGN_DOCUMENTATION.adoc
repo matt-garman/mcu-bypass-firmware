@@ -339,75 +339,75 @@ PIC10F320:: *not* enabled.  Its 256-word flash cannot hold the
       therefore risk leaving the audio route permanently disagreeing
       with the effect state and the LED.
 +
-      So the sanity gate escalates it.  The forced-reset path drives
-      both coil-control outputs to idle *before* it spins, so no
-      fault holds a coil energized for a whole watchdog period, and
-      the recovery re-runs initialization.  Initialization sets logical
-      state and LED to BYPASS and commands a nominal 12ms RESET-coil
-      pulse with SET inactive.  This is the firmware's electrical
-      recovery guarantee.  Physical relay convergence additionally
-      requires the board, driver, supply and relay assumptions recorded
-      in `docs/relay_coil_fault_correction.md`.
+So the sanity gate escalates it.  The forced-reset path drives
+both coil-control outputs to idle *before* it spins, so no
+fault holds a coil energized for a whole watchdog period, and
+the recovery re-runs initialization.  Initialization sets logical
+state and LED to BYPASS and commands a nominal 12ms RESET-coil
+pulse with SET inactive.  This is the firmware's electrical
+recovery guarantee.  Physical relay convergence additionally
+requires the board, driver, supply and relay assumptions recorded
+in `docs/relay_coil_fault_correction.md`.
 +
-      Detection reuses each shell's existing output-state integrity
-      check, so an energized coil is simply an output-latch
-      mismatch.  PIC10F320 cannot afford that general check within
-      256 words and instead guards exactly the two coil latch bits,
-      giving it full parity on the coil guarantee while retaining its
-      documented gap for other output-latch upsets.  Only PIC12F675
-      compares physical GPIO against an independent output shadow;
-      the other parts do not claim universal external stuck-pin
-      detection.
+Detection reuses each shell's existing output-state integrity
+check, so an energized coil is simply an output-latch
+mismatch.  PIC10F320 cannot afford that general check within
+256 words and instead guards exactly the two coil latch bits,
+giving it full parity on the coil guarantee while retaining its
+documented gap for other output-latch upsets.  Only PIC12F675
+compares physical GPIO against an independent output shadow;
+the other parts do not claim universal external stuck-pin
+detection.
 +
-      A low output latch is not by itself a physical-pad guarantee when
-      pin configuration is corrupt.  AVR-XT can invert a coil pad through
-      `PORTA.PINnCTRL.INVEN`; PIC12F675 can route comparator `COUT` onto
-      GP2, outside GPIO ownership.  Their forced-reset paths therefore
-      wrap the shared latch clear in an MCU-specific emergency sequence.
-      AVR-XT removes pull-ups, disconnects direction, clears inversion and
-      stale OUT state, then restores the low outputs.  PIC12F675 removes
-      coil pull-ups, changes the pins to inputs, disables analog and
-      comparator ownership, clears shadow/GPIO, then restores output
-      direction.  Board fail-safe pull-downs hold the pins inactive during
-      the brief input interval.
+A low output latch is not by itself a physical-pad guarantee when
+pin configuration is corrupt.  AVR-XT can invert a coil pad through
+`PORTA.PINnCTRL.INVEN`; PIC12F675 can route comparator `COUT` onto
+GP2, outside GPIO ownership.  Their forced-reset paths therefore
+wrap the shared latch clear in an MCU-specific emergency sequence.
+AVR-XT removes pull-ups, disconnects direction, clears inversion and
+stale OUT state, then restores the low outputs.  PIC12F675 removes
+coil pull-ups, changes the pins to inputs, disables analog and
+comparator ownership, clears shadow/GPIO, then restores output
+direction.  Board fail-safe pull-downs hold the pins inactive during
+the brief input interval.
 +
-      Target fault tests observe modeled package pins rather than inferring
-      them from latches: physical PA2/PA3 on AVR-XT and direct GP1/GP2 node
-      voltage on PIC12F675.  The latter covers every comparator mode one
-      bit from off and both comparator output states where COUT can own
-      GP2.  Latch-only mutants are rejected.  This is simulator electrical
-      evidence; it does not validate PCB loading, silicon behavior or relay
-      mechanics.
+Target fault tests observe modeled package pins rather than inferring
+them from latches: physical PA2/PA3 on AVR-XT and direct GP1/GP2 node
+voltage on PIC12F675.  The latter covers every comparator mode one
+bit from off and both comparator output states where COUT can own
+GP2.  Latch-only mutants are rejected.  This is simulator electrical
+evidence; it does not validate PCB loading, silicon behavior or relay
+mechanics.
 +
-      Relay coil clears use one masked target operation.  On
-      PIC12F675 this clears both coil bits in the SRAM shadow before
-      one whole-port GPIO write, preventing a corrupt uncleared coil
-      bit from being replayed as an intermediate physical high while
-      preserving the required all-port refresh.
+Relay coil clears use one masked target operation.  On
+PIC12F675 this clears both coil bits in the SRAM shadow before
+one whole-port GPIO write, preventing a corrupt uncleared coil
+bit from being replayed as an intermediate physical high while
+preserving the required all-port refresh.
 +
-      That single write publishes every shadow bit, not only the coil
-      bits, so on PIC12F675 the emergency path also canonicalizes the
-      parked spare output GP4 in the shadow first.  Without it the
-      escalation would itself convert a corrupt GP4 intent bit from
-      inert SRAM into a driven pad and hold it for the whole watchdog
-      period, on a pin the board contract permits only while it is
-      low.  A second single-pin write is not an alternative: two
-      sequential whole-port writes reintroduce the coil replay the
-      one-write rule above exists to prevent.  Target fault tests
-      sample the GP4 pad at the watchdog spin, where the hazard is;
-      a post-reset read cannot see it, because the reset is what ends
-      it.
+That single write publishes every shadow bit, not only the coil
+bits, so on PIC12F675 the emergency path also canonicalizes the
+parked spare output GP4 in the shadow first.  Without it the
+escalation would itself convert a corrupt GP4 intent bit from
+inert SRAM into a driven pad and hold it for the whole watchdog
+period, on a pin the board contract permits only while it is
+low.  A second single-pin write is not an alternative: two
+sequential whole-port writes reintroduce the coil replay the
+one-write rule above exists to prevent.  Target fault tests
+sample the GP4 pad at the watchdog spin, where the hazard is;
+a post-reset read cannot see it, because the reset is what ends
+it.
 +
-      No gate runs during the complete blocking relay actuation
-      sequence, from its pre-pulse clear through its post-pulse
-      clear.  An upset in that sequence can shorten the intended
-      pulse or energize the inactive or both coils.  The
-      characterized cases cover 1, 6 and 11ms inside the 12ms delay,
-      not every instruction boundary around assertion and clearing.
-      The normal epilogue commands both coil outputs low if execution
-      completes, but missed or spurious relay actuation, audio
-      disruption, and an external output path that does not accept
-      that command remain residual risks.
+No gate runs during the complete blocking relay actuation
+sequence, from its pre-pulse clear through its post-pulse
+clear.  An upset in that sequence can shorten the intended
+pulse or energize the inactive or both coils.  The
+characterized cases cover 1, 6 and 11ms inside the 12ms delay,
+not every instruction boundary around assertion and clearing.
+The normal epilogue commands both coil outputs low if execution
+completes, but missed or spurious relay actuation, audio
+disruption, and an external output path that does not accept
+that command remain residual risks.
 +
 NOTE: This trade-off is deliberate and worth stating.  A stray coil
 upset now causes watchdog recovery and an unconditional firmware
