@@ -2608,7 +2608,8 @@ checks=$((checks + 1))
 	for required in 'flash-pic12f675.py' 'NOT a raw write target' \
 		'no source checkout' 'immutable PASS/FAIL' \
 		'no trim damage was OBSERVED' 'hardware-unvalidated' \
-		'never constructs a writer' 'no Make goal programs this part'; do
+		'never constructs a writer' 'no Make goal programs this part' \
+		'is not a step of a normal flash'; do
 	grep -Fq "$required" "$flashing" \
 		|| fail "rendered PIC12F675 flashing guidance omits: $required"
 done

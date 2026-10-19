@@ -2052,8 +2052,11 @@ def command_finalize(args, helper_path):
     evidence = Evidence.open(args.evidence_dir)
     if evidence.exists(RESULT_NAME):
         raise FlashError(
-            "this transaction already has a published result and is immutable: "
-            "%s" % evidence.filename(RESULT_NAME))
+            "this transaction already has a published result and is immutable, "
+            "so there is nothing to finalize: finalize resolves only a PENDING "
+            "transaction (a %s with no %s) and issued no device command. The "
+            "published result is %s"
+            % (RESERVATION_NAME, RESULT_NAME, evidence.filename(RESULT_NAME)))
     if not evidence.exists(RESERVATION_NAME):
         raise FlashError(
             "no reservation to finalize: %s holds no %s. An evidence directory "

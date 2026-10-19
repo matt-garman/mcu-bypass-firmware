@@ -429,7 +429,8 @@ check "the refused retry issued no further write" \
 	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
 run_helper '' finalize --evidence-dir "$EVIDENCE" --ipecmd "$FAKE"
 check "finalizing a completed transaction is refused" \
-	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"already has a published result"* ]] && echo 1 || echo 0)"
+	"$([ "$RC" -eq 2 ] && [[ "$OUT" == *"already has a published result"* ]] \
+		&& [[ "$OUT" == *"nothing to finalize"* ]] && echo 1 || echo 0)"
 check "the refused finalization issued no further write" \
 	"$([ "$(writes)" = 1 ] && echo 1 || echo 0)"
 

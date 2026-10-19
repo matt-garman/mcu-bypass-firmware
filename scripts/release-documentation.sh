@@ -1521,9 +1521,14 @@ release_render_pic12f675_flashing() {
 		'device twice, reserves the write durably, writes exactly once, compares the' \
 		'WHOLE device afterwards -- every word the image does not supply has to read' \
 		'back erased -- and publishes one atomically installed, immutable PASS/FAIL' \
-		'`result.json`. A PENDING directory -- a reservation with no' \
-		'result -- is resolved read-only, and that mode never constructs a writer' \
-		'argument:' \
+		'`result.json`.' \
+		'' \
+		'`finalize` is not a step of a normal flash. A `program` run that prints' \
+		'`PIC12F675_FLASH_RESULT` has already published `result.json`, and' \
+		'`finalize` refuses any directory that holds one without issuing a device' \
+		'command. It exists only for an interrupted run, which leaves a PENDING' \
+		'directory -- a reservation with no result. That directory is resolved' \
+		'read-only, and that mode never constructs a writer argument:' \
 		'' \
 		'```sh' \
 		'python3 flash-pic12f675.py finalize \' \
