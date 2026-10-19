@@ -36,29 +36,29 @@ rows are combinations with no known report, not combinations known to fail.
 
 <!-- field-reports:start -->
 
-| MCU       | Output Scheme   | Firmware Version | Reported by |
-| :-------- | :-------------- | :--------------- | :---- |
-| ATtiny13a | CD4053 Simple   | pre-v0.9.0       | [Build report](https://forum.pedalpcb.com/threads/custom-barber-ltd-sr-w-microcontroller-bypass.29615/) |
-| ATtiny13a | CD4053 Muting   | v0.9.9           | [Quasi-IC](https://www.diystompboxes.com/smfforum/index.php?msg=1312340), [Build report](https://forum.pedalpcb.com/threads/dynamic-haircut-v2-0-barber-gain-changer.29479/post-393071) |
-| ATtiny13a | TQ2-L2-5V Relay |                  |       |
-| ATtiny45  | CD4053 Simple   |                  |       |
-| ATtiny45  | CD4053 Muting   |                  |       |
-| ATtiny45  | TQ2-L2-5V Relay |                  |       |
-| ATtiny85  | CD4053 Simple   |                  |       |
-| ATtiny85  | CD4053 Muting   |                  |       |
-| ATtiny85  | TQ2-L2-5V Relay |                  |       |
-| ATtiny202 | TMUX4053 Simple |                  |       |
-| ATtiny202 | TMUX4053 Muting | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/nashville-nobility-custom-nobels-odr-1bc.30339/)      |
-| ATtiny202 | TQ2-L2-5V Relay |                  |       |
-| PIC10F320 | CD4053 Simple   |                  |       |
-| PIC10F320 | CD4053 Muting   | v0.9.7           | [Build report](https://forum.pedalpcb.com/threads/25-year-pollinator-one-control-silver-bee-hamishr-mod.30010/) |
-| PIC10F320 | TQ2-L2-5V Relay |                  |       |
-| PIC10F322 | CD4053 Simple   |                  |       |
-| PIC10F322 | CD4053 Muting   | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/plague-doctor-custom-proco-fat-rat.30299/)      |
-| PIC10F322 | TQ2-L2-5V Relay |                  |       |
-| PIC12F675 | CD4053 Simple   |                  |       |
-| PIC12F675 | CD4053 Muting   | v0.9.13          | [Build report](https://forum.pedalpcb.com/threads/warp-south-custom-greer-lightspeed-southland.30298/)      |
-| PIC12F675 | TQ2-L2-5V Relay |                  |       |
+| MCU       | Output Scheme   | Firmware Version(s) | Reported by |
+| :-------- | :-------------- | :------------------ | :---- |
+| ATtiny13a | CD4053 Simple   | pre-v0.9.0          | [Build report](https://forum.pedalpcb.com/threads/custom-barber-ltd-sr-w-microcontroller-bypass.29615/) |
+| ATtiny13a | CD4053 Muting   | v0.9.9              | [Quasi-IC](https://www.diystompboxes.com/smfforum/index.php?msg=1312340), [Build report 1](https://forum.pedalpcb.com/threads/dynamic-haircut-v2-0-barber-gain-changer.29479/post-393071), [Build Report 2](https://forum.pedalpcb.com/threads/old-fashioned-skreddy-animals-major-overdrive.28763/post-395652) |
+| ATtiny13a | TQ2-L2-5V Relay |                     |       |
+| ATtiny45  | CD4053 Simple   |                     |       |
+| ATtiny45  | CD4053 Muting   |                     |       |
+| ATtiny45  | TQ2-L2-5V Relay |                     |       |
+| ATtiny85  | CD4053 Simple   |                     |       |
+| ATtiny85  | CD4053 Muting   |                     |       |
+| ATtiny85  | TQ2-L2-5V Relay | v0.9.18             | [Build report](https://forum.pedalpcb.com/threads/pez-rojo-custom-menatone-red-snapper.30439/post-399864)      |
+| ATtiny202 | TMUX4053 Simple |                     |       |
+| ATtiny202 | TMUX4053 Muting | v0.9.13, v0.9.18    | [Build report 1](https://forum.pedalpcb.com/threads/nashville-nobility-custom-nobels-odr-1bc.30339/),  [Build Report 2](https://forum.pedalpcb.com/threads/pez-rojo-custom-menatone-red-snapper.30439/), [Build Report 3](https://forum.pedalpcb.com/threads/the-enchanter-custom-timmy-jan-ray.30400/), [Build Report 4](https://forum.pedalpcb.com/threads/carbon-squish-custom-diamond-compressor.30616/)      |
+| ATtiny202 | TQ2-L2-5V Relay |                     |       |
+| PIC10F320 | CD4053 Simple   |                     |       |
+| PIC10F320 | CD4053 Muting   | v0.9.7              | [Build report](https://forum.pedalpcb.com/threads/25-year-pollinator-one-control-silver-bee-hamishr-mod.30010/) |
+| PIC10F320 | TQ2-L2-5V Relay |                     |       |
+| PIC10F322 | CD4053 Simple   |                     |       |
+| PIC10F322 | CD4053 Muting   | v0.9.13             | [Build report](https://forum.pedalpcb.com/threads/plague-doctor-custom-proco-fat-rat.30299/)      |
+| PIC10F322 | TQ2-L2-5V Relay |                     |       |
+| PIC12F675 | CD4053 Simple   |                     |       |
+| PIC12F675 | CD4053 Muting   | v0.9.13             | [Build report 1](https://forum.pedalpcb.com/threads/warp-south-custom-greer-lightspeed-southland.30298/), [Build Report 2](https://forum.pedalpcb.com/threads/xtortion-10-custom-ibanez-mt-10-mostortion.30607/)      |
+| PIC12F675 | TQ2-L2-5V Relay |                     |       |
 
 <!-- field-reports:end -->
 
