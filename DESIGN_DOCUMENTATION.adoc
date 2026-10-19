@@ -89,6 +89,7 @@ effect is "engaged", the status LED should be lit, and when the
 effect is in "bypass", the status LED should be dark.
 
 Therefore, the MCU needs to:
+
     * maintain state (engage/bypass)
     * light or dark the status LED
     * respond to footswitch presses (including debounce)
@@ -102,11 +103,14 @@ on press (not on release).
 
 This sub-circuit should be as robust as possible and assume likely
 adverse conditions:
+
     * high temperature (e.g. noon-time Death Valley performance)
     * EMI/RFI (e.g. cell phones, wifi, fluorescent lighting, AC
       motors, proximity to radio station, etc)
 
+
 == Reliability Goals
+
     * Reference-quality
     * World-class touring musician grade
     * Suitable for use by established market-leading manufacturers
@@ -128,6 +132,7 @@ adverse conditions:
 
 
 == Caveats and Limitations
+
     * Every implementation except PIC12F675 uses a nominal 1ms timer-derived
       sample cadence; PIC12F675 uses 1.024ms.  The AVR implementations sample
       in timer ISRs, while the PIC implementations poll their timer flags.
