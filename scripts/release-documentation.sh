@@ -1626,7 +1626,7 @@ release_render_flashing() {
 		case "$profile" in
 			make-source)
 				_release_source_command_valid "$image" "$command" || return 2 ;;
-			avrdude-isp|avrdude-updi|pk2cmd)
+			avrdude-isp|avrdude-updi|ipecmd)
 				case "$command" in
 					*'make '*) return 2 ;;
 					*"$image"*) have_download=1 ;;
@@ -1664,18 +1664,21 @@ release_render_flashing() {
 		"$isp_programmer"
 	printf '| ATtiny202 | UPDI | `avrdude` | `-c %s -P %s` | your UPDI adapter'"'"'s device node; ISP programmers cannot drive UPDI |\n' \
 		"$updi_programmer" "$updi_port"
-	printf '| PIC10F320, PIC10F322 | ICSP | `pk2cmd` (PICkit 2) | an externally powered target | add `-T` to have the PICkit supply power |\n'
+	printf '| PIC10F320, PIC10F322 | ICSP | `ipecmd` (MPLAB X IPE) | `-TPPK3` (PICkit 3) and an externally powered target | `-TPPK4` or `-TPPK5` for a newer PICkit; add `-W4.75` to have the PICkit supply power |\n'
 	printf '| PIC12F675 | ICSP | `flash-pic12f675.py` | the guarded transaction below | never a raw writer |\n'
 	printf '\n'
 	printf '%s\n' \
-		'PICkit 3/4/5 program the PIC10F32x parts through MPLAB IPE'"'"'s `ipecmd` rather' \
-		'than `pk2cmd`. Every command published here is pinned, byte for byte, to the' \
-		'programming command this project'"'"'s Makefile defines by default, and that' \
-		'default is `pk2cmd`. The `ipecmd` form is a non-default override of the same' \
-		'goals and writes and verifies the same way, but its reset-release flag and' \
-		'part-name spelling have not been confirmed against a part; that procedure' \
-		'therefore stays in the source tree'"'"'s `FLASHING.md`, which carries the caveat' \
-		'with it, rather than being published here as a complete command.' \
+		'The PIC10F32x commands run MPLAB X IPE'"'"'s `ipecmd` from its jar, because a' \
+		'stock MPLAB X install puts no `ipecmd` on `PATH`. Set `IPECMD` to that jar' \
+		'once in the shell you paste into, for example' \
+		'`export IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar`.' \
+		'MPLAB X 6.25 dropped PICkit 3 support, so a PICkit 3 needs 6.20 or earlier.' \
+		'`-P` spells the part without its `PIC` prefix, which `ipecmd` supplies itself' \
+		'and rejects when doubled. `-W4.75` rather than `-W5`, because a PICkit 3' \
+		'draws Vdd from USB and refuses 5 V on a rail that sags below it; 4.75 V suits' \
+		'the 5 V PIC10F32x parts, never the 3.6 V PIC10LF32x. Every command published' \
+		'here is pinned, byte for byte, to the programming command this project'"'"'s' \
+		'Makefile defines by default.' \
 		'' \
 		'### Per-image commands' \
 		'' \

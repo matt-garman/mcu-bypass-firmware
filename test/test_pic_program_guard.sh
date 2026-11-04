@@ -57,14 +57,18 @@ printf '\t%s' "\$@" >> "$program_log"
 printf '\n' >> "$program_log"
 EOF
 chmod 755 "$tools/xc8" "$tools/programmer"
-ln -s programmer "$tools/pk2cmd"
-ln -s programmer "$tools/ipecmd"
+ln -s programmer "$tools/java"
 ln -s programmer "$tools/custom-programmer"
 ln -s programmer "$tools/inherited-programmer"
+# The canonical goals hand this path to `java -jar`; the fake java logs it, so
+# only its existence matters to the recipe.
+ipecmd_jar="$work/mplab ipe/ipecmd.jar"
+mkdir -p "${ipecmd_jar%/*}"
+: > "$ipecmd_jar"
 
 clean_env=(
 	env -u MAKEFLAGS -u MFLAGS -u GNUMAKEFLAGS -u MAKEOVERRIDES
-	-u MAKEFILES -u MAKELEVEL -u MAKE
+	-u MAKEFILES -u MAKELEVEL -u MAKE -u IPECMD
 	-u PIC10F322_PART -u PIC10F322_PROG -u PIC10F322_PROG_TOOL
 	-u PIC10F322_PROG_HEX -u PIC10F322_PROG_CMD
 	-u PIC10F320_PART -u PIC10F320_PROG -u PIC10F320_PROG_TOOL
@@ -81,8 +85,18 @@ make_args=(
 
 run_clean() {
 	"${clean_env[@]}" TMPDIR="$work" PATH="$tools:$PATH" \
-		PIC_PROGRAMMER_LOG="$program_log" \
+		IPECMD="$ipecmd_jar" PIC_PROGRAMMER_LOG="$program_log" \
 		"${MAKE_CMD[@]}" "${make_args[@]}" "$@"
+}
+
+# The one argv the canonical goal may hand the writer, as the fake logs it.
+canonical_argv() {
+	local part=$1 build=$2 argv=java
+	argv+=$'\t-jar\t'"$ipecmd_jar"
+	argv+=$'\t-TPPK3\t'"-P${part#PIC}"
+	argv+=$'\t'"-F$build/bypass-${part,,}-cd4053_simple.hex"
+	argv+=$'\t-M\t-Y\t-OL'
+	printf '%s\n' "$argv"
 }
 
 program_calls() {
@@ -96,12 +110,10 @@ check_clean_route() {
 		|| { sed -n '1,120p' "$output" >&2; fail "$goal failed with canonical fake tools"; }
 	[ "$(program_calls)" -eq 1 ] \
 		|| fail "$goal invoked $(program_calls) programmer commands instead of 1"
-	grep -F -- "-P$part" "$program_log" >/dev/null \
+	grep -F -- "-P${part#PIC}" "$program_log" >/dev/null \
 		|| fail "$goal did not keep the canonical $part identity"
-	local expected=pk2cmd actual
-	expected+=$'\t'"-P$part"
-	expected+=$'\t'"-F$build/bypass-${part,,}-cd4053_simple.hex"
-	expected+=$'\t-M\t-Y\t-R'
+	local expected actual
+	expected=$(canonical_argv "$part" "$build")
 	IFS= read -r actual < "$program_log"
 	[ "$actual" = "$expected" ] \
 		|| fail "$goal command was '$actual', expected '$expected'"
@@ -118,6 +130,46 @@ check_clean_route() {
 	[ "$actual" = $'custom-programmer\t--custom\t'"$part" ] \
 		|| fail "$goal-custom command was not the exact explicit custom command: $actual"
 	checks=$((checks + 1))
+
+	# The custom goal's DEFAULT command is the one a release publishes, so it
+	# must resolve "$IPECMD" from the environment exactly as the canonical goal
+	# does and reach the writer with the same argv.
+	: > "$program_log"
+	run_clean "$goal-custom" "$selector=cd4053_simple" > "$output" 2>&1 \
+		|| { sed -n '1,120p' "$output" >&2; fail "$goal-custom failed with its default command"; }
+	[ "$(program_calls)" -eq 1 ] \
+		|| fail "$goal-custom default invoked $(program_calls) programmer commands instead of 1"
+	expected=$(canonical_argv "$part" "$build")
+	IFS= read -r actual < "$program_log"
+	[ "$actual" = "$expected" ] \
+		|| fail "$goal-custom default command was '$actual', expected '$expected'"
+	checks=$((checks + 1))
+}
+
+# IPECMD is a host location the canonical goal reads rather than a programmer
+# override it rejects, so its absence is the one way left to reach the writer
+# without a jar. Unset, empty and naming no file all refuse before the writer.
+expect_ipecmd_required() {
+	local goal=$1 selector=$2 label setting
+	for label in unset empty missing; do
+		case "$label" in
+			unset) setting=() ;;
+			empty) setting=(IPECMD=) ;;
+			missing) setting=("IPECMD=$work/no-such/ipecmd.jar") ;;
+		esac
+		: > "$program_log"
+		if "${clean_env[@]}" "${setting[@]}" TMPDIR="$work" PATH="$tools:$PATH" \
+				PIC_PROGRAMMER_LOG="$program_log" \
+				"${MAKE_CMD[@]}" "${make_args[@]}" "$goal" \
+				"$selector=cd4053_simple" > "$output" 2>&1; then
+			fail "$goal ran with IPECMD $label"
+		fi
+		grep -F "IPECMD must name MPLAB X IPE's ipecmd.jar" "$output" >/dev/null \
+			|| { sed -n '1,120p' "$output" >&2; fail "$goal with IPECMD $label failed without the IPECMD diagnostic"; }
+		[ "$(program_calls)" -eq 0 ] \
+			|| fail "$goal with IPECMD $label reached the fake programmer"
+		checks=$((checks + 1))
+	done
 }
 
 expect_reject() {
@@ -131,7 +183,7 @@ expect_reject() {
 			;;
 		environment)
 			if "${clean_env[@]}" "$assignment" TMPDIR="$work" PATH="$tools:$PATH" \
-					PIC_PROGRAMMER_LOG="$program_log" \
+					IPECMD="$ipecmd_jar" PIC_PROGRAMMER_LOG="$program_log" \
 					"${MAKE_CMD[@]}" "${make_args[@]}" "$goal" \
 					"$selector=cd4053_simple" > "$output" 2>&1; then
 				fail "$label was accepted"
@@ -139,7 +191,7 @@ expect_reject() {
 			;;
 		environment-e)
 			if "${clean_env[@]}" "$assignment" TMPDIR="$work" PATH="$tools:$PATH" \
-					PIC_PROGRAMMER_LOG="$program_log" \
+					IPECMD="$ipecmd_jar" PIC_PROGRAMMER_LOG="$program_log" \
 					"${MAKE_CMD[@]}" -e "${make_args[@]}" "$goal" \
 					"$selector=cd4053_simple" > "$output" 2>&1; then
 				fail "$label was accepted"
@@ -147,7 +199,7 @@ expect_reject() {
 			;;
 		makeflags)
 			if "${clean_env[@]}" "MAKEFLAGS=$assignment" TMPDIR="$work" PATH="$tools:$PATH" \
-					PIC_PROGRAMMER_LOG="$program_log" \
+					IPECMD="$ipecmd_jar" PIC_PROGRAMMER_LOG="$program_log" \
 					"${MAKE_CMD[@]}" "${make_args[@]}" "$goal" \
 					"$selector=cd4053_simple" > "$output" 2>&1; then
 				fail "$label was accepted"
@@ -175,7 +227,7 @@ expect_control_reject() {
 		*) fail "unknown Make control: $control" ;;
 	esac
 	if "${clean_env[@]}" "$control" TMPDIR="$work" PATH="$tools:$PATH" \
-			PIC_PROGRAMMER_LOG="$program_log" \
+			IPECMD="$ipecmd_jar" PIC_PROGRAMMER_LOG="$program_log" \
 			"${MAKE_CMD[@]}" "${make_args[@]}" "$goal" \
 			"$selector=cd4053_simple" > "$output" 2>&1; then
 		fail "$label was accepted"
@@ -195,7 +247,8 @@ expect_guard_self_protected() {
 			"_${prefix}_PROGRAMMER_INPUTS=" \
 			"_${prefix}_PROGRAMMER_OVERRIDES=" \
 			"${prefix}_PROG_CMD=$tools/inherited-programmer" \
-			TMPDIR="$work" PATH="$tools:$PATH" PIC_PROGRAMMER_LOG="$program_log" \
+			TMPDIR="$work" PATH="$tools:$PATH" IPECMD="$ipecmd_jar" \
+			PIC_PROGRAMMER_LOG="$program_log" \
 			"${MAKE_CMD[@]}" -e "${make_args[@]}" "$goal" \
 			"$selector=cd4053_simple" > "$output" 2>&1; then
 		fail "$goal accepted environment overrides of its guard internals"
@@ -227,25 +280,24 @@ expect_function_shadow_safe() {
 	local goal=$1 selector=$2 part=$3 build=$4
 	: > "$program_log"
 	if "${clean_env[@]}" \
-			'BASH_FUNC_pk2cmd%%=() { printf "function-shadow\n" >> "$PIC_PROGRAMMER_LOG"; }' \
+			'BASH_FUNC_java%%=() { printf "function-shadow\n" >> "$PIC_PROGRAMMER_LOG"; }' \
 			"BASH_FUNC_command%%=() { printf '%s\\n' '$tools/inherited-programmer'; }" \
 			'BASH_FUNC_false%%=() { return 0; }' \
-			TMPDIR="$work" PATH="$tools:$PATH" PIC_PROGRAMMER_LOG="$program_log" \
+			TMPDIR="$work" PATH="$tools:$PATH" IPECMD="$ipecmd_jar" \
+			PIC_PROGRAMMER_LOG="$program_log" \
 			"${MAKE_CMD[@]}" "${make_args[@]}" "$goal" \
 			"$selector=cd4053_simple" > "$output" 2>&1; then
 		[ "$(program_calls)" -eq 1 ] \
 			|| fail "$goal function-shadow control did not make exactly one safe programmer call"
-		local expected=pk2cmd actual
-		expected+=$'\t'"-P$part"
-		expected+=$'\t'"-F$build/bypass-${part,,}-cd4053_simple.hex"
-		expected+=$'\t-M\t-Y\t-R'
+		local expected actual
+		expected=$(canonical_argv "$part" "$build")
 		IFS= read -r actual < "$program_log"
 		[ "$actual" = "$expected" ] \
 			|| fail "$goal function-shadow command was '$actual', expected '$expected'"
 	else
 		[ "$(program_calls)" -eq 0 ] \
 			|| fail "$goal invoked a writer before rejecting the inherited Bash function"
-		grep -F "programmer 'pk2cmd' not found on PATH" "$output" >/dev/null \
+		grep -F "Java runtime 'java' not found on PATH" "$output" >/dev/null \
 			|| { sed -n '1,120p' "$output" >&2; fail "$goal rejected the function shadow for the wrong reason"; }
 	fi
 	checks=$((checks + 1))
@@ -255,6 +307,7 @@ check_part() {
 	local part=$1 goal=$2 selector=$3 prefix=$4 build=$5
 	local name value
 	check_clean_route "$part" "$goal" "$selector" "$build" "${prefix}_PROG_CMD"
+	expect_ipecmd_required "$goal" "$selector"
 
 	for name in PART PROG PROG_TOOL PROG_HEX PROG_CMD; do
 		case "$name" in

@@ -2175,7 +2175,7 @@ IMAGE_SUMS_FILE="$OUTPUT_DIR/SHA256SUMS"
 # lines were therefore not valid shell, and both of the forms that were named a
 # Makefile no downloaded release contains. The remaining nine carried a bare
 # `-c <prog>`, which bash reads as a redirection rather than a placeholder.
-FLASH_DOWNLOAD_PROFILES="avrdude-isp avrdude-updi pk2cmd"
+FLASH_DOWNLOAD_PROFILES="avrdude-isp avrdude-updi ipecmd"
 declare -A IMAGE_FUSES=()
 flash_row() {
 	[ "$#" -eq 3 ] \
@@ -2211,14 +2211,19 @@ img_row() {
 	case "$base" in
 		${FW_BASE}-${PIC10F320_TAG}-*.hex)
 			mcu="PIC10F320"; clk="${PIC10F320_CLK_MHZ} MHz (HFINTOSC)"; fuses="CONFIG word embedded in HEX"
-			# -M programs the whole device, -Y verifies it afterwards, -R
-			# releases reset so the pedal runs on unplugging the programmer.
-			# Checked against PIC10F320_PROG_CMD below, exactly as the 322 arm
-			# is checked against its own. The source-checkout route selects the
-			# output stage with PIC10F320_VARIANT rather than VARIANT, because
-			# that is the selector its build goal reads; passing VARIANT here
-			# would build the default stage and flash a different one.
-			flash_row "$base" pk2cmd "pk2cmd -PPIC10F320 -F$base -M -Y -R"
+			# MPLAB X IPE's ipecmd, run from its jar: a stock install puts
+			# no ipecmd on PATH, so the reader sets IPECMD once and the
+			# line stays complete. -P names the part WITHOUT the PIC
+			# prefix, which ipecmd supplies and rejects when doubled. -M
+			# programs the whole device, -Y verifies it afterwards, -OL
+			# releases reset so the pedal runs on unplugging the
+			# programmer. Checked against PIC10F320_PROG_CMD below, exactly
+			# as the 322 arm is checked against its own. The source-checkout
+			# route selects the output stage with PIC10F320_VARIANT rather
+			# than VARIANT, because that is the selector its build goal
+			# reads; passing VARIANT here would build the default stage and
+			# flash a different one.
+			flash_row "$base" ipecmd "java -jar \"\$IPECMD\" -TPPK3 -P10F320 -F$base -M -Y -OL"
 			flash_row "$base" make-source \
 				"make pic10f320-program PIC10F320_VARIANT=$variant" ;;
 		${FW_BASE}-${PIC10F322_TAG}-*.hex)
@@ -2226,7 +2231,7 @@ img_row() {
 			# Checked against PIC10F322_PROG_CMD below; the source-checkout
 			# route moves out of the pasteable block, because a downloaded
 			# release ships no Makefile to run it with.
-			flash_row "$base" pk2cmd "pk2cmd -PPIC10F322 -F$base -M -Y -R"
+			flash_row "$base" ipecmd "java -jar \"\$IPECMD\" -TPPK3 -P10F322 -F$base -M -Y -OL"
 			flash_row "$base" make-source \
 				"make pic10f322-program VARIANT=$variant" ;;
 		${FW_BASE}-${PIC12F675_TAG}-*.hex)
@@ -2345,10 +2350,14 @@ release_producer_source_command_valid() {
 # checked before, and all four properties were violated in v0.9.11.
 check_flash_commands() {
 	local file=$1 image profile command stem variant fuse name value block
-	local pk2_command pk2_arg pk2_image pk2_image_count
+	local ipe_command ipe_arg ipe_image ipe_image_count
 	local pinned tag_var cmd_var hex_var published
 	local -A download_seen=()
-	local -a download_cmds=() pk2_args=()
+	local -a download_cmds=() ipe_args=()
+	# One plain writer invocation: the jar named by the one variable the
+	# reader sets, then options only -- no redirection, chaining or second
+	# command riding along on a line someone pastes.
+	local ipe_re='^java[[:space:]]+-jar[[:space:]]+"\$IPECMD"([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$'
 
 	while IFS=$'\t' read -r image profile command; do
 		[ -n "$image" ] && [ -n "$profile" ] && [ -n "$command" ] \
@@ -2395,7 +2404,7 @@ check_flash_commands() {
 				;;
 		esac
 		# Both writers verify what they wrote -- avrdude unless -V turns it
-		# off, pk2cmd only when asked with -Y -- and an unverified write would
+		# off, ipecmd only when asked with -Y -- and an unverified write would
 		# look exactly like a verified one in a published manifest.
 		case "$profile" in
 			avrdude-isp|avrdude-updi)
@@ -2415,29 +2424,29 @@ check_flash_commands() {
 					esac
 				done
 				;;
-			pk2cmd)
-				pk2_command=${command%%#*}
-				[[ "$pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
-					|| die "the pk2cmd command for $image is not one plain writer invocation: $command"
-				read -r -a pk2_args <<<"$pk2_command"
-				pk2_image=""
-				pk2_image_count=0
-				for pk2_arg in "${pk2_args[@]}"; do
-					case "$pk2_arg" in
+			ipecmd)
+				ipe_command=${command%%#*}
+				[[ "$ipe_command" =~ $ipe_re ]] \
+					|| die "the ipecmd command for $image is not one plain writer invocation: $command"
+				read -r -a ipe_args <<<"$ipe_command"
+				ipe_image=""
+				ipe_image_count=0
+				for ipe_arg in "${ipe_args[@]}"; do
+					case "$ipe_arg" in
 						-F*)
-							pk2_image=${pk2_arg#-F}
-							pk2_image_count=$((pk2_image_count + 1)) ;;
+							ipe_image=${ipe_arg#-F}
+							ipe_image_count=$((ipe_image_count + 1)) ;;
 					esac
 				done
-				[ "$pk2_image_count" -eq 1 ] && [ "$pk2_image" = "$image" ] \
-					|| die "the pk2cmd command for $image does not select $image as its sole -F image operand: $command"
-				case " $pk2_command " in
+				[ "$ipe_image_count" -eq 1 ] && [ "$ipe_image" = "$image" ] \
+					|| die "the ipecmd command for $image does not select $image as its sole -F image operand: $command"
+				case " $ipe_command " in
 					*' -M '*) ;;
-					*) die "the pk2cmd command for $image does not program the whole device (-M): $command" ;;
+					*) die "the ipecmd command for $image does not program the whole device (-M): $command" ;;
 				esac
-				case " $pk2_command " in
+				case " $ipe_command " in
 					*' -Y '*) ;;
-					*) die "the pk2cmd command for $image performs no verify pass (-Y): $command" ;;
+					*) die "the ipecmd command for $image performs no verify pass (-Y): $command" ;;
 				esac
 				;;
 		esac
@@ -2481,7 +2490,7 @@ check_flash_commands() {
 		published=""
 		while IFS=$'\t' read -r image profile command; do
 			case "$profile:$image" in
-				pk2cmd:*-"${!tag_var}"-*)
+				ipecmd:*-"${!tag_var}"-*)
 					published=${command/ -F$image / -F${!hex_var} }
 					break ;;
 			esac

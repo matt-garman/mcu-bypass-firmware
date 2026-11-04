@@ -1010,30 +1010,33 @@ for flash_image in "${!flash_command[@]}"; do
 				*" -U flash:w:$flash_image:i"*) ;;
 				*) die "the published avrdude command for $flash_image does not write that image to flash" ;;
 			esac ;;
-		pk2cmd\ *)
-			flash_pk2_command=${flash_line%%#*}
-			[[ "$flash_pk2_command" =~ ^pk2cmd([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$ ]] \
-				|| die "the published pk2cmd command for $flash_image is not one plain writer invocation"
-			read -r -a flash_pk2_args <<<"$flash_pk2_command"
-			flash_pk2_image=""
-			flash_pk2_image_count=0
-			for flash_pk2_arg in "${flash_pk2_args[@]}"; do
-				case "$flash_pk2_arg" in
+		java\ *)
+			# MPLAB X IPE's ipecmd, run from the jar the reader names once
+			# in IPECMD; then options only, so nothing can ride along.
+			flash_ipe_command=${flash_line%%#*}
+			flash_ipe_re='^java[[:space:]]+-jar[[:space:]]+"\$IPECMD"([[:space:]]+-[-A-Za-z0-9._/:=]+)+[[:space:]]*$'
+			[[ "$flash_ipe_command" =~ $flash_ipe_re ]] \
+				|| die "the published ipecmd command for $flash_image is not one plain writer invocation"
+			read -r -a flash_ipe_args <<<"$flash_ipe_command"
+			flash_ipe_image=""
+			flash_ipe_image_count=0
+			for flash_ipe_arg in "${flash_ipe_args[@]}"; do
+				case "$flash_ipe_arg" in
 					-F*)
-						flash_pk2_image=${flash_pk2_arg#-F}
-						flash_pk2_image_count=$((flash_pk2_image_count + 1)) ;;
+						flash_ipe_image=${flash_ipe_arg#-F}
+						flash_ipe_image_count=$((flash_ipe_image_count + 1)) ;;
 				esac
 			done
-			[ "$flash_pk2_image_count" -eq 1 ] \
-				&& [ "$flash_pk2_image" = "$flash_image" ] \
-				|| die "the published pk2cmd command for $flash_image does not select $flash_image as its sole -F image operand"
-			case " $flash_pk2_command " in
+			[ "$flash_ipe_image_count" -eq 1 ] \
+				&& [ "$flash_ipe_image" = "$flash_image" ] \
+				|| die "the published ipecmd command for $flash_image does not select $flash_image as its sole -F image operand"
+			case " $flash_ipe_command " in
 				*' -M '*) ;;
-				*) die "the published pk2cmd command for $flash_image does not program the whole device" ;;
+				*) die "the published ipecmd command for $flash_image does not program the whole device" ;;
 			esac
-			case " $flash_pk2_command " in
+			case " $flash_ipe_command " in
 				*' -Y '*) ;;
-				*) die "the published pk2cmd command for $flash_image performs no verify pass" ;;
+				*) die "the published ipecmd command for $flash_image performs no verify pass" ;;
 			esac ;;
 		*) die "the published command for $flash_image names no programming tool this verifier knows: $flash_line" ;;
 	esac

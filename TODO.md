@@ -222,11 +222,11 @@ separate `avrdude` invocations while the release renders one combined
 invocation, so the two can disagree in everything but the fuse values and part
 name they share.
 
-Put fake `avrdude`, `pk2cmd` and `ipecmd` executables on `PATH`, run the real
-program goals against them, capture the actual argument vectors and compare
-them with the published commands. `make -n` is not the oracle: the goals carry
-build prerequisites, recursive Make output and several programmer invocations,
-and dry-run text also depends on which artifacts already exist.
+Put fake `avrdude` and `java` (for `ipecmd.jar`) executables on `PATH`, run the
+real program goals against them, capture the actual argument vectors and
+compare them with the published commands. `make -n` is not the oracle: the
+goals carry build prerequisites, recursive Make output and several programmer
+invocations, and dry-run text also depends on which artifacts already exist.
 `test/test_avr_program_order.sh` already drives fake programmers this way and
 is where the comparison belongs. Settling the canonical AVR operation shape --
 two ordered invocations or one -- is part of the work.
@@ -428,6 +428,40 @@ Effort: about half a day at the bench plus 1-2 hours to retain and review the
 evidence. Risk: High; these four close here or nowhere. They do not block the
 `0.9.x` software release (the part already ships), but they are the gate to the
 `1.x.y` hardware-validated line — the same gate every other part must pass.
+
+### T3-pic12f675-tool-vdd - Let the PIC12F675 helper choose the tool-supplied voltage
+
+`flash-pic12f675.py --power tool` passes a bare `-W`, and two documents say no
+argument could do better: `FLASHING.md` ("`--power tool` cannot choose a
+voltage", and for a 4.75 V shortfall "no argument will change it") and
+`HARDWARE_VALIDATION_LOG.md` ("the tool cannot choose a voltage in any case").
+Both rest on `ipecmd` 6.20 marking every VDD/VPP option *Applicable only for
+PM3*. A field run reported on 2026-11-04 contradicts them: with a PICkit 3 on a
+USB port that could not hold 5 V, MPLAB X 6.20 `ipecmd` refused `-W5` against a
+bare PIC10F320 and programmed it with `-W4.75`. So `-W` takes a voltage on a
+PICkit 3, and a bare-part `--power tool` transaction on such a port fails today
+where one argument would let it run.
+
+The work:
+
+- Confirm on a PIC12F675 that `-W<volts>` is honoured with a PICkit 3, and what
+  the bare `-W` actually requests. A retained `ipecmd` transcript of each is
+  enough.
+- Choose the value from the part's programming specification (DS41191), not
+  from its operating range: the bulk-erase VDD floor is the constraint that
+  matters, since a transaction erases.
+- Give the helper that voltage explicitly, either a fixed `-W<volts>` under
+  `--power tool` or a bounded option. Fix it for the whole transaction and
+  record it in the reservation as the power mode already is, so the baseline
+  read, the write and any finalize all happen under one electrical
+  arrangement.
+- Correct both documents, including the remedy list in `FLASHING.md`'s
+  shortfall paragraph, and update the helper's fakes so one modelled on the old
+  assumption cannot pass.
+
+Dependencies: a PIC12F675, a PICkit 3 and MPLAB X 6.20 for the confirmation
+run. Effort: about 1-2 hours plus the bench check. Risk: Low; `--power tool` is
+already unqualified and `external` stays the default.
 
 ### T3-toolchain - Broaden compiler and toolchain portability
 
@@ -809,6 +843,7 @@ The stable ID in each row matches exactly one open section above.
 | T3-nonblocking-actuation | Qualify non-blocking output actuation | 3 | High | High - hardware safety |
 | T3-hw-procedure | Hardware-validation procedure | 3 | 2-3 h | High |
 | T3-pic12f675-bench | Graduate the PIC12F675 on silicon | 3 | 0.5 d + 2 h | High - gates the part's 1.x.y hardware validation |
+| T3-pic12f675-tool-vdd | PIC12F675 helper chooses the tool-supplied voltage | 3 | 1-2 h + bench | Medium - bare-part programming |
 | T3-toolchain | Broader compiler/toolchain portability | 3 | Medium | Medium-High |
 | T3-hil | Behavioral and register-introspection HIL | 3 | 5-8 d | High |
 | T3-provenance | Optional embedded source URL | 3 | 1-2 h | Low |

@@ -2210,35 +2210,42 @@ pic10f322-test-target-variants:
 # there is no separate fuse step (and the gpsim/CONFIG-word checks already
 # verified that word pre-flash).
 #
-# The published pic10f322-program route always uses the default pk2cmd command.
-# Two common Linux programmers remain available through the explicitly selected
-# pic10f322-program-custom goal, configured by PIC10F322_PROG:
-#   pk2cmd  (PICkit 2, open-source CLI)            <- default
-#   ipecmd  (PICkit 3/4/5 via MPLAB IPE; PIC10F322_PROG=ipecmd, PIC10F322_PROG_TOOL=PK3|PK4|PK5)
-# The custom goal also accepts PIC10F322_PROG_CMD for any other tool.
+# The published pic10f322-program route always uses the default ipecmd command:
+# MPLAB X IPE's command-line programmer driving a PICkit 3, run as
+# `java -jar "$IPECMD"`. A stock MPLAB X install puts no `ipecmd` on PATH, so
+# IPECMD is the path to ipecmd.jar, read by the recipe from its ENVIRONMENT
+# (export it, or pass it on the make command line, which Make exports). It is a
+# host location rather than a programmer override, so the canonical goal accepts
+# it -- and refuses to run without it. The explicitly selected
+# pic10f322-program-custom goal keeps the rest configurable: PIC10F322_PROG for
+# another Java runtime, PIC10F322_PROG_TOOL=PK4|PK5 for a newer PICkit, and
+# PIC10F322_PROG_CMD for any other writer.
+#
+# `-P10F322`, not `-PPIC10F322`: ipecmd supplies the `PIC` family prefix itself
+# and rejects the prefixed spelling. A PICkit 3 run against a PIC10F320 found it,
+# as the PIC12F675 helper's bench run had for its own part.
+#
 # Power defaults are CONSERVATIVE: the programmer does NOT source Vdd (safe for an
 # externally-powered pedal board). For a bare chip powered by the programmer, add
-# the power flag: pk2cmd `-T` (and `-A<volts>`), ipecmd `-W5`.
+# `-W4.75` through the custom goal. A PICkit 3 derives Vdd from USB, and a rail
+# that sags below 5 V makes ipecmd refuse `-W5`; 4.75 V is inside the part's
+# operating range and is what that PIC10F320 run needed.
 #
-# BOTH dialects read the device back. `-M -Y -R` and `-M -Y -OL` are the same
-# transaction in two vocabularies: program the whole device, verify it, release
-# it from reset so the pedal runs when the programmer is unplugged. An ipecmd
-# form without `-Y` reports success without reading back a single byte, and it
-# would disagree with the two places that already spell this dialect: the
-# FLASHING.md PICkit 3 procedure published for these very parts, and
-# scripts/flash-pic12f675.py's write_argv(), the one validated ipecmd write this
-# project defines. PK3 is the default for the same reason -- FLASHING.md leads
-# with the PICkit 3 and the helper pins PK3, and MPLAB X 6.25 dropped PICkit 3
-# support, so a reader following that file is on 6.20 or earlier.
-PIC10F322_PART      ?= PIC10F322
-PIC10F322_PROG      ?= pk2cmd
+# `-M -Y -OL`: program the whole device, verify it, release it from reset so the
+# pedal runs when the programmer is unplugged. Without `-Y` ipecmd reports
+# success without reading back a single byte. It is the same dialect
+# scripts/flash-pic12f675.py's write_argv() spells. PK3 is the default because
+# FLASHING.md leads with the PICkit 3 and the helper pins PK3;
+# MPLAB X 6.25 dropped PICkit 3 support, so a reader following that file is on
+# 6.20 or earlier.
+PIC10F322_PART      ?= 10F322
+PIC10F322_PROG      ?= java
 PIC10F322_PROG_TOOL ?= PK3
 PIC10F322_PROG_HEX   = $(PIC10F322_BUILD_DIR)/$(call fw_image,$(VARIANT),$(PIC10F322_TAG)).hex
-ifeq ($(PIC10F322_PROG),ipecmd)
-PIC10F322_PROG_CMD ?= $(PIC10F322_PROG) -TP$(PIC10F322_PROG_TOOL) -P$(PIC10F322_PART) -F$(PIC10F322_PROG_HEX) -M -Y -OL
-else
-PIC10F322_PROG_CMD ?= $(PIC10F322_PROG) -P$(PIC10F322_PART) -F$(PIC10F322_PROG_HEX) -M -Y -R
-endif
+# `$$IPECMD` is a SHELL reference: the value carries the literal `"$IPECMD"`, the
+# spelling a release publishes for a reader to paste, and the shell running the
+# custom recipe resolves it from the environment.
+PIC10F322_PROG_CMD ?= $(PIC10F322_PROG) -jar "$$IPECMD" -TP$(PIC10F322_PROG_TOOL) -P$(PIC10F322_PART) -F$(PIC10F322_PROG_HEX) -M -Y -OL
 
 # Builds all variants + the flash-budget gate first (so the image is fresh and
 # proven to fit), then flashes the VARIANT-selected HEX. Unlike the pre-hardware
@@ -2260,15 +2267,21 @@ pic10f322-program: variant-selectors-valid pic10f322
 		echo "       select a variant with VARIANT=<$(VARIANTS)> (default $(VARIANT))."; \
 		exit 1; \
 	fi; \
-	prog=`/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v pk2cmd' 2>/dev/null`; \
+	prog=`/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v java' 2>/dev/null`; \
 	case "$$prog" in */*) [ -x "$$prog" ] ;; *) false ;; esac || { \
-		echo "ERROR: PIC programmer 'pk2cmd' not found on PATH."; \
-		echo "       install pk2cmd (PICkit 2), or use pic10f322-program-custom."; \
+		echo "ERROR: Java runtime 'java' not found on PATH; MPLAB X's ipecmd.jar needs one."; \
+		echo "       install a Java runtime, or use pic10f322-program-custom."; \
 		exit 1; \
 	}; \
-	echo "Programming PIC10F322 (variant $(VARIANT)) via pk2cmd:"; \
-	echo "  pk2cmd -PPIC10F322 -F$$hex -M -Y -R"; \
-	/usr/bin/env -i PATH="$$PATH" "$$prog" -PPIC10F322 -F"$$hex" -M -Y -R
+	jar="$${IPECMD-}"; \
+	if [ -z "$$jar" ] || [ ! -f "$$jar" ]; then \
+		echo "ERROR: IPECMD must name MPLAB X IPE's ipecmd.jar (IPECMD='$$jar'), e.g."; \
+		echo "       export IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar"; \
+		exit 1; \
+	fi; \
+	echo "Programming PIC10F322 (variant $(VARIANT)) via ipecmd:"; \
+	echo "  java -jar \"$$jar\" -TPPK3 -P10F322 -F$$hex -M -Y -OL"; \
+	/usr/bin/env -i PATH="$$PATH" "$$prog" -jar "$$jar" -TPPK3 -P10F322 -F"$$hex" -M -Y -OL
 
 # Separate goal, rather than an opt-in variable: a goal is not inherited through
 # MAKEFLAGS, so selecting this path is an explicit action at this invocation.
@@ -5572,7 +5585,8 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 
 # --- PIC10F320 device programming (hardware) ---------------------------------
 # The PIC10F322 interface above, separately namespaced. The published goal keeps
-# the default pk2cmd command; programmer overrides require
+# the default ipecmd command, reads the same IPECMD from its environment, and
+# spells the part `10F320` for the same reason; programmer overrides require
 # pic10f320-program-custom. The two variable
 # families are deliberately independent -- which is also why make-release.sh
 # refuses to derive one part's published command from the other's -- so that
@@ -5586,22 +5600,20 @@ pic10f320: variant-selectors-valid $(PIC10F320_SRC)
 # Spelling it any other way would let `make pic10f320-program VARIANT=<v>` build
 # the default output stage and then write a different one to silicon.
 #
-# NOT HARDWARE-VALIDATED. No PICkit has run this command against a PIC10F320
-# under a written procedure with retained measurements; HARDWARE_VALIDATION_LOG.md
-# states that for every part in this repository, and TODO `T3-hw-procedure` is
-# the procedure it waits on. What this target does add is an authority: a release
-# publishes the default PIC10F320_PROG_CMD spelling, while
-# test-pic-program-guard independently pins this public recipe to the same
-# literal argv. Either side drifting breaks its own gate.
-PIC10F320_PART      ?= PIC10F320
-PIC10F320_PROG      ?= pk2cmd
+# NOT HARDWARE-VALIDATED. A PICkit 3 has programmed a PIC10F320 with the same
+# ipecmd argv run by hand (field use, with `-W4.75` added for a bare part), but
+# no PICkit has run this goal against a PIC10F320 under a written procedure with
+# retained measurements; HARDWARE_VALIDATION_LOG.md states that for every part in
+# this repository, and TODO `T3-hw-procedure` is the procedure it waits on. What
+# this target does add is an authority: a release publishes the default
+# PIC10F320_PROG_CMD spelling, while test-pic-program-guard independently pins
+# this public recipe to the same literal argv. Either side drifting breaks its
+# own gate.
+PIC10F320_PART      ?= 10F320
+PIC10F320_PROG      ?= java
 PIC10F320_PROG_TOOL ?= PK3
 PIC10F320_PROG_HEX   = $(PIC10F320_HEX)
-ifeq ($(PIC10F320_PROG),ipecmd)
-PIC10F320_PROG_CMD ?= $(PIC10F320_PROG) -TP$(PIC10F320_PROG_TOOL) -P$(PIC10F320_PART) -F$(PIC10F320_PROG_HEX) -M -Y -OL
-else
-PIC10F320_PROG_CMD ?= $(PIC10F320_PROG) -P$(PIC10F320_PART) -F$(PIC10F320_PROG_HEX) -M -Y -R
-endif
+PIC10F320_PROG_CMD ?= $(PIC10F320_PROG) -jar "$$IPECMD" -TP$(PIC10F320_PROG_TOOL) -P$(PIC10F320_PART) -F$(PIC10F320_PROG_HEX) -M -Y -OL
 
 # Builds the selected variant (and its flash-budget and return-stack gates)
 # first, so the image is fresh and proven to fit, then flashes it. Like
@@ -5624,15 +5636,21 @@ pic10f320-program: variant-selectors-valid pic10f320
 		echo "       (default $(PIC10F320_VARIANT))."; \
 		exit 1; \
 	fi; \
-	prog=`/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v pk2cmd' 2>/dev/null`; \
+	prog=`/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v java' 2>/dev/null`; \
 	case "$$prog" in */*) [ -x "$$prog" ] ;; *) false ;; esac || { \
-		echo "ERROR: PIC programmer 'pk2cmd' not found on PATH."; \
-		echo "       install pk2cmd (PICkit 2), or use pic10f320-program-custom."; \
+		echo "ERROR: Java runtime 'java' not found on PATH; MPLAB X's ipecmd.jar needs one."; \
+		echo "       install a Java runtime, or use pic10f320-program-custom."; \
 		exit 1; \
 	}; \
-	echo "Programming PIC10F320 (variant $(PIC10F320_VARIANT)) via pk2cmd:"; \
-	echo "  pk2cmd -PPIC10F320 -F$$hex -M -Y -R"; \
-	/usr/bin/env -i PATH="$$PATH" "$$prog" -PPIC10F320 -F"$$hex" -M -Y -R
+	jar="$${IPECMD-}"; \
+	if [ -z "$$jar" ] || [ ! -f "$$jar" ]; then \
+		echo "ERROR: IPECMD must name MPLAB X IPE's ipecmd.jar (IPECMD='$$jar'), e.g."; \
+		echo "       export IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar"; \
+		exit 1; \
+	fi; \
+	echo "Programming PIC10F320 (variant $(PIC10F320_VARIANT)) via ipecmd:"; \
+	echo "  java -jar \"$$jar\" -TPPK3 -P10F320 -F$$hex -M -Y -OL"; \
+	/usr/bin/env -i PATH="$$PATH" "$$prog" -jar "$$jar" -TPPK3 -P10F320 -F"$$hex" -M -Y -OL
 
 pic10f320-program-custom: variant-selectors-valid pic10f320
 	@hex="$(PIC10F320_PROG_HEX)"; \
@@ -8251,7 +8269,8 @@ help:
 	@echo "  pic10f322-test-io     libgpsim GPIO transition + pulse timing check (PIC10F322_IO_VARIANT)"
 	@echo "  pic10f322-test-target fail-closed fault + lock-step + target-I/O for one PIC variant"
 	@echo "                        (PIC10F322_TARGET_VARIANT); pic10f322-test-target-variants runs all"
-	@echo "  pic10f322-program     flash one PIC10F322 variant with canonical pk2cmd semantics (VARIANT=)"
+	@echo "  pic10f322-program     flash one PIC10F322 variant with canonical ipecmd semantics (VARIANT=;"
+	@echo "                        needs IPECMD=<path to ipecmd.jar> in the environment)"
 	@echo "  pic10f322-program-custom  explicit custom-programmer path"
 	@echo "                        (PIC10F322_PROG=, PIC10F322_PROG_TOOL=, PIC10F322_PROG_CMD=)"
 	@echo "PIC12F675 (classic mid-range, 1024 words; release-supported, built by all/release):"
@@ -8296,8 +8315,8 @@ help:
 	@echo "  pic10f320-test-target  fail-closed fault + lock-step + target-I/O for one variant"
 	@echo "                     (PIC10F320_TARGET_VARIANT); pic10f320-test-target-variants runs all"
 	@echo "  pic10f320-test-soak  libgpsim soak (PIC10F320_SOAK_VARIANT, PIC10F320_SOAK_DURATION_MS)"
-	@echo "  pic10f320-program  flash one PIC10F320 variant with canonical pk2cmd semantics"
-	@echo "                     (PIC10F320_VARIANT=)"
+	@echo "  pic10f320-program  flash one PIC10F320 variant with canonical ipecmd semantics"
+	@echo "                     (PIC10F320_VARIANT=; needs IPECMD=<path to ipecmd.jar> in the environment)"
 	@echo "  pic10f320-program-custom  explicit custom-programmer path"
 	@echo "                     (PIC10F320_PROG=, PIC10F320_PROG_TOOL=, PIC10F320_PROG_CMD=)"
 	@echo "  pic10f320-clean    remove build_pic10f320/ (build + coverage artifacts)"

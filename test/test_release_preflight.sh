@@ -3151,7 +3151,7 @@ write_flashing_fixture
 	printf 'A `-M` flag programs the device, which is exactly what must not happen\n'
 	printf 'here.\n\n'
 	printf '```sh\n'
-	printf 'pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R\n'
+	printf 'java -jar "$IPECMD" -TPPK3 -P10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -OL\n'
 	printf '```\n'
 } > "$flashing_root/docs/field_notes.md"
 assert_flashing_accepts 'prose naming the retired form and another part'\''s one-liner'

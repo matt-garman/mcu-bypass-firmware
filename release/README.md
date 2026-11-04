@@ -543,8 +543,9 @@ source-tree equivalent of the programmer command:
 `make pic10f322-program VARIANT=<variant>` and
 `make pic10f320-program PIC10F320_VARIANT=<variant>`. The selector name differs
 because each goal reads the one its own build lane reads, and passing the wrong
-one would build the default output stage and flash a different one.
-`MANIFEST.md` publishes both beside the downloaded-image commands, and a release
+one would build the default output stage and flash a different one. Both write
+through MPLAB X IPE's `ipecmd` and read `IPECMD`, the path to its `ipecmd.jar`,
+from the environment. `MANIFEST.md` publishes both beside the downloaded-image commands, and a release
 checks each against the Makefile command it names, byte for byte. These exact
 published goals reject inherited programmer, part, command, and image settings;
 their hardware recipes also use literal canonical argv rather than expanding

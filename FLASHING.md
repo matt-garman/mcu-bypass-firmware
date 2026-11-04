@@ -96,61 +96,64 @@ one command programs code and configuration together.
 MPLAB X 6.25 dropped PICkit 3 support — use 6.20 or earlier.
 
 ```
-IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar
+export IPECMD=/opt/microchip/mplabx/v6.20/mplab_platform/mplab_ipe/ipecmd.jar
 
-java -jar "$IPECMD" -TPPK3 -P<part> -F<hex> -M -Y -OL -W5
+java -jar "$IPECMD" -TPPK3 -P<part> -F<hex> -M -Y -OL
 ```
 
-Windows: run
+A stock MPLAB X install puts no `ipecmd` on `PATH`, so the jar is run through
+`java`. Windows: run
 `"C:\Program Files\Microchip\MPLABX\v6.20\mplab_platform\mplab_ipe\ipecmd.exe"`
 directly with the same flags (`/` also works in place of `-`).
 
 | flag     | meaning |
 | :------- | :------ |
 | `-TPPK3` | tool is a PICkit 3 (`PK4`, `PK5` for newer kits) |
-| `-P`     | part, e.g. `PIC10F322` |
+| `-P`     | part **without** its `PIC` prefix, e.g. `10F320`: `ipecmd` adds the prefix itself and rejects `-PPIC10F320` |
 | `-F`     | hex file |
 | `-M`     | program the whole device (program memory + configuration) |
 | `-Y`     | verify afterwards |
 | `-OL`    | release from reset when done, so the chip runs immediately |
-| `-W5`    | **PICkit sources 5 V to the target.** Omit it when the board has its own supply. |
+| `-W4.75` | **PICkit sources 4.75 V to the target.** Omit it when the board has its own supply. |
+
+`-W4.75` rather than `-W5`: a PICkit 3 derives the target supply from USB and
+cannot raise it, so on a port whose 5 V rail sags, `-W5` fails because the
+measured target VDD falls short. 4.75 V is inside the PIC10F320/322's 2.3–5.5 V
+operating range. It is **not** safe for a PIC10LF320/322, whose maximum is
+3.6 V.
 
 ### Examples
 
 ```
 # PIC10F320, muting CD4053, powered by the PICkit
-java -jar "$IPECMD" -TPPK3 -PPIC10F320 \
-  -Fbypass-pic10f320-cd4053_with_mute.hex -M -Y -OL -W5
+java -jar "$IPECMD" -TPPK3 -P10F320 \
+  -Fbypass-pic10f320-cd4053_with_mute.hex -M -Y -OL -W4.75
 
 # PIC10F322, relay, board externally powered
-java -jar "$IPECMD" -TPPK3 -PPIC10F322 \
+java -jar "$IPECMD" -TPPK3 -P10F322 \
   -Fbypass-pic10f322-tq2_l2_5v_relay.hex -M -Y -OL
 ```
 
-PICkit 2 equivalent: `pk2cmd -PPIC10F322 -F<hex> -M -Y -R` (add `-T` to power
-the target).
-
-If `ipecmd` rejects the part name, drop the prefix (`-P10F322`) — Microchip's
-CLI readme documents the short form.
-
-`-W5`, `-OL` and the `PIC…`-prefixed part spelling come from Microchip's CLI
-documentation and community usage, not from a session logged in this
-repository. Confirm them on the first PICkit 3 run and correct this file.
+The PIC10F320 example, `-W4.75` included, has programmed a PIC10F320 through a
+PICkit 3 under MPLAB X 6.20. That is field use, not a controlled record (see
+[HARDWARE_VALIDATION_LOG.md](HARDWARE_VALIDATION_LOG.md)). The PIC10F322
+spelling follows the same rule but has not been run here.
 
 From a source checkout, `make pic10f322-program VARIANT=<variant>` and
 `make pic10f320-program PIC10F320_VARIANT=<variant>` build the selected image,
 run its budget gates, and then write it with the canonical
-`pk2cmd … -M -Y -R` command. These release-published goals reject programmer,
-part, command, or image overrides from the command line, environment, `-e`, or
-inherited Make variable assignments. Their hardware recipes do not expand those
-variables, so a concealed target-specific assignment cannot change the literal
-part, writer, image argument, or `-M -Y -R` flags. For a deliberate alternative,
-use the explicitly named `pic10f322-program-custom` or
-`pic10f320-program-custom` goal. On those goals, set `PIC10F322_PROG` or
-`PIC10F320_PROG` to `ipecmd`, and set
-`PIC10F322_PROG_TOOL` or `PIC10F320_PROG_TOOL` to select the `-M -Y -OL` form
-above. `PIC10F322_PROG_CMD` or `PIC10F320_PROG_CMD` accepts another writer. None
-of the routes adds `-W5`: they assume the board supplies its own power, which
+`java -jar "$IPECMD" -TPPK3 -P<part> -F<hex> -M -Y -OL` command. They read
+`IPECMD` from the environment, as exported above, and refuse to start without
+it. These release-published goals reject programmer, part, command, or image
+overrides from the command line, environment, `-e`, or inherited Make variable
+assignments. Their hardware recipes do not expand those variables, so a
+concealed target-specific assignment cannot change the literal part, writer,
+image argument, or `-M -Y -OL` flags. For a deliberate alternative, use the
+explicitly named `pic10f322-program-custom` or `pic10f320-program-custom` goal.
+On those goals, `PIC10F322_PROG_TOOL` or `PIC10F320_PROG_TOOL` selects a newer
+PICkit, `PIC10F322_PROG` or `PIC10F320_PROG` another Java runtime, and
+`PIC10F322_PROG_CMD` or `PIC10F320_PROG_CMD` accepts another writer. None of
+the routes adds `-W4.75`: they assume the board supplies its own power, which
 is the arrangement a pedal is in. Neither route has been run against a part
 under a written procedure.
 

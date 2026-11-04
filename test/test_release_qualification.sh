@@ -424,11 +424,11 @@ checks=$((checks + 1))
 # Every part whose per-image programmer command the release PUBLISHES must have
 # a declared Makefile authority to check it against. Stated as a set equality
 # over what the producer actually emits, not as a list of today's two parts: the
-# PIC10F320 shipped a published `pk2cmd` line for four releases with nothing to
+# PIC10F320 shipped a published programmer line for four releases with nothing to
 # compare it with, because the arm that emits the command and the block that
 # pins commands were written at different times and no rule related them. A
 # third PIC arm added tomorrow fails here until it is pinned.
-mapfile -t published_pk2_tags < <(awk '
+mapfile -t published_ipe_tags < <(awk '
 	# A case arm of img_row. Reset first: an arm naming no _TAG variable
 	# (the ATtiny literals) must not inherit the previous arm s tag.
 	/^[[:space:]]*\$\{FW_BASE\}-/ {
@@ -436,15 +436,15 @@ mapfile -t published_pk2_tags < <(awk '
 		if (match($0, /[A-Z0-9_]+_TAG/)) arm = substr($0, RSTART, RLENGTH)
 		next
 	}
-	/flash_row "\$base" pk2cmd/ { print (arm == "" ? "UNNAMED_ARM" : arm) }
+	/flash_row "\$base" ipecmd/ { print (arm == "" ? "UNNAMED_ARM" : arm) }
 ' "$RELEASE" | sort -u)
-mapfile -t pinned_pk2_tags < <(grep -oE \
+mapfile -t pinned_ipe_tags < <(grep -oE \
 	'"[A-Z0-9_]+_TAG[[:space:]]+[A-Z0-9_]+_PROG_CMD[[:space:]]+[A-Z0-9_]+_PROG_HEX"' \
 	"$RELEASE" | tr -d '"' | awk '{ print $1 }' | sort -u)
-[ "${#published_pk2_tags[@]}" -ge 2 ] \
-	|| fail "release producer emits ${#published_pk2_tags[@]} pk2cmd image arms; the scan stopped matching"
-[ "${published_pk2_tags[*]}" = "${pinned_pk2_tags[*]}" ] \
-	|| fail "published pk2cmd parts and pinned Makefile authorities disagree: published '${published_pk2_tags[*]}' vs pinned '${pinned_pk2_tags[*]}'"
+[ "${#published_ipe_tags[@]}" -ge 2 ] \
+	|| fail "release producer emits ${#published_ipe_tags[@]} ipecmd image arms; the scan stopped matching"
+[ "${published_ipe_tags[*]}" = "${pinned_ipe_tags[*]}" ] \
+	|| fail "published ipecmd parts and pinned Makefile authorities disagree: published '${published_ipe_tags[*]}' vs pinned '${pinned_ipe_tags[*]}'"
 # ... and each row must pin a part against ITS OWN variables. These parts differ
 # by one digit and share a pinout, a programmer and a command dialect, so a row
 # that reads PIC10F320_TAG and then compares against PIC10F322_PROG_CMD would
@@ -465,7 +465,7 @@ while read -r pinned_row; do
 			<(sed -n '/^unset MAKE GPSIM_TIMEOUT_SECONDS/,/^$/p' "$RELEASE") \
 			|| fail "release producer does not clear ${pinned_prefix}_${pinned_scrubbed} from the release query environment"
 	done
-done < <(printf '%s\n' "${pinned_pk2_tags[@]}" | while read -r pinned_tag; do
+done < <(printf '%s\n' "${pinned_ipe_tags[@]}" | while read -r pinned_tag; do
 	grep -oE "\"${pinned_tag}[[:space:]]+[A-Z0-9_]+_PROG_CMD[[:space:]]+[A-Z0-9_]+_PROG_HEX\"" \
 		"$RELEASE" | tr -d '"' | head -n 1
 done)
@@ -912,7 +912,7 @@ fixture_fuse_cell() {
 
 fixture_flash_command() {
 	case "$1" in
-		*-pic*) printf 'pk2cmd -Pfixture -F%s -M -Y -R\n' "$1" ;;
+		*-pic*) printf 'java -jar "$IPECMD" -TPPK3 -Pfixture -F%s -M -Y -OL\n' "$1" ;;
 		*)      printf 'avrdude -c usbtiny -p fixture -U lfuse:w:0x5a:m -U hfuse:w:0xf9:m -U flash:w:%s:i\n' "$1" ;;
 	esac
 }
@@ -1649,10 +1649,10 @@ flash_pic_command=$(fixture_flash_command "$flash_pic_victim")
 sed -i "s|^${flash_pic_command}\$|${flash_pic_command/ -Y/}|" "$release/MANIFEST.md"
 expect_fail "PIC command with no verify pass" "performs no verify pass"
 
-# Naming the expected image in a comment does not make it the image pk2cmd
+# Naming the expected image in a comment does not make it the image ipecmd
 # reads. The sole -F operand is the programming operation's authority.
 reset_fixture
-sed -i "s|^${flash_pic_command}\$|pk2cmd -Pfixture -Fwrong-image.hex -M -Y -R # ${flash_pic_victim}|" \
+sed -i "s|^${flash_pic_command}\$|java -jar \"\$IPECMD\" -TPPK3 -Pfixture -Fwrong-image.hex -M -Y -OL # ${flash_pic_victim}|" \
 	"$release/MANIFEST.md"
 expect_fail "PIC command whose expected image appears only in inert text" \
 	"does not select $flash_pic_victim as its sole -F image operand"
@@ -1667,7 +1667,7 @@ for image in "${canonical_images[@]}"; do
 	esac
 done
 [ -n "$flash_guarded" ] || fail "the canonical image set contains no PIC12F675 image"
-sed -i "s|^# ${flash_victim}\$|# ${flash_guarded}\\npk2cmd -Pfixture -F${flash_guarded} -M -Y -R\\n\\n# ${flash_victim}|" \
+sed -i "s|^# ${flash_victim}\$|# ${flash_guarded}\\njava -jar \"\$IPECMD\" -TPPK3 -Pfixture -F${flash_guarded} -M -Y -OL\\n\\n# ${flash_victim}|" \
 	"$release/MANIFEST.md"
 expect_fail "raw per-image PIC12F675 write" \
 	"publishes a raw per-image write for $flash_guarded"
@@ -2555,8 +2555,8 @@ flashing_fixture="$work/rendered-flashcmds.txt"
 printf '%s\t%s\t%s\n' \
 	'bypass-attiny13a-cd4053_simple.hex' avrdude-isp \
 	'avrdude -c test-programmer -p t13 -U flash:w:bypass-attiny13a-cd4053_simple.hex:i' \
-	'bypass-pic10f322-cd4053_simple.hex' pk2cmd \
-	'pk2cmd -PPIC10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -R' \
+	'bypass-pic10f322-cd4053_simple.hex' ipecmd \
+	'java -jar "$IPECMD" -TPPK3 -P10F322 -Fbypass-pic10f322-cd4053_simple.hex -M -Y -OL' \
 	'bypass-pic10f322-cd4053_simple.hex' make-source \
 	'make pic10f322-program VARIANT=cd4053_simple' \
 	> "$flashing_fixture"
@@ -2624,8 +2624,8 @@ if grep -Fiq 'preserves factory OSCCAL/BG' "$RELEASE" \
 		|| grep -Fq 'pk2cmd -PPIC12F675' "$RELEASE"; then
 	fail "release producer still contains unsafe PIC12F675 flashing guidance outside the renderer"
 fi
-printf '%s\t%s\t%s\n' 'bypass-pic12f675-cd4053_simple.hex' pk2cmd \
-	'pk2cmd -PPIC12F675 -Fbypass-pic12f675-cd4053_simple.hex -M -Y -R' > "$flashing_fixture"
+printf '%s\t%s\t%s\n' 'bypass-pic12f675-cd4053_simple.hex' ipecmd \
+	'java -jar "$IPECMD" -TPPK3 -P12F675 -Fbypass-pic12f675-cd4053_simple.hex -M -Y -OL' > "$flashing_fixture"
 if release_render_flashing "$flashing_fixture" v0.9.9 \
 		test-programmer serialupdi /dev/ttyUSB0 >/dev/null; then
 	fail "assembled flashing renderer accepted a per-image PIC12F675 writer command"

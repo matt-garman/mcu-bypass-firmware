@@ -52,6 +52,31 @@ lengths.
 
 ## [Unreleased]
 
+### Changed
+
+- **PIC10F320 and PIC10F322 are programmed with MPLAB X `ipecmd`, not
+  `pk2cmd`.** The release's per-image commands, and the `pic10f320-program` and
+  `pic10f322-program` goals they are pinned to, now run
+  `java -jar "$IPECMD" -TPPK3 -P10F32x -F<image> -M -Y -OL`, which drives the
+  PICkit 3/4/5 that `pk2cmd`, a PICkit 2 tool, cannot. **Migration:** export
+  `IPECMD` as the path to MPLAB X's `ipecmd.jar` (6.20 or earlier for a
+  PICkit 3). The program goals refuse to start without it. The PICkit 2 route
+  is gone. A `pk2cmd` command can still be passed to the `*-program-custom`
+  goals through `PIC10F320_PROG_CMD` or `PIC10F322_PROG_CMD`.
+- **`FLASHING.md` powers a bare PIC10F32x at 4.75 V.** The programmer-powered
+  example passes `-W4.75` instead of `-W5`. A PICkit 3 takes its supply from
+  USB and refused 5 V on a rail that sagged below it. 4.75 V suits the PIC10F32x
+  and not the 3.6 V PIC10LF32x. Published commands and the program goals still
+  assume the board supplies its own power.
+
+### Fixed
+
+- **`ipecmd` part names no longer carry the `PIC` prefix.** `ipecmd` supplies
+  the prefix itself and rejects `-PPIC10F320`, which is what `FLASHING.md`'s
+  examples and the Makefile's `ipecmd` custom route passed. Both now pass
+  `-P10F320` and `-P10F322`, the spelling a PICkit 3 run on a PIC10F320
+  accepted.
+
 ## [0.9.18] - 2026-10-18
 
 ### Added
