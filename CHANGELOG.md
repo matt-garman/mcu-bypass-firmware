@@ -52,6 +52,8 @@ lengths.
 
 ## [Unreleased]
 
+## [0.9.19] - 2026-11-09
+
 ### Changed
 
 - **PIC10F320 and PIC10F322 are programmed with MPLAB X `ipecmd`, not
@@ -1891,7 +1893,8 @@ to six parts and 18 images.
   evidence, and a tag-triggered CI job that rebuilds on a clean runner and fails
   the release on any hash mismatch.
 
-[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.18...HEAD
+[Unreleased]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.19...HEAD
+[0.9.19]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.18...v0.9.19
 [0.9.18]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.17...v0.9.18
 [0.9.17]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.16...v0.9.17
 [0.9.16]: https://github.com/matt-garman/mcu-bypass-firmware/compare/v0.9.15...v0.9.16
