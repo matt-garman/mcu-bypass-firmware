@@ -171,6 +171,10 @@ IMAGE_CONTINUITY = {
                        "context check became unconditional source, but every "
                        "image already compiled it in, so removing the unused "
                        "alternate branches left all 21 byte for byte"),
+    "v0.9.18": (9, 12, "the Ubuntu 26.04 release: the AVR compiler pin moved "
+                       "from avr-gcc 7.3.0 to 14.3.0, so all twelve AVR images "
+                       "were rebuilt, while the nine PIC images, built by the "
+                       "unchanged XC8, were republished byte for byte"),
 }
 
 
